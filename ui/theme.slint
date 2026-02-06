@@ -1,0 +1,25 @@
+// App-wide theme. Colors are derived from `dark_mode`.
+export global AppTheme {
+    // Set from Rust (or could be wired to system settings later).
+    in property <bool> dark_mode: false;
+
+    // Core
+    out property <color> accent: #2563EB;
+
+    out property <color> app_bg: dark_mode ? #0B1220 : #F8FAFC;
+    out property <color> panel_bg: dark_mode ? #0F172A : #FFFFFF;
+    out property <color> sidebar_bg: dark_mode ? #0F172A : #FFFFFF;
+
+    out property <color> card_bg: dark_mode ? #0B1220 : #FFFFFF;
+    out property <color> hover_bg: dark_mode ? #111827 : #F1F5F9;
+    out property <color> selected_bg: dark_mode ? #0B2A66 : #DBEAFE;
+
+    out property <color> text_primary: dark_mode ? #E5E7EB : #0F172A;
+    out property <color> text_secondary: dark_mode ? #A3A3A3 : #334155;
+    out property <color> text_muted: dark_mode ? #9CA3AF : #475569;
+
+    out property <color> border_color: dark_mode ? #1F2937 : #E2E8F0;
+    out property <color> input_bg: dark_mode ? #0B1220 : #FFFFFF;
+    out property <color> input_bg_disabled: dark_mode ? #0A1020 : #F1F5F9;
+    out property <color> input_border: dark_mode ? #334155 : #CBD5E1;
+}

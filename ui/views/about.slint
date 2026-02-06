@@ -1,0 +1,36 @@
+import { AppTheme } from "../theme.slint";
+
+export component AboutView inherits VerticalLayout {
+    in property <string> version: "";
+    in property <string> homepage: "";
+    callback open_url(string);
+
+    spacing: 12px;
+    padding: 24px;
+    alignment: start;
+
+    Text {
+        text: "关于";
+        font-size: 22px;
+        font-weight: 700;
+        color: AppTheme.text_primary;
+    }
+
+    Text {
+        text: "版本：v" + root.version;
+        color: AppTheme.text_secondary;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: "项目地址："; color: AppTheme.text_secondary; }
+        Text {
+            text: root.homepage;
+            color: AppTheme.accent;
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.open_url(root.homepage); }
+            }
+        }
+    }
+}

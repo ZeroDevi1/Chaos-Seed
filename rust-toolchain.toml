@@ -1,0 +1,5 @@
+[toolchain]
+# Slint 1.14.x and some transitive deps require a newer compiler than 1.85.
+channel = "1.93.0"
+components = ["rustfmt", "clippy"]
+

@@ -1,0 +1,250 @@
+import { Button, LineEdit } from "std-widgets.slint";
+import { SubtitleRow } from "../models.slint";
+import { AppTheme } from "../theme.slint";
+
+component FieldLabel inherits Text {
+    in property <string> label;
+    text: root.label;
+    font-size: 12px;
+    color: AppTheme.text_muted;
+}
+
+component FramedLineEdit inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> value;
+    in property <bool> enabled: true;
+    in property <int> width_px: 240;
+    callback edited(string);
+
+    width: root.width_px * 1px;
+    height: 36px;
+    border-radius: 8px;
+    background: root.enabled ? AppTheme.input_bg : AppTheme.input_bg_disabled;
+    border-width: 1px;
+    border-color: input.has-focus ? AppTheme.accent : AppTheme.input_border;
+    opacity: root.enabled ? 1.0 : 0.7;
+
+    input := LineEdit {
+        x: 10px;
+        y: 7px;
+        width: parent.width - 20px;
+        height: parent.height - 14px;
+        placeholder-text: root.placeholder;
+        text: root.value;
+        enabled: root.enabled;
+        edited(text) => {
+            root.value = text;
+            root.edited(text);
+        }
+    }
+}
+
+component MiniCheckBox inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: checked ? #2563EB : #94A3B8;
+    background: checked ? #2563EB : #FFFFFF;
+    opacity: enabled ? 1.0 : 0.6;
+
+    if (checked): Text {
+        text: "✔";
+        color: #FFFFFF;
+        font-size: 12px;
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+export component SubtitleDownloadView inherits VerticalLayout {
+    in-out property <string> query: "";
+    in-out property <string> min_score: "";
+    in-out property <string> lang: "";
+    in-out property <string> limit: "20";
+    in-out property <string> out_dir: "";
+
+    in-out property <bool> busy: false;
+    in-out property <string> status_text: "";
+
+    in property <[SubtitleRow]> results: [];
+
+    callback search_clicked(string, string, string, string);
+    callback result_toggled(int, bool);
+    callback download_clicked();
+
+    spacing: 12px;
+    padding: 24px;
+    alignment: start;
+
+    Text {
+        text: "字幕下载";
+        font-size: 22px;
+        font-weight: 700;
+        color: AppTheme.text_primary;
+    }
+
+    Text {
+        text: "使用说明：先输入关键词并搜索；在结果中勾选字幕（可多选）；点击“下载已选”后选择保存目录并开始下载。";
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
+
+    // Query + actions
+    HorizontalLayout {
+        spacing: 12px;
+        alignment: start;
+
+        VerticalLayout {
+            spacing: 6px;
+            alignment: start;
+            FieldLabel { label: "关键词"; }
+            FramedLineEdit {
+                width_px: 520;
+                placeholder: "例如：泽塔奥特曼 / 电影名 / 剧名";
+                value <=> root.query;
+                enabled: !root.busy;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 10px;
+            alignment: start;
+            Rectangle { height: 20px; } // align with input label
+
+            Button {
+                text: root.busy ? "处理中..." : "搜索";
+                enabled: !root.busy;
+                clicked => { root.search_clicked(root.query, root.min_score, root.lang, root.limit); }
+            }
+
+            Button {
+                text: "下载已选";
+                enabled: !root.busy;
+                clicked => { root.download_clicked(); }
+            }
+        }
+    }
+
+    // Filters row
+    HorizontalLayout {
+        spacing: 12px;
+        alignment: start;
+
+        VerticalLayout {
+            spacing: 6px;
+            alignment: start;
+            FieldLabel { label: "最低分数(min_score，可空)"; }
+            FramedLineEdit { width_px: 180; placeholder: "例如：50"; value <=> root.min_score; enabled: !root.busy; }
+        }
+
+        VerticalLayout {
+            spacing: 6px;
+            alignment: start;
+            FieldLabel { label: "语言(lang，可空)"; }
+            FramedLineEdit { width_px: 160; placeholder: "例如：zh / en"; value <=> root.lang; enabled: !root.busy; }
+        }
+
+        VerticalLayout {
+            spacing: 6px;
+            alignment: start;
+            FieldLabel { label: "数量(limit)"; }
+            FramedLineEdit { width_px: 120; placeholder: "默认 20"; value <=> root.limit; enabled: !root.busy; }
+        }
+    }
+
+    // Output folder
+    HorizontalLayout {
+        spacing: 12px;
+        alignment: start;
+        Text { text: "上次下载目录："; color: AppTheme.text_secondary; }
+        Text {
+            text: root.out_dir == "" ? "(未设置)" : root.out_dir;
+            color: AppTheme.text_secondary;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+
+    Text {
+        text: root.status_text;
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
+
+    Rectangle { height: 1px; background: AppTheme.border_color; }
+
+    // Results list
+    Rectangle {
+        border-width: 1px;
+        border-color: AppTheme.border_color;
+        border-radius: 6px;
+        background: AppTheme.card_bg;
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+
+        flick := Flickable {
+            width: parent.width;
+            height: parent.height;
+            viewport-height: root.results.length * 56px;
+            interactive: true;
+
+            VerticalLayout {
+                padding: 8px;
+                spacing: 6px;
+                alignment: start;
+
+                if (root.results.length == 0): Rectangle {
+                    height: 52px;
+                    background: transparent;
+                    Text {
+                        x: 10px;
+                        text: root.busy ? "正在搜索..." : "暂无结果：请先搜索关键词。";
+                        color: AppTheme.text_muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                for row[i] in root.results: Rectangle {
+                    height: 52px;
+                    border-radius: 6px;
+                    background: area.has-hover ? AppTheme.hover_bg : transparent;
+                    area := TouchArea {}
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+
+                        MiniCheckBox {
+                            checked: row.selected;
+                            enabled: !root.busy;
+                            toggled(v) => { root.result_toggled(i, v); }
+                        }
+
+                        Text { text: row.score; width: 64px; color: AppTheme.text_primary; }
+                        Text { text: row.name; horizontal-stretch: 1; color: AppTheme.text_primary; overflow: elide; }
+                        Text { text: row.ext; width: 50px; color: AppTheme.text_secondary; }
+                        Text { text: row.languages; width: 120px; color: AppTheme.text_secondary; overflow: elide; }
+                        Text { text: row.extra_name; width: 160px; color: AppTheme.text_secondary; overflow: elide; }
+                    }
+                }
+            }
+        }
+    }
+}

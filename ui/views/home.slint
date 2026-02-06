@@ -1,0 +1,34 @@
+import { Button } from "std-widgets.slint";
+import { AppTheme } from "../theme.slint";
+
+export component HomeView inherits VerticalLayout {
+    callback go_subtitle();
+
+    spacing: 16px;
+    padding: 24px;
+    alignment: start;
+
+    Text {
+        text: "Chaos Seed";
+        font-size: 28px;
+        font-weight: 700;
+        color: AppTheme.text_primary;
+    }
+
+    Text {
+        text: "在迅雷字幕接口中搜索并下载字幕（Rust + Slint）。";
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
+
+    Text {
+        text: "推荐流程：输入关键词 -> 搜索 -> 勾选字幕 -> 下载已选 -> 选择目录。";
+        color: AppTheme.text_muted;
+        wrap: word-wrap;
+    }
+
+    Button {
+        text: "前往字幕下载";
+        clicked => { root.go_subtitle(); }
+    }
+}

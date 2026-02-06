@@ -1,0 +1,157 @@
+import { AppTheme } from "../theme.slint";
+
+component SidebarItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <int> index;
+    in property <int> selected_index;
+    in property <bool> collapsed: false;
+    in property <bool> enabled: true;
+    callback clicked(int);
+
+    height: 44px;
+    border-radius: 8px;
+    background: touch.pressed ? AppTheme.border_color : (touch.has-hover ? AppTheme.hover_bg : transparent);
+    opacity: enabled ? 1.0 : 0.6;
+
+    // Selected indicator (left accent bar)
+    Rectangle {
+        x: 0;
+        y: 8px;
+        width: 3px;
+        height: parent.height - 16px;
+        border-radius: 2px;
+        background: root.index == root.selected_index ? AppTheme.accent : transparent;
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 10px;
+        alignment: start;
+
+        Text {
+            text: root.icon;
+            font-size: 18px;
+            color: root.index == root.selected_index ? AppTheme.accent : AppTheme.text_secondary;
+            width: 22px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+
+        if (!root.collapsed): Text {
+            text: root.text;
+            font-size: 14px;
+            font-weight: root.index == root.selected_index ? 600 : 400;
+            color: AppTheme.text_primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(root.index); }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in property <int> selected_index: 0;
+    in-out property <bool> collapsed: false;
+    in property <bool> enabled: true;
+    callback tab_selected(int);
+
+    width: collapsed ? 56px : 220px;
+    background: AppTheme.sidebar_bg;
+    border-width: 1px;
+    border-color: AppTheme.border_color;
+
+    animate width {
+        duration: 180ms;
+        easing: ease-out-quad;
+    }
+
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 12px;
+        padding-bottom: 16px;
+        spacing: 6px;
+        alignment: start;
+
+        // Header + collapse button
+        Rectangle {
+            height: 44px;
+            border-radius: 8px;
+            background: menu_touch.has-hover ? AppTheme.hover_bg : transparent;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 10px;
+                alignment: start;
+
+                Text {
+                    text: "≡";
+                    font-size: 18px;
+                    color: menu_touch.has-hover ? AppTheme.accent : AppTheme.text_secondary;
+                    width: 22px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+
+                if (!root.collapsed): Text {
+                    text: "Chaos Seed";
+                    font-size: 16px;
+                    font-weight: 600;
+                    color: AppTheme.text_primary;
+                    vertical-alignment: center;
+                }
+            }
+
+            menu_touch := TouchArea {
+                enabled: root.enabled;
+                clicked => { root.collapsed = !root.collapsed; }
+            }
+        }
+
+        Rectangle { height: 4px; }
+
+        SidebarItem {
+            icon: "⌂";
+            text: "首页";
+            index: 0;
+            selected_index: root.selected_index;
+            collapsed: root.collapsed;
+            enabled: root.enabled;
+            clicked(i) => { root.tab_selected(i); }
+        }
+
+        SidebarItem {
+            icon: "⬇";
+            text: "字幕下载";
+            index: 1;
+            selected_index: root.selected_index;
+            collapsed: root.collapsed;
+            enabled: root.enabled;
+            clicked(i) => { root.tab_selected(i); }
+        }
+
+        Rectangle { vertical-stretch: 1; } // spacer
+
+        Rectangle {
+            height: 1px;
+            background: AppTheme.border_color;
+        }
+
+        SidebarItem {
+            icon: "ⓘ";
+            text: "关于";
+            index: 2;
+            selected_index: root.selected_index;
+            collapsed: root.collapsed;
+            enabled: root.enabled;
+            clicked(i) => { root.tab_selected(i); }
+        }
+    }
+}
