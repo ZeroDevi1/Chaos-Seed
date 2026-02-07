@@ -18,12 +18,13 @@
 
 **现象**
 - 日志显示 `task=search ok items>0` 且 `ui=results_update count>0`，但 UI 列表不显示。
-- 鼠标点击输入框无反应，必须 Tab 切换才能输入/定位光标。
+- 鼠标点击输入框无反应（已修复）：必须 Tab 切换才能输入/定位光标。
 
 **实现方向（概括）**
 - 优先修复 `ui/app.slint`：对每个页面 View 实例显式设置 `width/height = parent.width/parent.height`，修复布局与命中测试区域异常。
 - 若仍不显示：Rust 侧改为稳定 `ModelRc`（只 set 一次，后续更新 `VecModel` 内容，不替换 model 指针）。
 - （可选）UI 增加 debug 字段显示 `results.length`，快速判断数据是否传入。
+- （诊断增强）搜索成功后把 items（最多 50 条）dump 到 `logs/app.log`，用于确认是否真正拿到数据。
 
 **验收标准**
 - 鼠标点击输入框立刻聚焦并可输入，光标可随鼠标定位。
@@ -75,4 +76,3 @@
 
 **需求**
 - Setting 页面提供开关：是否输出 `logs/app.log`（建议 Debug 默认开启，Release 默认关闭）。
-
