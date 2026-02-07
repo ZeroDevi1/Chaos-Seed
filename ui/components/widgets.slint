@@ -1,4 +1,5 @@
 import { AppTheme } from "../theme.slint";
+import { LineEdit } from "std-widgets.slint";
 
 export enum ButtonKind {
     Primary,
@@ -51,44 +52,19 @@ export component FieldLabel inherits Text {
 }
 
 export component AppLineEdit inherits Rectangle {
-    in-out property <string> text;
-    in property <string> placeholder-text;
-    in property <bool> enabled: true;
-    callback accepted(string);
-    callback edited(string);
-
+    // Use Slint's built-in LineEdit widget (Fluent on Windows) so mouse/caret/selection works
+    // correctly. Custom theming can be added later if needed.
     height: 36px;
-    border-radius: 8px;
-    background: root.enabled ? AppTheme.input_bg : AppTheme.input_bg_disabled;
-    border-width: 1px;
-    border-color: input.has-focus ? AppTheme.accent : AppTheme.input_border;
-    opacity: root.enabled ? 1.0 : 0.7;
 
-    HorizontalLayout {
+    inner := LineEdit {
         width: parent.width;
         height: parent.height;
-        padding-left: 10px;
-        padding-right: 10px;
-        alignment: start;
-
-        input := TextInput {
-            text <=> root.text;
-            color: AppTheme.text_primary;
-            vertical-alignment: center;
-            single-line: true;
-            enabled: root.enabled;
-            horizontal-stretch: 1;
-            min-width: 0;
-            height: parent.height;
-            accepted => { root.accepted(self.text); }
-            edited => { root.edited(self.text); }
-        }
     }
 
-    if (root.text == "" && root.placeholder-text != ""): Text {
-        x: 10px;
-        text: root.placeholder-text;
-        color: AppTheme.text_secondary;
-        vertical-alignment: center;
-    }
+    // Re-expose the important API surface.
+    in-out property <string> text <=> inner.text;
+    in property <string> placeholder-text <=> inner.placeholder-text;
+    in property <bool> enabled <=> inner.enabled;
+    callback accepted <=> inner.accepted;
+    callback edited <=> inner.edited;
 }

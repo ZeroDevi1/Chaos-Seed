@@ -19,6 +19,9 @@ export component SubtitleDownloadView inherits VerticalLayout {
     spacing: 12px;
     padding: 24px;
     alignment: start;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-height: 0;
 
     Text {
         text: "字幕下载";
@@ -128,6 +131,7 @@ export component SubtitleDownloadView inherits VerticalLayout {
         background: AppTheme.card_bg;
         horizontal-stretch: 1;
         vertical-stretch: 1;
+        min-height: 0;
 
         flick := Flickable {
             width: parent.width;
