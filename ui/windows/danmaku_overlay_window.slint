@@ -1,0 +1,124 @@
+import { DanmakuRow } from "../models.slint";
+
+export component DanmakuOverlayWindow inherits Window {
+    // Overlay window defaults to always-on-top; no toggle in the overlay UI.
+    in-out property <bool> pin_on_top: true;
+    in-out property <int> now_ms: 0;
+    in property <length> speed_per_ms: 0.18px;
+    in property <[DanmakuRow]> messages: [];
+
+    callback close_clicked();
+    callback begin_drag();
+
+    title: "Danmaku Overlay";
+    no-frame: true;
+    // Let the backend provide native resize interactions for frameless windows.
+    resize-border-width: 10px;
+    always-on-top: root.pin_on_top;
+    // Keep the overlay truly transparent so it can float above other apps.
+    background: #00000000;
+
+    property <length> lane_height: 26px;
+    property <length> top_margin: 16px;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #00000000;
+        border-width: 3px;
+        border-color: #000000;
+        border-radius: 8px;
+        clip: true; // avoid text outside frame
+
+        // Drag to move (exclude the close button area by splitting into two regions).
+        // Declared early so subsequent controls appear "on top" for hit-testing.
+        TouchArea {
+            x: 0;
+            y: 0;
+            width: parent.width - 60px;
+            height: 52px;
+            z: 0;
+            mouse-cursor: move;
+            pointer-event(pe) => {
+                if (pe.button == PointerEventButton.left && pe.kind == PointerEventKind.down) {
+                    root.begin_drag();
+                }
+            }
+        }
+        TouchArea {
+            x: 0;
+            y: 52px;
+            width: parent.width;
+            height: parent.height - 52px;
+            z: 0;
+            mouse-cursor: move;
+            pointer-event(pe) => {
+                if (pe.button == PointerEventButton.left && pe.kind == PointerEventKind.down) {
+                    root.begin_drag();
+                }
+            }
+        }
+
+        // Close button (top-right)
+        Rectangle {
+            x: parent.width - self.width - 10px;
+            y: 10px;
+            z: 2;
+            width: 36px;
+            height: 28px;
+            border-radius: 6px;
+            background: close_area.has-hover ? #00000033 : #00000022;
+            border-width: 1px;
+            border-color: #000000;
+
+            Text {
+                text: "×";
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 16px;
+                color: #000000;
+            }
+
+            close_area := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: pointer;
+                clicked => { root.close_clicked(); }
+            }
+        }
+
+        // (No explicit resize handle - edges/corners act as grips.)
+
+        for msg[i] in root.messages: Rectangle {
+            // Overlay only shows the message text (no username).
+            x: root.width - (root.now_ms - msg.start_ms) * root.speed_per_ms;
+            y: root.top_margin + msg.lane * root.lane_height;
+            width: parent.width;
+            height: root.lane_height;
+            background: transparent;
+            clip: true;
+            visible: root.now_ms < msg.end_ms;
+
+            // A tiny shadow improves readability without making the background opaque.
+            Text {
+                x: 1px;
+                y: 1px;
+                text: msg.text;
+                color: #FFFFFF;
+                opacity: 0.85;
+                font-size: 18px;
+                font-weight: 600;
+                overflow: clip;
+            }
+            Text {
+                text: msg.text;
+                color: #000000;
+                font-size: 18px;
+                font-weight: 600;
+                overflow: clip;
+            }
+        }
+    }
+}

@@ -1,7 +1,7 @@
 import { SubtitleRow } from "../models.slint";
 import { AppTheme } from "../theme.slint";
 import { AppButton, AppLineEdit, FieldLabel, ButtonKind } from "../components/widgets.slint";
-import { ListView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 
 export component SubtitleDownloadView inherits VerticalLayout {
     in-out property <string> query: "";
@@ -12,7 +12,23 @@ export component SubtitleDownloadView inherits VerticalLayout {
     in-out property <bool> busy: false;
     in-out property <string> status_text: "";
 
-    in property <[SubtitleRow]> results: [];
+    in property <[SubtitleRow]> results: [
+        {
+            score: "0.00",
+            name: "【奥特燃起来了泽塔奥特曼】全程高能 泽塔奥特曼完结纪念",
+            ext: "ass",
+            languages: "https://subtitle.v.geilijiasu.com/55/E1/55E1457CED6ECA1CFC5CEC28FACE45A3D859613A.srt",
+            extra_name: "（网友上传）",
+        },
+        {
+            score: "0.00",
+            name: "泽塔奥特曼PV1.ass",
+            ext: "ass",
+            languages: "https://subtitle.v.geilijiasu.com/55/E1/55E1457CED6ECA1CFC5CEC28FACE45A3D859613A.srt",
+            extra_name: "（网友上传）",
+        },
+    ];
+
 
     callback search_clicked(string, string, string, string);
     callback download_one(int);
@@ -122,6 +138,14 @@ export component SubtitleDownloadView inherits VerticalLayout {
         wrap: word-wrap;
     }
 
+    // Debug helper: quickly confirm whether the UI receives model updates.
+    // Remove once the binding/rendering issue is fully resolved.
+    Text {
+        text: "debug: results.length=" + root.results.length;
+        color: AppTheme.text_muted;
+        font-size: 11px;
+    }
+
     Rectangle { height: 1px; background: AppTheme.border_color; }
 
     // Results list
@@ -134,58 +158,61 @@ export component SubtitleDownloadView inherits VerticalLayout {
         vertical-stretch: 1;
         min-height: 0;
 
-        if (root.results.length == 0): Rectangle {
-            x: 8px;
-            y: 8px;
-            width: parent.width - 16px;
-            height: 52px;
-            background: transparent;
-
-            Text {
-                x: 10px;
-                text: root.busy ? "正在搜索..." : "暂无结果：请先搜索关键词。";
-                color: AppTheme.text_muted;
-                vertical-alignment: center;
-            }
-        }
-
-        // Use std-widgets ListView for stable sizing/scrolling across backends.
-        if (root.results.length > 0): ListView {
+        // Use ScrollView to get a robust viewport + clipping + optional scrolling behavior
+        // across render backends.
+        VerticalLayout {
             x: 8px;
             y: 8px;
             width: parent.width - 16px;
             height: parent.height - 16px;
+            spacing: 8px;
+            alignment: start;
 
-            for row[i] in root.results: Rectangle {
-                height: 58px; // include vertical spacing
-                background: transparent;
+            if (root.results.length == 0): Text {
+                text: root.busy ? "正在搜索..." : "暂无结果：请先搜索关键词。";
+                color: AppTheme.text_muted;
+                wrap: word-wrap;
+            }
 
-                item := Rectangle {
-                    x: 0;
-                    y: 3px;
-                    width: parent.width;
-                    height: 52px;
-                    border-radius: 6px;
-                    background: area.has-hover ? AppTheme.hover_bg : transparent;
-                    area := TouchArea {}
+            if (root.results.length > 0): ScrollView {
+                enabled: true;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
 
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 10px;
-                        alignment: start;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+                    alignment: start;
 
-                        Text { text: row.score; width: 64px; color: AppTheme.text_primary; }
-                        Text { text: row.name; horizontal-stretch: 1; color: AppTheme.text_primary; overflow: elide; }
-                        Text { text: row.ext; width: 50px; color: AppTheme.text_secondary; }
-                        Text { text: row.languages; width: 120px; color: AppTheme.text_secondary; overflow: elide; }
-                        Text { text: row.extra_name; width: 160px; color: AppTheme.text_secondary; overflow: elide; }
+                    for row[i] in root.results: Rectangle {
+                        horizontal-stretch: 1;
+                        height: 52px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: AppTheme.border_color;
+                        background: area.has-hover ? AppTheme.hover_bg : transparent;
+                        area := TouchArea { width: parent.width; height: parent.height; }
 
-                        AppButton {
-                            kind: ButtonKind.Secondary;
-                            text: "下载";
-                            enabled: !root.busy;
-                            clicked => { root.download_one(i); }
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            alignment: start;
+
+                            Text { text: row.score; width: 64px; color: AppTheme.text_primary; }
+                            Text { text: row.name; horizontal-stretch: 1; color: AppTheme.text_primary; overflow: elide; }
+                            Text { text: row.ext; width: 50px; color: AppTheme.text_secondary; }
+                            Text { text: row.languages; width: 120px; color: AppTheme.text_secondary; overflow: elide; }
+                            Text { text: row.extra_name; width: 160px; color: AppTheme.text_secondary; overflow: elide; }
+
+                            AppButton {
+                                kind: ButtonKind.Secondary;
+                                text: "下载";
+                                enabled: !root.busy;
+                                clicked => { root.download_one(i); }
+                            }
                         }
                     }
                 }

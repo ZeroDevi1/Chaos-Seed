@@ -1,0 +1,133 @@
+import { AppTheme } from "../theme.slint";
+import { DanmakuRow } from "../models.slint";
+import { CheckBox } from "std-widgets.slint";
+
+export component DanmakuChatWindow inherits Window {
+    in-out property <bool> pin_on_top: false;
+    in property <[DanmakuRow]> messages: [];
+
+    callback close_clicked();
+    callback begin_drag();
+
+    title: "Danmaku Chat";
+    no-frame: true;
+    resize-border-width: 10px;
+    always-on-top: root.pin_on_top;
+    background: AppTheme.panel_bg;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: AppTheme.panel_bg;
+
+        // Title / controls
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: 44px;
+            background: AppTheme.card_bg;
+            border-width: 1px;
+            border-color: AppTheme.border_color;
+
+            Text {
+                x: 12px;
+                text: "弹幕 Chat（模拟）";
+                color: AppTheme.text_primary;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            CheckBox {
+                x: 180px;
+                y: 12px;
+                z: 2;
+                checked <=> root.pin_on_top;
+                text: "置顶";
+            }
+
+            Rectangle {
+                x: parent.width - self.width - 10px;
+                y: 8px;
+                z: 2;
+                width: 36px;
+                height: 28px;
+                border-radius: 6px;
+                background: close_area.has-hover ? AppTheme.hover_bg : transparent;
+                border-width: 1px;
+                border-color: AppTheme.border_color;
+
+                Text {
+                    text: "×";
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 16px;
+                    color: AppTheme.text_primary;
+                }
+
+                close_area := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    mouse-cursor: pointer;
+                    clicked => { root.close_clicked(); }
+                }
+            }
+
+            // Drag the window by grabbing the title bar.
+            drag_area := TouchArea {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                z: 1; // below close button/checkbox touch areas
+                mouse-cursor: move;
+
+                pointer-event(pe) => {
+                    if (pe.button == PointerEventButton.left && pe.kind == PointerEventKind.down) {
+                        root.begin_drag();
+                    }
+                }
+            }
+        }
+
+        // Chat messages are rendered bottom-up (new messages appear at the bottom and push up).
+        Rectangle {
+            x: 0;
+            y: 44px;
+            width: parent.width;
+            height: parent.height - 44px;
+            background: AppTheme.panel_bg;
+            border-width: 1px;
+            border-color: AppTheme.border_color;
+            clip: true;
+
+            property <length> pad: 12px;
+            property <length> row_h: 22px;
+            property <length> row_gap: 6px;
+            property <length> row_step: row_h + row_gap;
+            property <int> count: root.messages.length;
+
+            for msg[i] in root.messages: Rectangle {
+                width: parent.width - (pad * 2);
+                height: row_h;
+                x: pad;
+                // Bottom-up: the last item sits at the bottom padding.
+                y: parent.height - pad - row_h - ((count - 1 - i) * row_step);
+                background: transparent;
+                visible: self.y + self.height > 0px;
+
+                Text {
+                    text: msg.user + "：" + msg.text;
+                    width: parent.width;
+                    height: parent.height;
+                    color: AppTheme.text_primary;
+                    font-size: 13px;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

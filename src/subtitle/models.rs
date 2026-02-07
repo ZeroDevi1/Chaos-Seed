@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ThunderSubtitleItem {
     #[serde(default)]
     pub gcid: String,

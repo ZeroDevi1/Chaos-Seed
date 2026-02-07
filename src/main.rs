@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::cell::RefCell;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,6 +13,9 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 use chaos_seed::subtitle;
 
 slint::include_modules!();
+
+#[path = "danmaku/runtime.rs"]
+mod danmaku_runtime;
 
 #[derive(Default)]
 struct AppState {
@@ -44,6 +48,52 @@ fn items_to_ui(items: &[subtitle::models::ThunderSubtitleItem]) -> Vec<SubtitleR
             }
         })
         .collect()
+}
+
+fn demo_subtitle_items() -> Vec<subtitle::models::ThunderSubtitleItem> {
+    use subtitle::models::ThunderSubtitleItem;
+    vec![
+        ThunderSubtitleItem {
+            name: "【奥特燃起来了泽塔奥特曼】全程高能 泽塔奥特曼完结纪念".to_string(),
+            url: "https://subtitle.v.geilijiasu.com/4A/88/4A88AA48CD04E40BD62A146E5322D6E99A46AE10.ass".to_string(),
+            ext: "ass".to_string(),
+            extra_name: "（网友上传）".to_string(),
+            score: 0.0,
+            ..Default::default()
+        },
+        ThunderSubtitleItem {
+            name: "【奥特燃起来了泽塔奥特曼】全程高能 泽塔".to_string(),
+            url: "https://subtitle.v.geilijiasu.com/A7/D0/A7D07B2E03E5EF0F08BF79792E4B574A2A3511B3.ass".to_string(),
+            ext: "ass".to_string(),
+            extra_name: "（网友上传）".to_string(),
+            score: 0.0,
+            ..Default::default()
+        },
+        ThunderSubtitleItem {
+            name: "泽塔奥特曼PV1.ass".to_string(),
+            url: "https://subtitle.v.geilijiasu.com/DA/A5/DAA58833C53C4A3F48319AB321D2CDD10633F388.ass".to_string(),
+            ext: "ass".to_string(),
+            extra_name: "（网友上传）".to_string(),
+            score: 0.0,
+            ..Default::default()
+        },
+        ThunderSubtitleItem {
+            name: "【RAW】奥特曼EXPO2021新年祭 泽塔奥特曼舞台剧 - 1.泽塔奥特曼 舞".to_string(),
+            url: "https://subtitle.v.geilijiasu.com/13/72/1372E56FF6E02E541F31264BE7F39C8E607F19C9.ass".to_string(),
+            ext: "ass".to_string(),
+            extra_name: "（网友上传）".to_string(),
+            score: 0.0,
+            ..Default::default()
+        },
+        ThunderSubtitleItem {
+            name: "泽塔奥特曼21.srt".to_string(),
+            url: "https://subtitle.v.geilijiasu.com/55/E1/55E1457CED6ECA1CFC5CEC28FACE45A3D859613A.srt".to_string(),
+            ext: "srt".to_string(),
+            extra_name: "（网友上传）".to_string(),
+            score: 0.0,
+            ..Default::default()
+        },
+    ]
 }
 
 #[cfg(windows)]
@@ -275,13 +325,27 @@ fn main() -> Result<(), slint::PlatformError> {
     let results_model: Rc<VecModel<SubtitleRow>> = Rc::new(VecModel::default());
     let results_model_rc: ModelRc<SubtitleRow> = ModelRc::from(results_model.clone());
     app.set_results(results_model_rc);
+    // Show default demo data immediately so we can validate UI binding/rendering without searching.
+    if let Ok(mut st) = state.lock() {
+        st.items = demo_subtitle_items();
+        results_model.set_vec(items_to_ui(&st.items));
+        app.set_status_text("默认数据：用于测试列表渲染/数据绑定（可点击下载）。".into());
+    }
 
     let (ui_tx, ui_rx) = std::sync::mpsc::channel::<UiMsg>();
     let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel::<TaskMsg>();
 
     spawn_runtime_thread(task_rx, ui_tx.clone());
 
-    setup_handlers(&app, state.clone(), task_tx, ui_tx.clone());
+    let danmaku_rt: Rc<RefCell<Option<Rc<RefCell<danmaku_runtime::DanmakuRuntime>>>>> =
+        Rc::new(RefCell::new(None));
+    setup_handlers(
+        &app,
+        state.clone(),
+        task_tx,
+        ui_tx.clone(),
+        danmaku_rt.clone(),
+    );
     start_ui_msg_pump(&app, state.clone(), ui_rx, results_model.clone());
 
     app.run()
@@ -321,10 +385,7 @@ fn start_ui_msg_pump(
                                         format!("找到 {} 条结果。", st.items.len()).into(),
                                     );
                                 }
-                                log_line(&format!(
-                                    "ui=results_update count={}",
-                                    st.items.len()
-                                ));
+                                log_line(&format!("ui=results_update count={}", st.items.len()));
                             }
                         }
                     }
@@ -342,15 +403,30 @@ fn setup_handlers(
     state: Arc<Mutex<AppState>>,
     task_tx: tokio::sync::mpsc::UnboundedSender<TaskMsg>,
     ui_tx: std::sync::mpsc::Sender<UiMsg>,
+    danmaku_rt: Rc<RefCell<Option<Rc<RefCell<danmaku_runtime::DanmakuRuntime>>>>>,
 ) {
+    fn sync_std_widgets_palette(app: &AppWindow) {
+        // std-widgets (Fluent) maintains its own palette and does not automatically follow our
+        // custom AppTheme toggle. Keep them in sync, otherwise light UI + dark widgets becomes
+        // unreadable.
+        let scheme = if app.get_dark_mode() {
+            slint::language::ColorScheme::Dark
+        } else {
+            slint::language::ColorScheme::Light
+        };
+        app.global::<Palette>().set_color_scheme(scheme);
+    }
+
     // Theme: drive the Slint global theme from the UI toggle.
     // (Slint doesn't support binding-to-global in .slint syntax.)
     app.global::<AppTheme>().set_dark_mode(app.get_dark_mode());
+    sync_std_widgets_palette(app);
     {
         let app_weak = app.as_weak();
         app.on_dark_mode_changed(move |dark| {
             if let Some(app) = app_weak.upgrade() {
                 app.global::<AppTheme>().set_dark_mode(dark);
+                sync_std_widgets_palette(&app);
             }
         });
     }
@@ -436,4 +512,146 @@ fn setup_handlers(
     app.on_open_url(|url| {
         let _ = open::that(url.as_str());
     });
+
+    // Danmaku simulator (floating windows)
+    {
+        let app_weak = app.as_weak();
+        let danmaku_rt = danmaku_rt.clone();
+        app.on_danmaku_start(move |style_index, always_on_top| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            if danmaku_rt.borrow().is_some() {
+                return;
+            }
+
+            let style = danmaku_runtime::DanmakuStyle::from_index(style_index);
+            let rt = match danmaku_runtime::DanmakuRuntime::start(&app, style, always_on_top) {
+                Ok(rt) => rt,
+                Err(e) => {
+                    log_line(&format!("danmaku=start err {e}"));
+                    app.set_status_text(format!("弹幕启动失败：{e}").into());
+                    return;
+                }
+            };
+
+            let rt_rc = Rc::new(RefCell::new(rt));
+            danmaku_runtime::DanmakuRuntime::install_timers(&rt_rc);
+            let rt_weak = Rc::downgrade(&rt_rc);
+
+            // Hook close events so closing the floating window stops generation.
+            if let Some(w) = rt_rc.borrow().overlay_window() {
+                {
+                    let weak = w.as_weak();
+                    let rt_weak = rt_weak.clone();
+                    w.on_begin_drag(move || {
+                        if let Some(rt_rc) = rt_weak.upgrade() {
+                            danmaku_runtime::DanmakuRuntime::begin_user_interaction(&rt_rc);
+                        }
+                        if let Some(w) = weak.upgrade() {
+                            begin_native_move(&w.window());
+                        }
+                    });
+                }
+
+                let app_weak2 = app_weak.clone();
+                let danmaku_rt2 = danmaku_rt.clone();
+                w.on_close_clicked(move || {
+                    schedule_stop_danmaku(app_weak2.clone(), danmaku_rt2.clone());
+                });
+
+                let app_weak2 = app_weak.clone();
+                let danmaku_rt2 = danmaku_rt.clone();
+                w.window().on_close_requested(move || {
+                    schedule_stop_danmaku(app_weak2.clone(), danmaku_rt2.clone());
+                    slint::CloseRequestResponse::HideWindow
+                });
+            }
+            if let Some(w) = rt_rc.borrow().chat_window() {
+                {
+                    let weak = w.as_weak();
+                    let rt_weak = rt_weak.clone();
+                    w.on_begin_drag(move || {
+                        if let Some(rt_rc) = rt_weak.upgrade() {
+                            danmaku_runtime::DanmakuRuntime::begin_user_interaction(&rt_rc);
+                        }
+                        if let Some(w) = weak.upgrade() {
+                            begin_native_move(&w.window());
+                        }
+                    });
+                }
+
+                let app_weak2 = app_weak.clone();
+                let danmaku_rt2 = danmaku_rt.clone();
+                w.on_close_clicked(move || {
+                    schedule_stop_danmaku(app_weak2.clone(), danmaku_rt2.clone());
+                });
+
+                let app_weak2 = app_weak.clone();
+                let danmaku_rt2 = danmaku_rt.clone();
+                w.window().on_close_requested(move || {
+                    schedule_stop_danmaku(app_weak2.clone(), danmaku_rt2.clone());
+                    slint::CloseRequestResponse::HideWindow
+                });
+            }
+
+            *danmaku_rt.borrow_mut() = Some(rt_rc);
+            app.set_danmaku_running(true);
+            log_line(&format!(
+                "danmaku=start ok style_index={style_index} top={always_on_top}"
+            ));
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let danmaku_rt = danmaku_rt.clone();
+        app.on_danmaku_stop(move || {
+            schedule_stop_danmaku(app_weak.clone(), danmaku_rt.clone());
+        });
+    }
+}
+
+fn schedule_stop_danmaku(
+    app_weak: slint::Weak<AppWindow>,
+    danmaku_rt: Rc<RefCell<Option<Rc<RefCell<danmaku_runtime::DanmakuRuntime>>>>>,
+) {
+    // Defer the cleanup to avoid dropping a window component from within its own callback.
+    slint::Timer::single_shot(Duration::from_millis(0), move || {
+        if let Some(app) = app_weak.upgrade() {
+            app.set_danmaku_running(false);
+        }
+        if let Some(rt_rc) = danmaku_rt.borrow_mut().take() {
+            rt_rc.borrow_mut().stop();
+        }
+        log_line("danmaku=stopped");
+    });
+}
+
+#[cfg(windows)]
+fn hwnd_from_slint_window(window: &slint::Window) -> Option<windows_sys::Win32::Foundation::HWND> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    // `slint::Window` does not implement `HasWindowHandle`, but `slint::WindowHandle` does.
+    // Note: the raw handle is only available after the window has been shown by the backend.
+    let handle = window.window_handle();
+    let raw = handle.window_handle().ok()?.as_raw();
+    match raw {
+        RawWindowHandle::Win32(h) => Some(h.hwnd.get() as windows_sys::Win32::Foundation::HWND),
+        _ => None,
+    }
+}
+
+fn begin_native_move(_window: &slint::Window) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, HTCAPTION, WM_NCLBUTTONDOWN};
+        if let Some(hwnd) = hwnd_from_slint_window(_window) {
+            unsafe {
+                // Let Windows handle the drag; this is much smoother than manual set_position().
+                ReleaseCapture();
+                SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION as usize, 0);
+            }
+        }
+    }
 }

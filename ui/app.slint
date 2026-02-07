@@ -6,10 +6,15 @@ import { LiveSourceView } from "views/live_source.slint";
 import { DanmakuView } from "views/danmaku.slint";
 import { SettingsView } from "views/settings.slint";
 import { AboutView } from "views/about.slint";
+import { DanmakuOverlayWindow } from "windows/danmaku_overlay_window.slint";
+import { DanmakuChatWindow } from "windows/danmaku_chat_window.slint";
 import { SubtitleRow } from "models.slint";
 import { AppTheme } from "theme.slint";
+import { Palette } from "std-widgets.slint";
 
 export { AppTheme }
+export { Palette }
+export { DanmakuOverlayWindow, DanmakuChatWindow }
 
 export component AppWindow inherits Window {
     title: "Chaos Seed";
@@ -40,6 +45,10 @@ export component AppWindow inherits Window {
     callback download_one(int);
     callback open_url(string);
     callback dark_mode_changed(bool);
+    callback danmaku_start(int, bool);
+    callback danmaku_stop();
+
+    in-out property <bool> danmaku_running: false;
 
     HorizontalLayout {
         Sidebar {
@@ -109,6 +118,9 @@ export component AppWindow inherits Window {
                     if (root.page_index == 3): DanmakuView {
                         width: parent.width;
                         height: parent.height;
+                        running <=> root.danmaku_running;
+                        danmaku_start(style_index, always_on_top) => { root.danmaku_start(style_index, always_on_top); }
+                        danmaku_stop() => { root.danmaku_stop(); }
                     }
 
                     if (root.page_index == 4): SettingsView {
