@@ -42,7 +42,11 @@ pub fn ensure_unique_path(path: &Path) -> Result<PathBuf, std::io::Error> {
         .unwrap_or("file")
         .to_string();
     let suffix = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-    let dot_suffix = if suffix.is_empty() { "".to_string() } else { format!(".{}", suffix) };
+    let dot_suffix = if suffix.is_empty() {
+        "".to_string()
+    } else {
+        format!(".{}", suffix)
+    };
 
     for i in 1..10_000 {
         let cand = parent.join(format!("{} ({}){}", stem, i, dot_suffix));

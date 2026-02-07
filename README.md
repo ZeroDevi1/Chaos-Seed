@@ -1,11 +1,11 @@
 # chaos-seed
 
-一个 Windows GUI（Rust + Slint）小工具：在迅雷字幕接口中搜索字幕，并支持勾选后批量下载到你选择的目录。
+一个 Windows GUI（Rust + Slint）小工具：在迅雷字幕接口中搜索字幕，并支持逐条下载到你选择的目录（每次下载都会弹出目录选择）。
 
 ## 功能
 
 - 左侧侧边栏：Home / 字幕下载 / About
-- 字幕下载流程：搜索 -> 列表展示 -> 勾选多条 -> 选择目录 -> 批量下载
+- 字幕下载流程：搜索 -> 列表展示 -> 点击单条“下载” -> 选择目录 -> 下载
 - 业务逻辑纯 Rust（不调用 Python）
 
 ## 构建前提（重要）
@@ -100,4 +100,3 @@ cargo build --release --no-default-features --features renderer-software
 ## 参考项目
 
 参考项目在 `refs/` 下，仅作学习与对照用，已剥离其 `.git`，并在本仓库中 gitignore，不进入提交历史。
-

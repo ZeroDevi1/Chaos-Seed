@@ -20,22 +20,25 @@ pub struct ThunderClient {
 }
 
 impl ThunderClient {
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, ThunderError> {
         Self::with_base_url("https://api-shoulei-ssl.xunlei.com")
     }
 
-    pub fn with_base_url(base_url: &str) -> Self {
+    pub fn with_base_url(base_url: &str) -> Result<Self, ThunderError> {
         let http = reqwest::Client::builder()
             .user_agent("chaos-seed/0.1")
-            .build()
-            .expect("failed to create reqwest client");
-        Self {
+            .build()?;
+        Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             http,
-        }
+        })
     }
 
-    pub async fn search(&self, query: &str, timeout: Duration) -> Result<Vec<ThunderSubtitleItem>, ThunderError> {
+    pub async fn search(
+        &self,
+        query: &str,
+        timeout: Duration,
+    ) -> Result<Vec<ThunderSubtitleItem>, ThunderError> {
         let q = query.trim();
         if q.is_empty() {
             return Ok(vec![]);
@@ -58,7 +61,11 @@ impl ThunderClient {
         Ok(data.data)
     }
 
-    pub async fn download_bytes(&self, url: &str, timeout: Duration) -> Result<Vec<u8>, ThunderError> {
+    pub async fn download_bytes(
+        &self,
+        url: &str,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, ThunderError> {
         let resp = self.http.get(url).timeout(timeout).send().await?;
         let resp = resp.error_for_status()?;
         let bytes = resp.bytes().await?;

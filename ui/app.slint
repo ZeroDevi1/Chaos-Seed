@@ -28,15 +28,13 @@ export component AppWindow inherits Window {
     in-out property <string> min_score: "";
     in-out property <string> lang: "";
     in-out property <string> limit: "20";
-    in-out property <string> out_dir: "";
 
     // Results model
     in property <[SubtitleRow]> results: [];
 
     // Callbacks implemented in Rust
     callback search_clicked(string, string, string, string);
-    callback result_toggled(int, bool);
-    callback download_clicked();
+    callback download_one(int);
     callback open_url(string);
     callback dark_mode_changed(bool);
 
@@ -88,14 +86,12 @@ export component AppWindow inherits Window {
                         min_score <=> root.min_score;
                         lang <=> root.lang;
                         limit <=> root.limit;
-                        out_dir <=> root.out_dir;
                         busy <=> root.busy;
                         status_text <=> root.status_text;
                         results: root.results;
 
                         search_clicked(q, ms, l, lim) => { root.search_clicked(q, ms, l, lim); }
-                        result_toggled(i, v) => { root.result_toggled(i, v); }
-                        download_clicked() => { root.download_clicked(); }
+                        download_one(i) => { root.download_one(i); }
                     }
 
                     if (root.page_index == 2): AboutView {

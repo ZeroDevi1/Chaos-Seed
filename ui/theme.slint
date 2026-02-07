@@ -21,5 +21,16 @@ export global AppTheme {
     out property <color> border_color: dark_mode ? #1F2937 : #E2E8F0;
     out property <color> input_bg: dark_mode ? #0B1220 : #FFFFFF;
     out property <color> input_bg_disabled: dark_mode ? #0A1020 : #F1F5F9;
-    out property <color> input_border: dark_mode ? #334155 : #CBD5E1;
+    out property <color> input_border: dark_mode ? #334155 : #94A3B8;
+
+    // Buttons
+    out property <color> button_primary_bg: accent;
+    out property <color> button_primary_bg_hover: dark_mode ? #1D4ED8 : #1D4ED8;
+    out property <color> button_primary_bg_pressed: dark_mode ? #1E40AF : #1E40AF;
+    out property <color> button_primary_fg: #FFFFFF;
+
+    out property <color> button_secondary_bg: dark_mode ? #0B1220 : #FFFFFF;
+    out property <color> button_secondary_bg_hover: hover_bg;
+    out property <color> button_secondary_bg_pressed: selected_bg;
+    out property <color> button_secondary_fg: text_primary;
 }

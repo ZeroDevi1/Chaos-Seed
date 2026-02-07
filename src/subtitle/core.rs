@@ -1,11 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::client::{download_with_retries, ThunderClient, ThunderError};
+use super::client::{ThunderClient, ThunderError, download_with_retries};
 use super::models::ThunderSubtitleItem;
 use super::util::{ensure_unique_path, sanitize_component};
 
-pub fn apply_filters(items: Vec<ThunderSubtitleItem>, min_score: Option<f64>, lang: Option<&str>) -> Vec<ThunderSubtitleItem> {
+pub fn apply_filters(
+    items: Vec<ThunderSubtitleItem>,
+    min_score: Option<f64>,
+    lang: Option<&str>,
+) -> Vec<ThunderSubtitleItem> {
     let mut out = items;
     if let Some(ms) = min_score {
         out.retain(|i| i.score >= ms);
@@ -26,9 +30,24 @@ pub async fn search_items(
     lang: Option<&str>,
     timeout: Duration,
 ) -> Result<Vec<ThunderSubtitleItem>, ThunderError> {
-    let client = ThunderClient::new();
+    let client = ThunderClient::new()?;
+    search_items_with_client(&client, query, limit, min_score, lang, timeout).await
+}
+
+pub async fn search_items_with_client(
+    client: &ThunderClient,
+    query: &str,
+    limit: usize,
+    min_score: Option<f64>,
+    lang: Option<&str>,
+    timeout: Duration,
+) -> Result<Vec<ThunderSubtitleItem>, ThunderError> {
     let mut items = client.search(query, timeout).await?;
-    items.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    items.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let items = apply_filters(items, min_score, lang);
     Ok(items.into_iter().take(limit).collect())
 }
@@ -40,10 +59,27 @@ pub async fn download_item(
     retries: u32,
     overwrite: bool,
 ) -> Result<PathBuf, ThunderError> {
-    let client = ThunderClient::new();
+    let client = ThunderClient::new()?;
+    download_item_with_client(&client, item, out_dir, timeout, retries, overwrite).await
+}
 
+pub async fn download_item_with_client(
+    client: &ThunderClient,
+    item: &ThunderSubtitleItem,
+    out_dir: &Path,
+    timeout: Duration,
+    retries: u32,
+    overwrite: bool,
+) -> Result<PathBuf, ThunderError> {
     let safe_name = sanitize_component(&item.name, 120);
-    let ext = sanitize_component(if item.ext.trim().is_empty() { "srt" } else { &item.ext }, 10);
+    let ext = sanitize_component(
+        if item.ext.trim().is_empty() {
+            "srt"
+        } else {
+            &item.ext
+        },
+        10,
+    );
 
     std::fs::create_dir_all(out_dir)?;
     let mut path = out_dir.join(format!("{}.{}", safe_name, ext));
@@ -52,7 +88,7 @@ pub async fn download_item(
     }
 
     let data = download_with_retries(
-        &client,
+        client,
         item.url.as_str(),
         timeout,
         retries,
@@ -87,7 +123,11 @@ mod tests {
 
     #[test]
     fn filter_by_min_score_and_lang() {
-        let items = vec![item("a", 1.0, &["zh"]), item("b", 9.0, &["en"]), item("c", 10.0, &["zh", "en"])];
+        let items = vec![
+            item("a", 1.0, &["zh"]),
+            item("b", 9.0, &["en"]),
+            item("c", 10.0, &["zh", "en"]),
+        ];
         let out = apply_filters(items, Some(9.0), Some("zh"));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "c");

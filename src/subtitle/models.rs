@@ -71,6 +71,9 @@ mod tests {
         assert_eq!(resp.result, "ok");
         assert_eq!(resp.data.len(), 1);
         assert_eq!(resp.data[0].name, "Example");
-        assert_eq!(resp.data[0].languages, vec!["zh".to_string(), "en".to_string()]);
+        assert_eq!(
+            resp.data[0].languages,
+            vec!["zh".to_string(), "en".to_string()]
+        );
     }
 }

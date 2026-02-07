@@ -1,31 +1,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use slint::{ComponentHandle, ModelRc, VecModel};
-use tokio::sync::Mutex;
 
-mod subtitle;
+use chaos_seed::subtitle;
 
 slint::include_modules!();
 
-#[derive(Debug, Clone)]
-struct RowState {
-    selected: bool,
-    item: subtitle::models::ThunderSubtitleItem,
-}
-
 #[derive(Default)]
 struct AppState {
-    rows: Vec<RowState>,
+    items: Vec<subtitle::models::ThunderSubtitleItem>,
 }
 
-fn rows_to_ui(rows: &[RowState]) -> Vec<SubtitleRow> {
-    rows.iter()
-        .map(|r| {
-            let item = &r.item;
+fn items_to_ui(items: &[subtitle::models::ThunderSubtitleItem]) -> Vec<SubtitleRow> {
+    items
+        .iter()
+        .map(|item| {
             let langs = item
                 .languages
                 .iter()
@@ -35,10 +29,14 @@ fn rows_to_ui(rows: &[RowState]) -> Vec<SubtitleRow> {
                 .join(",");
 
             SubtitleRow {
-                selected: r.selected,
                 score: format!("[{:.2}]", item.score).into(),
                 name: item.name.clone().into(),
-                ext: (if item.ext.trim().is_empty() { "srt".to_string() } else { item.ext.clone() }).into(),
+                ext: (if item.ext.trim().is_empty() {
+                    "srt".to_string()
+                } else {
+                    item.ext.clone()
+                })
+                .into(),
                 languages: langs.into(),
                 extra_name: item.extra_name.clone().into(),
             }
@@ -46,37 +44,219 @@ fn rows_to_ui(rows: &[RowState]) -> Vec<SubtitleRow> {
         .collect()
 }
 
-fn set_results(app: &AppWindow, rows: &[RowState]) {
-    let ui_rows = rows_to_ui(rows);
+fn set_results(app: &AppWindow, items: &[subtitle::models::ThunderSubtitleItem]) {
+    let ui_rows = items_to_ui(items);
     let model = VecModel::from(ui_rows);
     let model_rc: ModelRc<SubtitleRow> = ModelRc::from(Rc::new(model));
     app.set_results(model_rc);
 }
 
 #[cfg(windows)]
-fn pick_folder() -> Option<std::path::PathBuf> {
+fn pick_folder() -> Option<PathBuf> {
     rfd::FileDialog::new().pick_folder()
 }
 
 #[cfg(not(windows))]
-fn pick_folder() -> Option<std::path::PathBuf> {
+fn pick_folder() -> Option<PathBuf> {
     None
 }
 
-#[tokio::main]
-async fn main() {
-    let app = AppWindow::new().expect("failed to create AppWindow");
+enum TaskMsg {
+    Search {
+        query: String,
+        min_score: Option<f64>,
+        lang: Option<String>,
+        limit: usize,
+    },
+    DownloadOne {
+        item: subtitle::models::ThunderSubtitleItem,
+        out_dir: PathBuf,
+    },
+}
+
+enum UiMsg {
+    Busy(bool),
+    Status(String),
+    Results(Vec<subtitle::models::ThunderSubtitleItem>),
+}
+
+fn install_panic_hook() {
+    // Release builds hide the console window. Persist panic information so we can debug crashes.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = std::fs::create_dir_all("logs");
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = format!("logs/panic_{ts}.log");
+        let msg = format!("{info}\n");
+        let _ = std::fs::write(&path, msg);
+        default_hook(info);
+    }));
+}
+
+fn spawn_runtime_thread(
+    mut task_rx: tokio::sync::mpsc::UnboundedReceiver<TaskMsg>,
+    ui_tx: std::sync::mpsc::Sender<UiMsg>,
+) {
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                let _ = ui_tx.send(UiMsg::Status(format!("后台运行时初始化失败：{e}")));
+                return;
+            }
+        };
+
+        rt.block_on(async move {
+            while let Some(msg) = task_rx.recv().await {
+                match msg {
+                    TaskMsg::Search {
+                        query,
+                        min_score,
+                        lang,
+                        limit,
+                    } => {
+                        let _ = ui_tx.send(UiMsg::Busy(true));
+                        let _ = ui_tx.send(UiMsg::Status("正在搜索...".to_string()));
+
+                        let lang_opt = lang.as_deref();
+                        let res = subtitle::core::search_items(
+                            &query,
+                            limit,
+                            min_score,
+                            lang_opt,
+                            Duration::from_secs(20),
+                        )
+                        .await;
+
+                        match res {
+                            Ok(items) => {
+                                let _ = ui_tx.send(UiMsg::Results(items));
+                                let _ = ui_tx.send(UiMsg::Status("搜索完成。".to_string()));
+                            }
+                            Err(e) => {
+                                let _ = ui_tx.send(UiMsg::Status(format!("搜索失败：{e}")));
+                            }
+                        }
+                        let _ = ui_tx.send(UiMsg::Busy(false));
+                    }
+                    TaskMsg::DownloadOne { item, out_dir } => {
+                        let _ = ui_tx.send(UiMsg::Busy(true));
+                        let _ = ui_tx.send(UiMsg::Status(format!("开始下载：{}", item.name)));
+
+                        let res = subtitle::core::download_item(
+                            &item,
+                            &out_dir,
+                            Duration::from_secs(60),
+                            2,
+                            false,
+                        )
+                        .await;
+
+                        match res {
+                            Ok(path) => {
+                                let _ = ui_tx.send(UiMsg::Status(format!(
+                                    "下载完成：{} -> {}",
+                                    item.name,
+                                    path.display()
+                                )));
+                            }
+                            Err(e) => {
+                                let _ = ui_tx.send(UiMsg::Status(format!("下载失败：{e}")));
+                            }
+                        }
+                        let _ = ui_tx.send(UiMsg::Busy(false));
+                    }
+                }
+            }
+        });
+    });
+}
+
+fn parse_min_score(s: &str) -> Result<Option<f64>, &'static str> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+    s.parse::<f64>()
+        .map(Some)
+        .map_err(|_| "min_score 不是合法数字。")
+}
+
+fn parse_limit(s: &str) -> usize {
+    match s.trim().parse::<usize>() {
+        Ok(v) if v > 0 => v.min(200),
+        _ => 20,
+    }
+}
+
+fn main() -> Result<(), slint::PlatformError> {
+    install_panic_hook();
+
+    let app = AppWindow::new()?;
     app.set_version(env!("CARGO_PKG_VERSION").into());
     app.set_homepage("https://github.com/ZeroDevi1/Chaos-Seed".into());
 
     let state: Arc<Mutex<AppState>> = Arc::new(Mutex::new(AppState::default()));
 
-    setup_handlers(&app, state.clone());
+    let (ui_tx, ui_rx) = std::sync::mpsc::channel::<UiMsg>();
+    let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel::<TaskMsg>();
 
-    app.run().expect("slint app failed");
+    spawn_runtime_thread(task_rx, ui_tx.clone());
+
+    setup_handlers(&app, state.clone(), task_tx, ui_tx.clone());
+    start_ui_msg_pump(&app, state.clone(), ui_rx);
+
+    app.run()
 }
 
-fn setup_handlers(app: &AppWindow, state: Arc<Mutex<AppState>>) {
+fn start_ui_msg_pump(
+    app: &AppWindow,
+    state: Arc<Mutex<AppState>>,
+    ui_rx: std::sync::mpsc::Receiver<UiMsg>,
+) {
+    let app_weak = app.as_weak();
+
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(30),
+        move || {
+            if let Some(app) = app_weak.upgrade() {
+                while let Ok(msg) = ui_rx.try_recv() {
+                    match msg {
+                        UiMsg::Busy(b) => app.set_busy(b),
+                        UiMsg::Status(s) => app.set_status_text(s.into()),
+                        UiMsg::Results(items) => {
+                            if let Ok(mut st) = state.lock() {
+                                st.items = items;
+                                set_results(&app, &st.items);
+                                app.set_status_text(
+                                    format!("找到 {} 条结果。", st.items.len()).into(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    );
+
+    // Keep the timer alive for the entire app lifecycle.
+    std::mem::forget(timer);
+}
+
+fn setup_handlers(
+    app: &AppWindow,
+    state: Arc<Mutex<AppState>>,
+    task_tx: tokio::sync::mpsc::UnboundedSender<TaskMsg>,
+    ui_tx: std::sync::mpsc::Sender<UiMsg>,
+) {
     // Theme: drive the Slint global theme from the UI toggle.
     // (Slint doesn't support binding-to-global in .slint syntax.)
     app.global::<AppTheme>().set_dark_mode(app.get_dark_mode());
@@ -90,206 +270,78 @@ fn setup_handlers(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     }
 
     // Search
-    let app_weak_search = app.as_weak();
-    let state_search = state.clone();
-    app.on_search_clicked(move |query, min_score, lang, limit| {
-        let query = query.to_string();
-        let min_score = min_score.to_string();
-        let lang = lang.to_string();
-        let limit = limit.to_string();
-
-        let app_weak = app_weak_search.clone();
-        let state = state_search.clone();
-
-        tokio::spawn(async move {
+    {
+        let task_tx = task_tx.clone();
+        let ui_tx = ui_tx.clone();
+        app.on_search_clicked(move |query, min_score, lang, limit| {
             let query_trim = query.trim().to_string();
             if query_trim.is_empty() {
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(app) = app_weak.upgrade() {
-                        app.set_status_text("请输入关键词。".into());
-                    }
-                });
+                let _ = ui_tx.send(UiMsg::Status("请输入关键词。".to_string()));
                 return;
             }
 
-            let min_score_parsed = {
-                let s = min_score.trim();
-                if s.is_empty() {
-                    None
-                } else {
-                    match s.parse::<f64>() {
-                        Ok(v) => Some(v),
-                        Err(_) => {
-                            let _ = slint::invoke_from_event_loop(move || {
-                                if let Some(app) = app_weak.upgrade() {
-                                    app.set_status_text("min_score 不是合法数字。".into());
-                                }
-                            });
-                            return;
-                        }
-                    }
-                }
-            };
-
-            let limit_parsed = match limit.trim().parse::<usize>() {
-                Ok(v) if v > 0 => v.min(200),
-                _ => 20,
-            };
-
-            let lang_trim = lang.trim().to_string();
-            let lang_opt = if lang_trim.is_empty() { None } else { Some(lang_trim.as_str()) };
-
-            let _ = slint::invoke_from_event_loop({
-                let app_weak = app_weak.clone();
-                move || {
-                    if let Some(app) = app_weak.upgrade() {
-                        app.set_busy(true);
-                        app.set_status_text("正在搜索...".into());
-                    }
-                }
-            });
-
-            let result =
-                subtitle::core::search_items(&query_trim, limit_parsed, min_score_parsed, lang_opt, Duration::from_secs(20))
-                    .await;
-
-            match result {
-                Ok(items) => {
-                    let mut st = state.lock().await;
-                    st.rows = items
-                        .into_iter()
-                        .map(|it| RowState { selected: false, item: it })
-                        .collect();
-                    let rows = st.rows.clone();
-                    drop(st);
-
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(app) = app_weak.upgrade() {
-                            set_results(&app, &rows);
-                            app.set_status_text(format!("找到 {} 条结果。", rows.len()).into());
-                            app.set_busy(false);
-                        }
-                    });
-                }
-                Err(e) => {
-                    let msg = format!("搜索失败：{e}");
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(app) = app_weak.upgrade() {
-                            app.set_status_text(msg.into());
-                            app.set_busy(false);
-                        }
-                    });
-                }
-            }
-        });
-    });
-
-    // Toggle selection
-    let app_weak = app.as_weak();
-    let state_toggle = state.clone();
-    app.on_result_toggled(move |idx, checked| {
-        let idx = idx as usize;
-        let app_weak = app_weak.clone();
-        let state_toggle = state_toggle.clone();
-        tokio::spawn(async move {
-            let mut st = state_toggle.lock().await;
-            if idx < st.rows.len() {
-                st.rows[idx].selected = checked;
-            }
-            let rows = st.rows.clone();
-            drop(st);
-
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(app) = app_weak.upgrade() {
-                    set_results(&app, &rows);
-                }
-            });
-        });
-    });
-
-    // Pick folder (optional explicit button)
-    // Download
-    let app_weak = app.as_weak();
-    let state_dl = state.clone();
-    app.on_download_clicked(move || {
-        let app_weak2 = app_weak.clone();
-        let state_dl2 = state_dl.clone();
-
-        let picked = pick_folder();
-
-        if picked.is_none() {
-            if let Some(app) = app_weak2.upgrade() {
-                #[cfg(windows)]
-                app.set_status_text("已取消下载。".into());
-                #[cfg(not(windows))]
-                app.set_status_text("目录选择仅在 Windows 构建可用。".into());
-            }
-            return;
-        }
-
-        let out_dir = picked.unwrap();
-        if let Some(app) = app_weak2.upgrade() {
-            app.set_out_dir(out_dir.display().to_string().into());
-            app.set_busy(true);
-            app.set_status_text("开始下载...".into());
-        }
-
-        tokio::spawn(async move {
-            let selected: Vec<subtitle::models::ThunderSubtitleItem> = {
-                let st = state_dl2.lock().await;
-                st.rows
-                    .iter()
-                    .filter(|r| r.selected)
-                    .map(|r| r.item.clone())
-                    .collect()
-            };
-
-            if selected.is_empty() {
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(app) = app_weak2.upgrade() {
-                        app.set_status_text("请先勾选要下载的字幕。".into());
-                        app.set_busy(false);
-                    }
-                });
-                return;
-            }
-
-            let total = selected.len();
-            for (i, item) in selected.iter().enumerate() {
-                let name = item.name.clone();
-                let _ = slint::invoke_from_event_loop({
-                    let app_weak = app_weak2.clone();
-                    move || {
-                        if let Some(app) = app_weak.upgrade() {
-                            app.set_status_text(format!("正在下载 {}/{}：{}", i + 1, total, name).into());
-                        }
-                    }
-                });
-
-                let res =
-                    subtitle::core::download_item(item, &out_dir, Duration::from_secs(60), 2, false).await;
-
-                if let Err(e) = res {
-                    let msg = format!("下载失败：{e}");
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(app) = app_weak2.upgrade() {
-                            app.set_status_text(msg.into());
-                            app.set_busy(false);
-                        }
-                    });
+            let min_score_parsed = match parse_min_score(min_score.as_str()) {
+                Ok(v) => v,
+                Err(msg) => {
+                    let _ = ui_tx.send(UiMsg::Status(msg.to_string()));
                     return;
                 }
-            }
+            };
 
-            let msg = format!("下载完成：共 {} 个文件 -> {}", total, out_dir.display());
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(app) = app_weak2.upgrade() {
-                    app.set_status_text(msg.into());
-                    app.set_busy(false);
-                }
+            let limit_parsed = parse_limit(limit.as_str());
+            let lang_trim = lang.trim().to_string();
+            let lang_opt = if lang_trim.is_empty() {
+                None
+            } else {
+                Some(lang_trim)
+            };
+
+            let _ = task_tx.send(TaskMsg::Search {
+                query: query_trim,
+                min_score: min_score_parsed,
+                lang: lang_opt,
+                limit: limit_parsed,
             });
         });
-    });
+    }
+
+    // Download one item (pick folder each time)
+    {
+        let task_tx = task_tx.clone();
+        let ui_tx = ui_tx.clone();
+        app.on_download_one(move |idx| {
+            let idx = idx as usize;
+            let item = {
+                let st = match state.lock() {
+                    Ok(s) => s,
+                    Err(_) => {
+                        let _ = ui_tx.send(UiMsg::Status(
+                            "内部状态错误：无法读取搜索结果。".to_string(),
+                        ));
+                        return;
+                    }
+                };
+                st.items.get(idx).cloned()
+            };
+
+            let Some(item) = item else {
+                let _ = ui_tx.send(UiMsg::Status("请选择有效的下载条目。".to_string()));
+                return;
+            };
+
+            let picked = pick_folder();
+            if picked.is_none() {
+                #[cfg(windows)]
+                let _ = ui_tx.send(UiMsg::Status("已取消下载。".to_string()));
+                #[cfg(not(windows))]
+                let _ = ui_tx.send(UiMsg::Status("目录选择仅在 Windows 构建可用。".to_string()));
+                return;
+            }
+
+            let out_dir = picked.unwrap();
+            let _ = task_tx.send(TaskMsg::DownloadOne { item, out_dir });
+        });
+    }
 
     // Open URL
     app.on_open_url(|url| {

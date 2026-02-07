@@ -1,0 +1,90 @@
+import { AppTheme } from "../theme.slint";
+
+export enum ButtonKind {
+    Primary,
+    Secondary,
+}
+
+export component AppButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <ButtonKind> kind: ButtonKind.Primary;
+    callback clicked();
+
+    height: 36px;
+    min-width: 92px;
+    border-radius: 8px;
+    opacity: root.enabled ? 1.0 : 0.55;
+
+    background: root.kind == ButtonKind.Primary
+        ? (touch.pressed ? AppTheme.button_primary_bg_pressed
+            : (touch.has-hover ? AppTheme.button_primary_bg_hover : AppTheme.button_primary_bg))
+        : (touch.pressed ? AppTheme.button_secondary_bg_pressed
+            : (touch.has-hover ? AppTheme.button_secondary_bg_hover : AppTheme.button_secondary_bg));
+
+    border-width: root.kind == ButtonKind.Secondary ? 1px : 0px;
+    border-color: AppTheme.border_color;
+
+    Text {
+        text: root.text;
+        color: root.kind == ButtonKind.Primary ? AppTheme.button_primary_fg : AppTheme.button_secondary_fg;
+        font-size: 14px;
+        font-weight: 600;
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component FieldLabel inherits Text {
+    in property <string> label;
+    text: root.label;
+    font-size: 12px;
+    color: AppTheme.text_muted;
+}
+
+export component AppLineEdit inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder-text;
+    in property <bool> enabled: true;
+    callback accepted(string);
+    callback edited(string);
+
+    height: 36px;
+    border-radius: 8px;
+    background: root.enabled ? AppTheme.input_bg : AppTheme.input_bg_disabled;
+    border-width: 1px;
+    border-color: input.has-focus ? AppTheme.accent : AppTheme.input_border;
+    opacity: root.enabled ? 1.0 : 0.7;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        alignment: start;
+
+        input := TextInput {
+            text <=> root.text;
+            color: AppTheme.text_primary;
+            vertical-alignment: center;
+            single-line: true;
+            enabled: root.enabled;
+            accepted => { root.accepted(self.text); }
+            edited => { root.edited(self.text); }
+        }
+    }
+
+    if (root.text == "" && root.placeholder-text != ""): Text {
+        x: 10px;
+        text: root.placeholder-text;
+        color: AppTheme.text_secondary;
+        vertical-alignment: center;
+    }
+}
+

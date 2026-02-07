@@ -1,5 +1,5 @@
-import { Button } from "std-widgets.slint";
 import { AppTheme } from "../theme.slint";
+import { AppButton } from "../components/widgets.slint";
 
 export component HomeView inherits VerticalLayout {
     callback go_subtitle();
@@ -22,12 +22,12 @@ export component HomeView inherits VerticalLayout {
     }
 
     Text {
-        text: "推荐流程：输入关键词 -> 搜索 -> 勾选字幕 -> 下载已选 -> 选择目录。";
+        text: "推荐流程：输入关键词 -> 搜索 -> 点击单条下载 -> 选择目录。";
         color: AppTheme.text_muted;
         wrap: word-wrap;
     }
 
-    Button {
+    AppButton {
         text: "前往字幕下载";
         clicked => { root.go_subtitle(); }
     }
