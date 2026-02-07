@@ -28,6 +28,10 @@
 - 文档分层：
   - `TODO.md` 调整为长期路线图（大方向/大功能）
   - `TODO_NEXT.md` 调整为近期 1~5 天交付的修复清单（少而详尽，带验收与回归）
+- 弹幕（先功能后 UI）：
+  - 清空并重构 `src/danmaku`，对齐 IINA+ 的事件模型（`SendDM` / `LiveDMServer`）与平台抽象。
+  - 平台支持：BiliLive（WBI 签名 + token + ws + dm_v2(pb) + emoticon 元数据）/ Douyu（HTML 解析 room_id + ws + blocklist）/ Huya（HNF_GLOBAL_INIT 解析 + ws + blocklist）。
+  - 提供调试用示例：`examples/danmaku_dump.rs`。
 - 字幕下载页交互调整为：回车/按钮搜索 → 列表展示 → 每条“下载”按钮 → 每次下载弹出目录选择（不复用上次目录）。
 - UI 统一控件：
   - 自定义按钮/输入框组件接入主题（改善白天模式对比度与可见性）
@@ -37,4 +41,3 @@
   - 为 release 增加 panic 日志落地（`logs/panic_*.log`）
 - Windows 图标：
   - 生成并嵌入 Windows 资源图标（`.rc + .ico`，通过 build.rs 处理）
-

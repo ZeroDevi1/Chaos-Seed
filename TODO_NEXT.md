@@ -12,6 +12,7 @@
 - P1-4 白天模式按钮不可见 + 输入框/说明不清晰：Done @ 2026-02-07（commit: `6e4d711`）
 - P2-5 Windows 图标（Explorer/任务栏/Alt-Tab）：Done @ 2026-02-07（commit: `6e4d711`）
 - P2-6 About 链接 + 侧边栏 Win11 观感增强：Done @ 2026-02-07（commit: `6e4d711`）
+- P1-7 弹幕：BiliLive / Douyu / Huya 核心连接与解析移植（先功能，UI 下次做）：Done @ 2026-02-07（commit: `2a584a1`）
 
 ## Next（近期要交付）
 
@@ -26,26 +27,15 @@
 
 ---
 
-### P2：弹幕 - 抽象层与两种 UI 形态设计冻结（本次不实现）
+### P1：弹幕 - UI 接入（Chat / Overlay）与交互（下次做）
 
-**目标（本次只写方案，不写实现代码）**
-- 把“平台解析抽象 + 连接弹幕流 + 两种展示形态 + 置顶/透明策略”写到可直接开工实现的程度。
-
-**抽象建议（后续实现用）**
-- `PlatformResolver`：按平台匹配 URL 并解析得到统一的 `ResolvedRoom`
-- `ResolvedRoom`：`platform/room_id/connect_info`
-- `DanmakuClient`：连接弹幕流，输出统一 `DanmakuMsg(user/text/ts/...)`
-
-**两种展示形态**
-- 竖直 Chat：背景不透明、从下往上滚动、显示用户名+弹幕、支持置顶。
-- 水平 Overlay：背景透明、从右往左滚动、位于屏幕上半部分、支持置顶（可在 A 直播间叠 B 弹幕）。
-
-**窗口能力**
-- Slint `Window` 支持 `always-on-top`
-- 透明背景优先 `background: #00000000`，不稳定则 fallback 半透明深色背景
+**交付目标**
+- Slint UI 接入新的 `chaos_seed::danmaku` 模块：能从输入 URL/房间号发起连接，并把 `SendDM` 渲染到：
+  - 竖直 Chat：从下往上滚动（支持置顶）
+  - 水平 Overlay：从右往左滚动（支持置顶/透明）
 
 **验收标准**
-- 文档/接口定义完善到“直接开工实现”的程度（不涉及逐行编码细节）。
+- BiliLive/Douyu/Huya 任意一个能在 UI 中看到弹幕滚动；断线/失败时有明确提示。
 
 ---
 

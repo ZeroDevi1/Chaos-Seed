@@ -6,6 +6,7 @@
 
 - 左侧侧边栏：Home / 字幕下载 / About
 - 字幕下载流程：搜索 -> 列表展示 -> 点击单条“下载” -> 选择目录 -> 下载
+- 弹幕（功能层已完成，UI 接入下次做）：BiliLive / Douyu / Huya 连接与解析，输出统一事件流
 - 业务逻辑纯 Rust（不调用 Python）
 
 ## 构建前提（重要）
@@ -100,3 +101,27 @@ cargo build --release --no-default-features --features renderer-software
 ## 参考项目
 
 参考项目在 `refs/` 下，仅作学习与对照用，已剥离其 `.git`，并在本仓库中 gitignore，不进入提交历史。
+
+## 弹幕（调试 / CLI 验证）
+
+本仓库已实现弹幕“功能层”（连接/解析/统一事件），但尚未接入 UI。
+
+你可以用 example 快速验证：
+
+```bash
+cargo run --example danmaku_dump -- 'https://live.bilibili.com/47867'
+cargo run --example danmaku_dump -- 'https://www.douyu.com/9999'
+cargo run --example danmaku_dump -- 'https://www.huya.com/660000'
+```
+
+输入也支持平台前缀：
+
+```bash
+cargo run --example danmaku_dump -- 'bilibili:47867'
+cargo run --example danmaku_dump -- 'douyu:https://www.douyu.com/9999'
+cargo run --example danmaku_dump -- 'huya:660000'
+```
+
+事件语义（对齐 IINA+）：
+- `LiveDMServer`：`text == ""` 表示连接 OK；`text == "error"` 表示失败/断线
+- `SendDM`：`dms` 中包含弹幕内容；表情弹幕会带 `image_url` 与（可选）`image_width`
