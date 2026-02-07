@@ -1,0 +1,66 @@
+import { AppTheme } from "../theme.slint";
+import { AppButton, AppLineEdit, FieldLabel } from "../components/widgets.slint";
+
+export component LiveSourceView inherits VerticalLayout {
+    in-out property <string> url: "";
+    in-out property <string> output: "";
+
+    spacing: 12px;
+    padding: 24px;
+    alignment: start;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-height: 0;
+
+    Text {
+        text: "直播源";
+        font-size: 22px;
+        font-weight: 700;
+        color: AppTheme.text_primary;
+    }
+
+    Text {
+        text: "占位：输入直播源/分享链接，后续将解析得到 m3u8 或 flv。";
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
+
+    VerticalLayout {
+        spacing: 6px;
+        alignment: start;
+
+        FieldLabel { label: "URL"; }
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            Rectangle {
+                width: 640px;
+                height: 36px;
+                background: transparent;
+                AppLineEdit {
+                    width: parent.width;
+                    placeholder-text: "粘贴直播源/分享链接（占位）";
+                    text <=> root.url;
+                    enabled: true;
+                }
+            }
+
+            AppButton {
+                width: 120px;
+                text: "解析";
+                enabled: false; // 占位：下次实现解析逻辑后启用
+            }
+        }
+    }
+
+    Rectangle { height: 1px; background: AppTheme.border_color; }
+
+    Text {
+        text: root.output == "" ? "输出：暂无（占位）" : root.output;
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
+}
+

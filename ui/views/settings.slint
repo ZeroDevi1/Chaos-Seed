@@ -1,0 +1,24 @@
+import { AppTheme } from "../theme.slint";
+
+export component SettingsView inherits VerticalLayout {
+    spacing: 12px;
+    padding: 24px;
+    alignment: start;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-height: 0;
+
+    Text {
+        text: "设置";
+        font-size: 22px;
+        font-weight: 700;
+        color: AppTheme.text_primary;
+    }
+
+    Text {
+        text: "占位：后续会在这里提供日志输出开关、主题跟随系统、侧边栏状态持久化等设置。";
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
+}
+

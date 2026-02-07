@@ -1,0 +1,56 @@
+import { AppTheme } from "../theme.slint";
+
+export component DanmakuView inherits VerticalLayout {
+    spacing: 12px;
+    padding: 24px;
+    alignment: start;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-height: 0;
+
+    Text {
+        text: "弹幕";
+        font-size: 22px;
+        font-weight: 700;
+        color: AppTheme.text_primary;
+    }
+
+    Text {
+        text: "占位：后续将支持解析不同平台直播间 URL（如 B 站/斗鱼/虎牙），连接弹幕流并展示。";
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
+
+    Rectangle {
+        border-width: 1px;
+        border-color: AppTheme.border_color;
+        border-radius: 8px;
+        background: AppTheme.card_bg;
+        padding: 14px;
+        horizontal-stretch: 1;
+
+        VerticalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: "计划两种展示形态（本次不实现）：";
+                color: AppTheme.text_primary;
+                font-weight: 600;
+            }
+
+            Text {
+                text: "1) 竖直 Chat：类似 YouTube Chat，背景不透明，弹幕从下向上滚动，可置顶。";
+                color: AppTheme.text_secondary;
+                wrap: word-wrap;
+            }
+
+            Text {
+                text: "2) 水平 Overlay：类似 B 站滚动弹幕，背景透明，从右向左滚动，支持置顶（可在 A 直播间叠 B 弹幕）。";
+                color: AppTheme.text_secondary;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+

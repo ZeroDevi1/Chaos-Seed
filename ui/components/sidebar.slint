@@ -137,6 +137,26 @@ export component Sidebar inherits Rectangle {
             clicked(i) => { root.tab_selected(i); }
         }
 
+        SidebarItem {
+            icon: "▶";
+            text: "直播源";
+            index: 2;
+            selected_index: root.selected_index;
+            collapsed: root.collapsed;
+            enabled: root.enabled;
+            clicked(i) => { root.tab_selected(i); }
+        }
+
+        SidebarItem {
+            icon: "≋";
+            text: "弹幕";
+            index: 3;
+            selected_index: root.selected_index;
+            collapsed: root.collapsed;
+            enabled: root.enabled;
+            clicked(i) => { root.tab_selected(i); }
+        }
+
         Rectangle { vertical-stretch: 1; } // spacer
 
         Rectangle {
@@ -145,9 +165,19 @@ export component Sidebar inherits Rectangle {
         }
 
         SidebarItem {
+            icon: "⚙";
+            text: "设置";
+            index: 4;
+            selected_index: root.selected_index;
+            collapsed: root.collapsed;
+            enabled: root.enabled;
+            clicked(i) => { root.tab_selected(i); }
+        }
+
+        SidebarItem {
             icon: "ⓘ";
             text: "关于";
-            index: 2;
+            index: 5;
             selected_index: root.selected_index;
             collapsed: root.collapsed;
             enabled: root.enabled;
