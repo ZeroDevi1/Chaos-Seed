@@ -12,7 +12,7 @@
 - P1-4 白天模式按钮不可见 + 输入框/说明不清晰：Done @ 2026-02-07（commit: `6e4d711`）
 - P2-5 Windows 图标（Explorer/任务栏/Alt-Tab）：Done @ 2026-02-07（commit: `6e4d711`）
 - P2-6 About 链接 + 侧边栏 Win11 观感增强：Done @ 2026-02-07（commit: `6e4d711`）
-- P1-7 弹幕：BiliLive / Douyu / Huya 核心连接与解析移植（先功能，UI 下次做）：Done @ 2026-02-07（commit: `2a584a1`）
+- P1-7 弹幕：BiliLive / Douyu / Huya 核心连接与解析移植（先功能，UI 下次做）：Done @ 2026-02-07（commit: `a37fce7`）
 
 ## Next（近期要交付）
 
