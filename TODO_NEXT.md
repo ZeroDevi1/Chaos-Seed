@@ -8,35 +8,12 @@
 
 - P0-1 启动白屏 / 首屏延迟 2~3s：Done @ 2026-02-07（commit: `6e4d711`）
 - P0-2 搜索按钮点击后闪退：Done @ 2026-02-07（commit: `6e4d711`）
+- P0-3 字幕下载页：搜索有结果但列表不显示 + 输入框鼠标点击不聚焦：Done @ 2026-02-07（commit: `77ac64b`）
 - P1-4 白天模式按钮不可见 + 输入框/说明不清晰：Done @ 2026-02-07（commit: `6e4d711`）
 - P2-5 Windows 图标（Explorer/任务栏/Alt-Tab）：Done @ 2026-02-07（commit: `6e4d711`）
 - P2-6 About 链接 + 侧边栏 Win11 观感增强：Done @ 2026-02-07（commit: `6e4d711`）
 
 ## Next（近期要交付）
-
-### P0：字幕下载页 - 搜索有结果但列表不显示 + 输入框鼠标点击不聚焦
-
-**现象**
-- 日志显示 `task=search ok items>0` 且 `ui=results_update count>0`，但 UI 列表不显示。
-- 鼠标点击输入框无反应（已修复）：必须 Tab 切换才能输入/定位光标。
-
-**实现方向（概括）**
-- 优先修复 `ui/app.slint`：对每个页面 View 实例显式设置 `width/height = parent.width/parent.height`，修复布局与命中测试区域异常。
-- 若仍不显示：Rust 侧改为稳定 `ModelRc`（只 set 一次，后续更新 `VecModel` 内容，不替换 model 指针）。
-- （可选）UI 增加 debug 字段显示 `results.length`，快速判断数据是否传入。
-- （诊断增强）搜索成功后把 items（最多 50 条）dump 到 `logs/app.log`，用于确认是否真正拿到数据。
-
-**验收标准**
-- 鼠标点击输入框立刻聚焦并可输入，光标可随鼠标定位。
-- 搜索后列表出现 N 行（例如 20 行），每行“下载”按钮可点击。
-
-**回归清单**
-- `cargo test`
-- Windows 原生：`cargo build --release`
-- WSL -> windows-gnu：`cargo build --release --target x86_64-pc-windows-gnu`
-- WSL -> windows-msvc（xwin）：`cargo xwin build --release --target x86_64-pc-windows-msvc`
-
----
 
 ### P1：新增页面占位（Settings / 直播源 / 弹幕）+ 侧边栏导航调整
 
