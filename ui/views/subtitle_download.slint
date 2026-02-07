@@ -132,7 +132,8 @@ export component SubtitleDownloadView inherits VerticalLayout {
         flick := Flickable {
             width: parent.width;
             height: parent.height;
-            viewport-height: root.results.length * 56px;
+            // Keep a minimum viewport height so the empty-state placeholder is visible.
+            viewport-height: Math.max(root.results.length * 56px, 56px);
             interactive: true;
 
             VerticalLayout {

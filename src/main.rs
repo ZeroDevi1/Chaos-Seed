@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -87,13 +89,29 @@ fn install_panic_hook() {
         let _ = std::fs::create_dir_all("logs");
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis())
             .unwrap_or(0);
         let path = format!("logs/panic_{ts}.log");
         let msg = format!("{info}\n");
         let _ = std::fs::write(&path, msg);
         default_hook(info);
     }));
+}
+
+fn log_line(msg: &str) {
+    let _ = std::fs::create_dir_all("logs");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let line = format!("[{ts}] {msg}\n");
+    if let Ok(mut f) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("logs/app.log")
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 fn spawn_runtime_thread(
@@ -121,6 +139,9 @@ fn spawn_runtime_thread(
                         lang,
                         limit,
                     } => {
+                        log_line(&format!(
+                            "task=search start query={query:?} min_score={min_score:?} lang={lang:?} limit={limit}"
+                        ));
                         let _ = ui_tx.send(UiMsg::Busy(true));
                         let _ = ui_tx.send(UiMsg::Status("正在搜索...".to_string()));
 
@@ -136,16 +157,22 @@ fn spawn_runtime_thread(
 
                         match res {
                             Ok(items) => {
+                                log_line(&format!("task=search ok items={}", items.len()));
                                 let _ = ui_tx.send(UiMsg::Results(items));
-                                let _ = ui_tx.send(UiMsg::Status("搜索完成。".to_string()));
                             }
                             Err(e) => {
+                                log_line(&format!("task=search err {e}"));
                                 let _ = ui_tx.send(UiMsg::Status(format!("搜索失败：{e}")));
                             }
                         }
                         let _ = ui_tx.send(UiMsg::Busy(false));
                     }
                     TaskMsg::DownloadOne { item, out_dir } => {
+                        log_line(&format!(
+                            "task=download start name={:?} out_dir={}",
+                            item.name,
+                            out_dir.display()
+                        ));
                         let _ = ui_tx.send(UiMsg::Busy(true));
                         let _ = ui_tx.send(UiMsg::Status(format!("开始下载：{}", item.name)));
 
@@ -160,6 +187,11 @@ fn spawn_runtime_thread(
 
                         match res {
                             Ok(path) => {
+                                log_line(&format!(
+                                    "task=download ok name={:?} path={}",
+                                    item.name,
+                                    path.display()
+                                ));
                                 let _ = ui_tx.send(UiMsg::Status(format!(
                                     "下载完成：{} -> {}",
                                     item.name,
@@ -167,6 +199,10 @@ fn spawn_runtime_thread(
                                 )));
                             }
                             Err(e) => {
+                                log_line(&format!(
+                                    "task=download err name={:?} err={e}",
+                                    item.name
+                                ));
                                 let _ = ui_tx.send(UiMsg::Status(format!("下载失败：{e}")));
                             }
                         }
@@ -197,6 +233,7 @@ fn parse_limit(s: &str) -> usize {
 
 fn main() -> Result<(), slint::PlatformError> {
     install_panic_hook();
+    log_line("app=start");
 
     let app = AppWindow::new()?;
     app.set_version(env!("CARGO_PKG_VERSION").into());
@@ -236,9 +273,17 @@ fn start_ui_msg_pump(
                             if let Ok(mut st) = state.lock() {
                                 st.items = items;
                                 set_results(&app, &st.items);
-                                app.set_status_text(
-                                    format!("找到 {} 条结果。", st.items.len()).into(),
-                                );
+                                if st.items.is_empty() {
+                                    app.set_status_text("未找到结果。".into());
+                                } else {
+                                    app.set_status_text(
+                                        format!("找到 {} 条结果。", st.items.len()).into(),
+                                    );
+                                }
+                                log_line(&format!(
+                                    "ui=results_update count={}",
+                                    st.items.len()
+                                ));
                             }
                         }
                     }
@@ -296,6 +341,9 @@ fn setup_handlers(
                 Some(lang_trim)
             };
 
+            log_line(&format!(
+                "ui=search_clicked query={query_trim:?} min_score={min_score_parsed:?} lang={lang_opt:?} limit={limit_parsed}"
+            ));
             let _ = task_tx.send(TaskMsg::Search {
                 query: query_trim,
                 min_score: min_score_parsed,

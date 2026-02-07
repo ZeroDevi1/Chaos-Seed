@@ -10,6 +10,8 @@ pub enum ThunderError {
     Http(#[from] reqwest::Error),
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("api gate failed: code={code}, result={result}")]
+    ApiGate { code: i32, result: String },
     #[error("download failed after {retries} retries: {message}")]
     DownloadFailed { retries: u32, message: String },
 }
@@ -56,7 +58,10 @@ impl ThunderClient {
 
         let data: ThunderSubtitleResponse = resp.json().await?;
         if data.code != 0 || data.result != "ok" {
-            return Ok(vec![]);
+            return Err(ThunderError::ApiGate {
+                code: data.code,
+                result: data.result,
+            });
         }
         Ok(data.data)
     }

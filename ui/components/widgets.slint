@@ -90,16 +90,5 @@ export component AppLineEdit inherits Rectangle {
         text: root.placeholder-text;
         color: AppTheme.text_secondary;
         vertical-alignment: center;
-        // Ensure the placeholder does not prevent focusing the input.
-        TouchArea {
-            enabled: root.enabled;
-            clicked => { input.focus(); }
-        }
-    }
-
-    // Clicking anywhere inside the control should focus the input.
-    TouchArea {
-        enabled: root.enabled;
-        clicked => { input.focus(); }
     }
 }

@@ -47,7 +47,7 @@ async fn search_gate_ok_returns_items() {
 }
 
 #[tokio::test]
-async fn search_gate_not_ok_returns_empty() {
+async fn search_gate_not_ok_returns_error() {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method(GET)
@@ -62,11 +62,11 @@ async fn search_gate_not_ok_returns_empty() {
 
     let client =
         subtitle::client::ThunderClient::with_base_url(&server.base_url()).expect("client");
-    let items = client
+    let err = client
         .search("abc", Duration::from_secs(2))
         .await
-        .expect("search");
-    assert!(items.is_empty());
+        .expect_err("should error");
+    assert!(err.to_string().contains("api gate failed"));
 }
 
 #[tokio::test]
