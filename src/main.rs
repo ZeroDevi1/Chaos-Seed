@@ -46,13 +46,6 @@ fn items_to_ui(items: &[subtitle::models::ThunderSubtitleItem]) -> Vec<SubtitleR
         .collect()
 }
 
-fn set_results(app: &AppWindow, items: &[subtitle::models::ThunderSubtitleItem]) {
-    let ui_rows = items_to_ui(items);
-    let model = VecModel::from(ui_rows);
-    let model_rc: ModelRc<SubtitleRow> = ModelRc::from(Rc::new(model));
-    app.set_results(model_rc);
-}
-
 #[cfg(windows)]
 fn pick_folder() -> Option<PathBuf> {
     rfd::FileDialog::new().pick_folder()
@@ -158,6 +151,42 @@ fn spawn_runtime_thread(
                         match res {
                             Ok(items) => {
                                 log_line(&format!("task=search ok items={}", items.len()));
+
+                                // Dump the returned items so we can verify the API actually returned data.
+                                // Limit lines to avoid huge logs when `limit` is large.
+                                let max_dump = items.len().min(50);
+                                for (i, item) in items.iter().take(max_dump).enumerate() {
+                                    let ext = if item.ext.trim().is_empty() {
+                                        "srt"
+                                    } else {
+                                        item.ext.as_str()
+                                    };
+                                    let langs = item
+                                        .languages
+                                        .iter()
+                                        .filter(|x| !x.trim().is_empty())
+                                        .cloned()
+                                        .collect::<Vec<_>>()
+                                        .join(",");
+
+                                    log_line(&format!(
+                                        "task=search item[{i}] score={:.2} name={:?} ext={:?} languages={:?} extra_name={:?} url={:?}",
+                                        item.score,
+                                        item.name,
+                                        ext,
+                                        langs,
+                                        item.extra_name,
+                                        item.url
+                                    ));
+                                }
+                                if items.len() > max_dump {
+                                    log_line(&format!(
+                                        "task=search items truncated: showing {} of {}",
+                                        max_dump,
+                                        items.len()
+                                    ));
+                                }
+
                                 let _ = ui_tx.send(UiMsg::Results(items));
                             }
                             Err(e) => {
@@ -241,13 +270,19 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let state: Arc<Mutex<AppState>> = Arc::new(Mutex::new(AppState::default()));
 
+    // Keep a stable model instance and only mutate its contents. This avoids subtle UI update
+    // issues where replacing the model pointer doesn't refresh ListView delegates.
+    let results_model: Rc<VecModel<SubtitleRow>> = Rc::new(VecModel::default());
+    let results_model_rc: ModelRc<SubtitleRow> = ModelRc::from(results_model.clone());
+    app.set_results(results_model_rc);
+
     let (ui_tx, ui_rx) = std::sync::mpsc::channel::<UiMsg>();
     let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel::<TaskMsg>();
 
     spawn_runtime_thread(task_rx, ui_tx.clone());
 
     setup_handlers(&app, state.clone(), task_tx, ui_tx.clone());
-    start_ui_msg_pump(&app, state.clone(), ui_rx);
+    start_ui_msg_pump(&app, state.clone(), ui_rx, results_model.clone());
 
     app.run()
 }
@@ -256,6 +291,7 @@ fn start_ui_msg_pump(
     app: &AppWindow,
     state: Arc<Mutex<AppState>>,
     ui_rx: std::sync::mpsc::Receiver<UiMsg>,
+    results_model: Rc<VecModel<SubtitleRow>>,
 ) {
     let app_weak = app.as_weak();
 
@@ -271,8 +307,13 @@ fn start_ui_msg_pump(
                         UiMsg::Status(s) => app.set_status_text(s.into()),
                         UiMsg::Results(items) => {
                             if let Ok(mut st) = state.lock() {
+                                // Update raw items for download.
                                 st.items = items;
-                                set_results(&app, &st.items);
+
+                                // Update the UI model in-place.
+                                let ui_rows = items_to_ui(&st.items);
+                                results_model.set_vec(ui_rows);
+
                                 if st.items.is_empty() {
                                     app.set_status_text("未找到结果。".into());
                                 } else {
