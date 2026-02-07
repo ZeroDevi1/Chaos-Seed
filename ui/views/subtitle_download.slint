@@ -34,14 +34,15 @@ export component SubtitleDownloadView inherits VerticalLayout {
     }
 
     // Query + actions
-    HorizontalLayout {
-        spacing: 12px;
+    VerticalLayout {
+        spacing: 6px;
         alignment: start;
+        FieldLabel { label: "关键词"; }
 
-        VerticalLayout {
-            spacing: 6px;
+        HorizontalLayout {
+            spacing: 12px;
             alignment: start;
-            FieldLabel { label: "关键词"; }
+
             Rectangle {
                 width: 520px;
                 height: 36px;
@@ -54,14 +55,9 @@ export component SubtitleDownloadView inherits VerticalLayout {
                     accepted(t) => { root.search_clicked(t, root.min_score, root.lang, root.limit); }
                 }
             }
-        }
-
-        VerticalLayout {
-            spacing: 10px;
-            alignment: start;
-            Rectangle { height: 20px; } // align with input label
 
             AppButton {
+                width: 120px;
                 text: root.busy ? "处理中..." : "搜索";
                 enabled: !root.busy;
                 clicked => { root.search_clicked(root.query, root.min_score, root.lang, root.limit); }
