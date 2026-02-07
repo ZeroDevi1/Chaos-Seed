@@ -1,7 +1,12 @@
 import { SubtitleRow } from "../models.slint";
 import { AppTheme } from "../theme.slint";
-import { AppButton, AppLineEdit, FieldLabel, ButtonKind } from "../components/widgets.slint";
-import { ScrollView } from "std-widgets.slint";
+import {
+    AppButton,
+    AppLineEdit,
+    FieldLabel,
+    ButtonKind,
+} from "../components/widgets.slint";
+import { ScrollView,ListView } from "std-widgets.slint";
 
 export component SubtitleDownloadView inherits VerticalLayout {
     in-out property <string> query: "";
@@ -12,23 +17,7 @@ export component SubtitleDownloadView inherits VerticalLayout {
     in-out property <bool> busy: false;
     in-out property <string> status_text: "";
 
-    in property <[SubtitleRow]> results: [
-        {
-            score: "0.00",
-            name: "【奥特燃起来了泽塔奥特曼】全程高能 泽塔奥特曼完结纪念",
-            ext: "ass",
-            languages: "https://subtitle.v.geilijiasu.com/55/E1/55E1457CED6ECA1CFC5CEC28FACE45A3D859613A.srt",
-            extra_name: "（网友上传）",
-        },
-        {
-            score: "0.00",
-            name: "泽塔奥特曼PV1.ass",
-            ext: "ass",
-            languages: "https://subtitle.v.geilijiasu.com/55/E1/55E1457CED6ECA1CFC5CEC28FACE45A3D859613A.srt",
-            extra_name: "（网友上传）",
-        },
-    ];
-
+    in property <[SubtitleRow]> results: [];
 
     callback search_clicked(string, string, string, string);
     callback download_one(int);
@@ -57,7 +46,9 @@ export component SubtitleDownloadView inherits VerticalLayout {
     VerticalLayout {
         spacing: 6px;
         alignment: start;
-        FieldLabel { label: "关键词"; }
+        FieldLabel {
+            label: "关键词";
+        }
 
         HorizontalLayout {
             spacing: 12px;
@@ -72,7 +63,9 @@ export component SubtitleDownloadView inherits VerticalLayout {
                     placeholder-text: "例如：泽塔奥特曼 / 电影名 / 剧名（回车搜索）";
                     text <=> root.query;
                     enabled: !root.busy;
-                    accepted(t) => { root.search_clicked(t, root.min_score, root.lang, root.limit); }
+                    accepted(t) => {
+                        root.search_clicked(t, root.min_score, root.lang, root.limit);
+                    }
                 }
             }
 
@@ -80,7 +73,9 @@ export component SubtitleDownloadView inherits VerticalLayout {
                 width: 120px;
                 text: root.busy ? "处理中..." : "搜索";
                 enabled: !root.busy;
-                clicked => { root.search_clicked(root.query, root.min_score, root.lang, root.limit); }
+                clicked => {
+                    root.search_clicked(root.query, root.min_score, root.lang, root.limit);
+                }
             }
         }
     }
@@ -93,39 +88,61 @@ export component SubtitleDownloadView inherits VerticalLayout {
         VerticalLayout {
             spacing: 6px;
             alignment: start;
-            FieldLabel { label: "最低分数(min_score，可空)"; }
+            FieldLabel {
+                label: "最低分数(min_score，可空)";
+            }
+
             Rectangle {
                 width: 180px;
                 height: 36px;
                 background: transparent;
-                AppLineEdit { placeholder-text: "例如：50"; text <=> root.min_score; enabled: !root.busy; }
+                AppLineEdit {
+                    placeholder-text: "例如：50";
+                    text <=> root.min_score;
+                    enabled: !root.busy;
+                }
             }
         }
 
         VerticalLayout {
             spacing: 6px;
             alignment: start;
-            FieldLabel { label: "语言(lang，可空)"; }
+            FieldLabel {
+                label: "语言(lang，可空)";
+            }
+
             Rectangle {
                 width: 160px;
                 height: 36px;
                 background: transparent;
-                AppLineEdit { placeholder-text: "例如：zh / en"; text <=> root.lang; enabled: !root.busy; }
+                AppLineEdit {
+                    placeholder-text: "例如：zh / en";
+                    text <=> root.lang;
+                    enabled: !root.busy;
+                }
             }
         }
 
         VerticalLayout {
             spacing: 6px;
             alignment: start;
-            FieldLabel { label: "数量(limit)"; }
+            FieldLabel {
+                label: "数量(limit)";
+            }
+
             Rectangle {
                 width: 120px;
                 height: 36px;
                 background: transparent;
-                AppLineEdit { placeholder-text: "默认 20"; text <=> root.limit; enabled: !root.busy; }
+                AppLineEdit {
+                    placeholder-text: "默认 20";
+                    text <=> root.limit;
+                    enabled: !root.busy;
+                }
             }
         }
     }
+
     Text {
         text: "提示：搜索后每条结果右侧都有“下载”按钮；点击后会弹出目录选择（每次下载都需要选择目录）。";
         color: AppTheme.text_muted;
@@ -138,15 +155,10 @@ export component SubtitleDownloadView inherits VerticalLayout {
         wrap: word-wrap;
     }
 
-    // Debug helper: quickly confirm whether the UI receives model updates.
-    // Remove once the binding/rendering issue is fully resolved.
-    Text {
-        text: "debug: results.length=" + root.results.length;
-        color: AppTheme.text_muted;
-        font-size: 11px;
+    Rectangle {
+        height: 1px;
+        background: AppTheme.border_color;
     }
-
-    Rectangle { height: 1px; background: AppTheme.border_color; }
 
     // Results list
     Rectangle {
@@ -178,7 +190,7 @@ export component SubtitleDownloadView inherits VerticalLayout {
                 enabled: true;
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
-
+                // height: parent.height;
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 6px;
@@ -191,7 +203,10 @@ export component SubtitleDownloadView inherits VerticalLayout {
                         border-width: 1px;
                         border-color: AppTheme.border_color;
                         background: area.has-hover ? AppTheme.hover_bg : transparent;
-                        area := TouchArea { width: parent.width; height: parent.height; }
+                        area := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                        }
 
                         HorizontalLayout {
                             width: parent.width;
@@ -201,17 +216,46 @@ export component SubtitleDownloadView inherits VerticalLayout {
                             spacing: 10px;
                             alignment: start;
 
-                            Text { text: row.score; width: 64px; color: AppTheme.text_primary; }
-                            Text { text: row.name; horizontal-stretch: 1; color: AppTheme.text_primary; overflow: elide; }
-                            Text { text: row.ext; width: 50px; color: AppTheme.text_secondary; }
-                            Text { text: row.languages; width: 120px; color: AppTheme.text_secondary; overflow: elide; }
-                            Text { text: row.extra_name; width: 160px; color: AppTheme.text_secondary; overflow: elide; }
+                            Text {
+                                text: row.score;
+                                width: 64px;
+                                color: AppTheme.text_primary;
+                            }
+
+                            Text {
+                                text: row.name;
+                                horizontal-stretch: 1;
+                                color: AppTheme.text_primary;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: row.ext;
+                                width: 50px;
+                                color: AppTheme.text_secondary;
+                            }
+
+                            Text {
+                                text: row.languages;
+                                width: 120px;
+                                color: AppTheme.text_secondary;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: row.extra_name;
+                                width: 160px;
+                                color: AppTheme.text_secondary;
+                                overflow: elide;
+                            }
 
                             AppButton {
                                 kind: ButtonKind.Secondary;
                                 text: "下载";
                                 enabled: !root.busy;
-                                clicked => { root.download_one(i); }
+                                clicked => {
+                                    root.download_one(i);
+                                }
                             }
                         }
                     }

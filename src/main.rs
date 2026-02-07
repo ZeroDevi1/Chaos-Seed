@@ -50,51 +50,6 @@ fn items_to_ui(items: &[subtitle::models::ThunderSubtitleItem]) -> Vec<SubtitleR
         .collect()
 }
 
-fn demo_subtitle_items() -> Vec<subtitle::models::ThunderSubtitleItem> {
-    use subtitle::models::ThunderSubtitleItem;
-    vec![
-        ThunderSubtitleItem {
-            name: "【奥特燃起来了泽塔奥特曼】全程高能 泽塔奥特曼完结纪念".to_string(),
-            url: "https://subtitle.v.geilijiasu.com/4A/88/4A88AA48CD04E40BD62A146E5322D6E99A46AE10.ass".to_string(),
-            ext: "ass".to_string(),
-            extra_name: "（网友上传）".to_string(),
-            score: 0.0,
-            ..Default::default()
-        },
-        ThunderSubtitleItem {
-            name: "【奥特燃起来了泽塔奥特曼】全程高能 泽塔".to_string(),
-            url: "https://subtitle.v.geilijiasu.com/A7/D0/A7D07B2E03E5EF0F08BF79792E4B574A2A3511B3.ass".to_string(),
-            ext: "ass".to_string(),
-            extra_name: "（网友上传）".to_string(),
-            score: 0.0,
-            ..Default::default()
-        },
-        ThunderSubtitleItem {
-            name: "泽塔奥特曼PV1.ass".to_string(),
-            url: "https://subtitle.v.geilijiasu.com/DA/A5/DAA58833C53C4A3F48319AB321D2CDD10633F388.ass".to_string(),
-            ext: "ass".to_string(),
-            extra_name: "（网友上传）".to_string(),
-            score: 0.0,
-            ..Default::default()
-        },
-        ThunderSubtitleItem {
-            name: "【RAW】奥特曼EXPO2021新年祭 泽塔奥特曼舞台剧 - 1.泽塔奥特曼 舞".to_string(),
-            url: "https://subtitle.v.geilijiasu.com/13/72/1372E56FF6E02E541F31264BE7F39C8E607F19C9.ass".to_string(),
-            ext: "ass".to_string(),
-            extra_name: "（网友上传）".to_string(),
-            score: 0.0,
-            ..Default::default()
-        },
-        ThunderSubtitleItem {
-            name: "泽塔奥特曼21.srt".to_string(),
-            url: "https://subtitle.v.geilijiasu.com/55/E1/55E1457CED6ECA1CFC5CEC28FACE45A3D859613A.srt".to_string(),
-            ext: "srt".to_string(),
-            extra_name: "（网友上传）".to_string(),
-            score: 0.0,
-            ..Default::default()
-        },
-    ]
-}
 
 #[cfg(windows)]
 fn pick_folder() -> Option<PathBuf> {
@@ -325,12 +280,6 @@ fn main() -> Result<(), slint::PlatformError> {
     let results_model: Rc<VecModel<SubtitleRow>> = Rc::new(VecModel::default());
     let results_model_rc: ModelRc<SubtitleRow> = ModelRc::from(results_model.clone());
     app.set_results(results_model_rc);
-    // Show default demo data immediately so we can validate UI binding/rendering without searching.
-    if let Ok(mut st) = state.lock() {
-        st.items = demo_subtitle_items();
-        results_model.set_vec(items_to_ui(&st.items));
-        app.set_status_text("默认数据：用于测试列表渲染/数据绑定（可点击下载）。".into());
-    }
 
     let (ui_tx, ui_rx) = std::sync::mpsc::channel::<UiMsg>();
     let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel::<TaskMsg>();
