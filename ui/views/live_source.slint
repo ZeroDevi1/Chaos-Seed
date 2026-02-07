@@ -36,9 +36,10 @@ export component LiveSourceView inherits VerticalLayout {
             alignment: start;
 
             Rectangle {
-                width: 640px;
                 height: 36px;
                 background: transparent;
+                horizontal-stretch: 1;
+                min-width: 240px;
                 AppLineEdit {
                     width: parent.width;
                     placeholder-text: "粘贴直播源/分享链接（占位）";
@@ -63,4 +64,3 @@ export component LiveSourceView inherits VerticalLayout {
         wrap: word-wrap;
     }
 }
-

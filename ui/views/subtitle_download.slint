@@ -1,6 +1,7 @@
 import { SubtitleRow } from "../models.slint";
 import { AppTheme } from "../theme.slint";
 import { AppButton, AppLineEdit, FieldLabel, ButtonKind } from "../components/widgets.slint";
+import { ListView } from "std-widgets.slint";
 
 export component SubtitleDownloadView inherits VerticalLayout {
     in-out property <string> query: "";
@@ -133,30 +134,36 @@ export component SubtitleDownloadView inherits VerticalLayout {
         vertical-stretch: 1;
         min-height: 0;
 
-        flick := Flickable {
-            width: parent.width;
-            height: parent.height;
-            // Keep a minimum viewport height so the empty-state placeholder is visible.
-            viewport-height: Math.max(root.results.length * 56px, 56px);
-            interactive: true;
+        if (root.results.length == 0): Rectangle {
+            x: 8px;
+            y: 8px;
+            width: parent.width - 16px;
+            height: 52px;
+            background: transparent;
 
-            VerticalLayout {
-                padding: 8px;
-                spacing: 6px;
-                alignment: start;
+            Text {
+                x: 10px;
+                text: root.busy ? "正在搜索..." : "暂无结果：请先搜索关键词。";
+                color: AppTheme.text_muted;
+                vertical-alignment: center;
+            }
+        }
 
-                if (root.results.length == 0): Rectangle {
-                    height: 52px;
-                    background: transparent;
-                    Text {
-                        x: 10px;
-                        text: root.busy ? "正在搜索..." : "暂无结果：请先搜索关键词。";
-                        color: AppTheme.text_muted;
-                        vertical-alignment: center;
-                    }
-                }
+        // Use std-widgets ListView for stable sizing/scrolling across backends.
+        if (root.results.length > 0): ListView {
+            x: 8px;
+            y: 8px;
+            width: parent.width - 16px;
+            height: parent.height - 16px;
 
-                for row[i] in root.results: Rectangle {
+            for row[i] in root.results: Rectangle {
+                height: 58px; // include vertical spacing
+                background: transparent;
+
+                item := Rectangle {
+                    x: 0;
+                    y: 3px;
+                    width: parent.width;
                     height: 52px;
                     border-radius: 6px;
                     background: area.has-hover ? AppTheme.hover_bg : transparent;
