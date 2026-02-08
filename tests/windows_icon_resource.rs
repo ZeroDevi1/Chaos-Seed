@@ -17,3 +17,12 @@ fn windows_icon_file_exists() {
         "resources/windows/app.ico should not be empty"
     );
 }
+
+// Compile-only guard: our Windows icon code uses `GetModuleHandleW` which requires the
+// `Win32_System_LibraryLoader` feature on the `windows-sys` crate.
+#[cfg(windows)]
+#[test]
+fn windows_sys_library_loader_feature_enabled() {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    let _ = GetModuleHandleW;
+}
