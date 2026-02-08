@@ -1,1 +1,2 @@
-IDI_ICON1 ICON "app.ico"
+/* Resource ID 1 is the conventional "application icon" picked up by many toolkits. */
+1 ICON "app.ico"

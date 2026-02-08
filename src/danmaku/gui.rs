@@ -322,6 +322,14 @@ impl DanmakuUiController {
 
             let _ = w.show();
 
+            // Ensure the taskbar/alt-tab icon matches the app icon on Windows.
+            let w_icon = w.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(0), move || {
+                if let Some(w) = w_icon.upgrade() {
+                    crate::apply_app_icon(&w.window());
+                }
+            });
+
             // Additional hit-test warmup: re-apply current size in the next tick.
             // This mimics the "manual resize" that users reported as making buttons clickable.
             let w2 = w.as_weak();
@@ -384,6 +392,14 @@ impl DanmakuUiController {
             Self::install_overlay_handlers(this, &w);
 
             let _ = w.show();
+
+            // Ensure the taskbar/alt-tab icon matches the app icon on Windows.
+            let w_icon = w.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(0), move || {
+                if let Some(w) = w_icon.upgrade() {
+                    crate::apply_app_icon(&w.window());
+                }
+            });
 
             let w2 = w.as_weak();
             slint::Timer::single_shot(Duration::from_millis(0), move || {

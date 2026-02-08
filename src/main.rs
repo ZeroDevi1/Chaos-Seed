@@ -492,6 +492,15 @@ fn main() -> Result<(), slint::PlatformError> {
     app.set_version(env!("CARGO_PKG_VERSION").into());
     app.set_homepage("https://github.com/ZeroDevi1/Chaos-Seed".into());
 
+    // On Windows, ensure the title-bar icon matches the app icon (some backends don't pick it up
+    // automatically from embedded resources).
+    let app_weak = app.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(0), move || {
+        if let Some(app) = app_weak.upgrade() {
+            apply_app_icon(&app.window());
+        }
+    });
+
     let state: Arc<Mutex<AppState>> = Arc::new(Mutex::new(AppState::default()));
 
     // Keep a stable model instance and only mutate its contents. This avoids subtle UI update
@@ -792,6 +801,57 @@ fn hwnd_from_slint_window(window: &slint::Window) -> Option<windows_sys::Win32::
     match raw {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get() as windows_sys::Win32::Foundation::HWND),
         _ => None,
+    }
+}
+
+fn apply_app_icon(_window: &slint::Window) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED,
+            LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SendMessageW, WM_SETICON,
+        };
+
+        fn make_int_resource(id: u16) -> *const u16 {
+            id as usize as *const u16
+        }
+
+        let Some(hwnd) = hwnd_from_slint_window(_window) else {
+            return;
+        };
+
+        unsafe {
+            let hinst = GetModuleHandleW(std::ptr::null());
+            if hinst == 0 {
+                return;
+            }
+
+            // Try to load icon resource ID 1 from the module (see resources/windows/app.rc).
+            let big_w = GetSystemMetrics(SM_CXICON);
+            let big_h = GetSystemMetrics(SM_CYICON);
+            let small_w = GetSystemMetrics(SM_CXSMICON);
+            let small_h = GetSystemMetrics(SM_CYSMICON);
+
+            let flags = LR_DEFAULTCOLOR | LR_SHARED;
+            let hicon_big =
+                LoadImageW(hinst, make_int_resource(1), IMAGE_ICON, big_w, big_h, flags);
+            let hicon_small = LoadImageW(
+                hinst,
+                make_int_resource(1),
+                IMAGE_ICON,
+                small_w,
+                small_h,
+                flags,
+            );
+
+            if hicon_big != 0 {
+                let _ = SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, hicon_big);
+            }
+            if hicon_small != 0 {
+                let _ = SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, hicon_small);
+            }
+        }
     }
 }
 
