@@ -7,6 +7,7 @@ use slint::{ComponentHandle, ModelRc, SharedPixelBuffer, VecModel};
 
 use chaos_seed::danmaku::model::{DanmakuComment, DanmakuEvent};
 use chaos_seed::danmaku::sim;
+use chaos_seed::danmaku::text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DisplayTarget {
@@ -43,6 +44,11 @@ pub struct DanmakuUiController {
 }
 
 impl DanmakuUiController {
+    // Keep in sync with `ui/windows/danmaku_overlay_window.slint`.
+    const OVERLAY_SAFE_INSET_PX: f32 = 14.0;
+    const OVERLAY_TITLEBAR_H_PX: f32 = 56.0;
+    const OVERLAY_LANE_H_PX: f32 = 28.0;
+
     pub fn new(
         app: slint::Weak<crate::AppWindow>,
         task_tx: tokio::sync::mpsc::UnboundedSender<crate::TaskMsg>,
@@ -99,14 +105,27 @@ impl DanmakuUiController {
             .min(u128::from(i32::MAX as u32)) as i32
     }
 
-    fn overlay_window_width_px(&mut self) -> f32 {
+    fn refresh_overlay_window_metrics(&mut self) {
         let Some(w) = self.overlay.as_ref() else {
-            return self.win_width_px;
+            return;
         };
+
         let sf = w.window().scale_factor();
         let size = w.window().size().to_logical(sf);
         self.win_width_px = size.width.max(1.0);
-        self.win_width_px
+
+        let h = size.height.max(1.0);
+        let available = (h - Self::OVERLAY_TITLEBAR_H_PX - Self::OVERLAY_SAFE_INSET_PX).max(1.0);
+        let lane_count = (available / Self::OVERLAY_LANE_H_PX).floor() as usize;
+        let lane_count = lane_count.clamp(1, 60);
+
+        if lane_count != self.lane_sched.cfg.lane_count {
+            self.lane_sched = sim::LaneScheduler::new(sim::LaneSchedulerConfig {
+                lane_count,
+                min_spacing_px: self.lane_sched.cfg.min_spacing_px,
+                speed_px_per_ms: self.speed_px_per_ms,
+            });
+        }
     }
 
     fn clamp_thumb_width_px(width: Option<u32>) -> f32 {
@@ -138,10 +157,11 @@ impl DanmakuUiController {
             return;
         }
 
-        let user = if ev.user.trim().is_empty() {
+        let user0 = text::sanitize_danmaku_text(&ev.user);
+        let user = if user0.trim().is_empty() {
             "？".to_string()
         } else {
-            ev.user
+            user0
         };
 
         let mut comments: Vec<DanmakuComment> = Vec::new();
@@ -156,7 +176,8 @@ impl DanmakuUiController {
         }
 
         let now_ms = self.now_ms();
-        let win_w = self.overlay_window_width_px();
+        self.refresh_overlay_window_metrics();
+        let win_w = self.win_width_px;
 
         for c in comments {
             let image_url = c.image_url.clone().unwrap_or_default();
@@ -164,6 +185,7 @@ impl DanmakuUiController {
             if text.trim().is_empty() && !image_url.is_empty() {
                 text = "[图片]".to_string();
             }
+            let text = text::sanitize_danmaku_text(&text);
 
             let overlay_text = if text.trim().is_empty() {
                 "[弹幕]".to_string()
@@ -390,7 +412,12 @@ impl DanmakuUiController {
                 let Some(ctrl_rc) = ctrl_weak.upgrade() else {
                     return;
                 };
-                let now_ms = ctrl_rc.borrow().now_ms();
+                let now_ms = {
+                    let mut ctrl = ctrl_rc.borrow_mut();
+                    // Keep lane scheduler in sync with window resizes.
+                    ctrl.refresh_overlay_window_metrics();
+                    ctrl.now_ms()
+                };
 
                 if let Some(w) = wweak.upgrade() {
                     w.set_now_ms(now_ms);

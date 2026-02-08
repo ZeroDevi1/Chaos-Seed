@@ -22,7 +22,7 @@ export component DanmakuOverlayWindow inherits Window {
     property <length> safe_inset: 14px;
     property <length> titlebar_h: 56px;
 
-    property <length> lane_height: 26px;
+    property <length> lane_height: 28px;
     // Reserve a top area so messages never pass under the close button.
     property <length> top_margin: titlebar_h;
 
@@ -100,7 +100,11 @@ export component DanmakuOverlayWindow inherits Window {
         for msg[i] in root.messages: Rectangle {
             // Overlay only shows the message text (no username).
             x: root.width - (root.now_ms - msg.start_ms) * root.speed_per_ms;
-            y: root.top_margin + msg.lane * root.lane_height;
+            // Clamp Y so messages always stay within the window when the user resizes the overlay.
+            y: min(
+                max(root.top_margin, root.height - root.lane_height - root.safe_inset),
+                root.top_margin + msg.lane * root.lane_height
+            );
             height: root.lane_height;
             background: transparent;
             visible: root.now_ms < msg.end_ms;
@@ -121,7 +125,7 @@ export component DanmakuOverlayWindow inherits Window {
             // Probe text: used only to measure preferred width (kept invisible and not interactive).
             probe := Text {
                 text: msg.text;
-                font-size: 18px;
+                font-size: 19px;
                 font-weight: 600;
                 opacity: 0.0;
             }
@@ -165,7 +169,7 @@ export component DanmakuOverlayWindow inherits Window {
                     height: parent.height;
                     color: #FFFFFF;
                     opacity: 0.90;
-                    font-size: 18px;
+                    font-size: 19px;
                     font-weight: 600;
                     vertical-alignment: center;
                     overflow: elide;
