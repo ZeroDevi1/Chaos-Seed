@@ -823,7 +823,7 @@ fn apply_app_icon(_window: &slint::Window) {
 
         unsafe {
             let hinst = GetModuleHandleW(std::ptr::null());
-            if hinst == 0 {
+            if hinst.is_null() {
                 return;
             }
 
@@ -845,11 +845,11 @@ fn apply_app_icon(_window: &slint::Window) {
                 flags,
             );
 
-            if hicon_big != 0 {
-                let _ = SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, hicon_big);
+            if !hicon_big.is_null() {
+                let _ = SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, hicon_big as isize);
             }
-            if hicon_small != 0 {
-                let _ = SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, hicon_small);
+            if !hicon_small.is_null() {
+                let _ = SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, hicon_small as isize);
             }
         }
     }
