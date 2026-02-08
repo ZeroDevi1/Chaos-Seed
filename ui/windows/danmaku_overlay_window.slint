@@ -18,8 +18,13 @@ export component DanmakuOverlayWindow inherits Window {
     // Keep the overlay truly transparent so it can float above other apps.
     background: #00000000;
 
+    // Keep controls away from the resize hit region (frameless window).
+    property <length> safe_inset: 14px;
+    property <length> titlebar_h: 56px;
+
     property <length> lane_height: 26px;
-    property <length> top_margin: 16px;
+    // Reserve a top area so messages never pass under the close button.
+    property <length> top_margin: titlebar_h;
 
     Rectangle {
         width: parent.width;
@@ -35,8 +40,8 @@ export component DanmakuOverlayWindow inherits Window {
         TouchArea {
             x: 0;
             y: 0;
-            width: parent.width - 60px;
-            height: 52px;
+            width: max(0px, parent.width - (safe_inset * 2 + 36px));
+            height: titlebar_h;
             z: 0;
             mouse-cursor: move;
             pointer-event(pe) => {
@@ -47,9 +52,9 @@ export component DanmakuOverlayWindow inherits Window {
         }
         TouchArea {
             x: 0;
-            y: 52px;
+            y: titlebar_h;
             width: parent.width;
-            height: parent.height - 52px;
+            height: parent.height - titlebar_h;
             z: 0;
             mouse-cursor: move;
             pointer-event(pe) => {
@@ -61,13 +66,14 @@ export component DanmakuOverlayWindow inherits Window {
 
         // Close button (top-right)
         Rectangle {
-            x: parent.width - self.width - 10px;
-            y: 10px;
+            x: parent.width - self.width - safe_inset;
+            y: safe_inset;
             z: 2;
             width: 36px;
             height: 28px;
             border-radius: 6px;
-            background: close_area.has-hover ? #00000033 : #00000022;
+            // Use a light translucent background for readability over video content.
+            background: close_area.has-hover ? #FFFFFFCC : #FFFFFFAA;
             border-width: 1px;
             border-color: #000000;
 
@@ -95,29 +101,75 @@ export component DanmakuOverlayWindow inherits Window {
             // Overlay only shows the message text (no username).
             x: root.width - (root.now_ms - msg.start_ms) * root.speed_per_ms;
             y: root.top_margin + msg.lane * root.lane_height;
-            width: parent.width;
             height: root.lane_height;
             background: transparent;
-            clip: true;
             visible: root.now_ms < msg.end_ms;
 
-            // A tiny shadow improves readability without making the background opaque.
-            Text {
-                x: 1px;
-                y: 1px;
+            property <length> pad_x: 10px;
+            property <length> bubble_max_w: max(0px, root.width - safe_inset * 2);
+            property <length> img_w: msg.image_url != "" ? msg.image_w : 0px;
+            property <bool> only_img: msg.image_url != "" && (msg.text == "[图片]" || msg.text == "[表情]");
+            // Keep the hitbox tight to the content (text + optional image).
+            property <length> bubble_w: min(
+                bubble_max_w,
+                probe.preferred-width + (msg.image_url != "" ? (img_w + 8px) : 0px)
+            );
+
+            // Make the moving message's bounding box fit the bubble for correct clipping.
+            width: bubble_w;
+
+            // Probe text: used only to measure preferred width (kept invisible and not interactive).
+            probe := Text {
                 text: msg.text;
-                color: #FFFFFF;
-                opacity: 0.85;
                 font-size: 18px;
                 font-weight: 600;
-                overflow: clip;
+                opacity: 0.0;
             }
-            Text {
-                text: msg.text;
-                color: #000000;
-                font-size: 18px;
-                font-weight: 600;
-                overflow: clip;
+
+            HorizontalLayout {
+                width: parent.width;
+                height: parent.height;
+                spacing: 8px;
+                alignment: start;
+
+                Rectangle {
+                    visible: msg.image_url != "";
+                    width: img_w;
+                    height: parent.height;
+                    background: transparent;
+
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: msg.image;
+                        image-fit: contain;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: "IMG";
+                        color: #FFFFFF;
+                        opacity: 0.40;
+                        font-size: 10px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        visible: !msg.image_ready;
+                    }
+                }
+
+                Text {
+                    visible: !only_img;
+                    text: msg.text;
+                    horizontal-stretch: 1;
+                    height: parent.height;
+                    color: #FFFFFF;
+                    opacity: 0.90;
+                    font-size: 18px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
             }
         }
     }

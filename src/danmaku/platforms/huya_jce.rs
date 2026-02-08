@@ -72,10 +72,7 @@ impl Encoder {
             self.buf.extend_from_slice(bytes);
         } else {
             self.write_head(tag, T_STRING4);
-            let len: i32 = bytes
-                .len()
-                .try_into()
-                .unwrap_or(i32::MAX);
+            let len: i32 = bytes.len().try_into().unwrap_or(i32::MAX);
             self.buf.extend_from_slice(&len.to_be_bytes());
             self.buf.extend_from_slice(bytes);
         }
@@ -242,7 +239,9 @@ impl<'a> Reader<'a> {
                 self.skip(size)
             }
             T_STRUCT_BEGIN => self.skip_to_struct_end(),
-            other => Err(DanmakuError::Codec(format!("jce: unsupported type {other}"))),
+            other => Err(DanmakuError::Codec(format!(
+                "jce: unsupported type {other}"
+            ))),
         }
     }
 
@@ -274,7 +273,9 @@ impl<'a> Reader<'a> {
             T_SHORT => Ok(self.read_be_i16()? as i64),
             T_INT => Ok(self.read_be_i32()? as i64),
             T_LONG => Ok(self.read_be_i64()?),
-            _ => Err(DanmakuError::Codec("jce: type mismatch for int".to_string())),
+            _ => Err(DanmakuError::Codec(
+                "jce: type mismatch for int".to_string(),
+            )),
         }
     }
 }
@@ -323,7 +324,11 @@ pub fn get_string(data: &[u8], tag: u32) -> Result<Option<String>, DanmakuError>
             Cow::Borrowed(s)
         }
         T_ZERO_TAG => return Ok(Some(String::new())),
-        _ => return Err(DanmakuError::Codec("jce: type mismatch for string".to_string())),
+        _ => {
+            return Err(DanmakuError::Codec(
+                "jce: type mismatch for string".to_string(),
+            ));
+        }
     };
     Ok(Some(String::from_utf8_lossy(&bytes).to_string()))
 }
@@ -363,7 +368,9 @@ pub fn get_bytes(data: &[u8], tag: u32) -> Result<Option<Vec<u8>>, DanmakuError>
             Ok(Some(out))
         }
         T_ZERO_TAG => Ok(Some(Vec::new())),
-        _ => Err(DanmakuError::Codec("jce: type mismatch for bytes".to_string())),
+        _ => Err(DanmakuError::Codec(
+            "jce: type mismatch for bytes".to_string(),
+        )),
     }
 }
 

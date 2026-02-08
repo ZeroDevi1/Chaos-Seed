@@ -1,6 +1,6 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
 
@@ -21,7 +21,10 @@ const SERVER_URL: &str = "wss://cdnws.api.huya.com";
 const HEARTBEAT_MS: u64 = 30_000;
 const HEARTBEAT_BYTES: &[u8] = &[0x00, 0x14, 0x1d, 0x00, 0x0c, 0x2c, 0x36, 0x00, 0x4c];
 
-pub async fn resolve(http: &reqwest::Client, room_id: &str) -> Result<ResolvedTarget, DanmakuError> {
+pub async fn resolve(
+    http: &reqwest::Client,
+    room_id: &str,
+) -> Result<ResolvedTarget, DanmakuError> {
     let room_id = room_id.trim();
     if room_id.is_empty() {
         return Err(DanmakuError::InvalidInput("empty room id".to_string()));
@@ -46,11 +49,15 @@ pub async fn run(
     cancel: CancellationToken,
 ) -> Result<(), DanmakuError> {
     let (room_id, yyuid, uid) = match &target.connect {
-        ConnectInfo::Huya { room_id, yyuid, uid } => (room_id.clone(), *yyuid, *uid),
+        ConnectInfo::Huya {
+            room_id,
+            yyuid,
+            uid,
+        } => (room_id.clone(), *yyuid, *uid),
         _ => {
             return Err(DanmakuError::InvalidInput(
                 "huya connector expects ConnectInfo::Huya".to_string(),
-            ))
+            ));
         }
     };
 
@@ -216,13 +223,15 @@ async fn handle_push(
 
             // For now we only emit comments; user/avatar are UI concerns for the next phase.
             let dm = DanmakuComment::text(content);
-            let _ = tx.send(DanmakuEvent::new(
+            let mut ev = DanmakuEvent::new(
                 Site::Huya,
                 room_id.to_string(),
                 DanmakuMethod::SendDM,
                 "",
                 Some(vec![dm]),
-            ));
+            );
+            ev.user = nick.clone();
+            let _ = tx.send(ev);
 
             // Keep compiler happy if we decide to extend comment model later.
             let _ = nick;
@@ -239,7 +248,10 @@ struct HuyaRoomInfo {
     uid: i64,
 }
 
-async fn fetch_huya_room_info(http: &reqwest::Client, room_id: &str) -> Result<HuyaRoomInfo, DanmakuError> {
+async fn fetch_huya_room_info(
+    http: &reqwest::Client,
+    room_id: &str,
+) -> Result<HuyaRoomInfo, DanmakuError> {
     let url = format!("https://m.huya.com/{room_id}");
     let text = http
         .get(url)

@@ -26,6 +26,7 @@ bytes = "1"
 md5 = "0.7"
 prost = "0.13"
 prost-derive = "0.13"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 [target.'cfg(windows)'.dependencies]
 rfd = "0.14"

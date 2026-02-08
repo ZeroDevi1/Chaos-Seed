@@ -68,4 +68,3 @@ pub enum DmType {
     Emoticon = 1,
     Voice = 2,
 }
-

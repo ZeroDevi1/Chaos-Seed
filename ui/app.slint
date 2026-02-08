@@ -8,7 +8,7 @@ import { SettingsView } from "views/settings.slint";
 import { AboutView } from "views/about.slint";
 import { DanmakuOverlayWindow } from "windows/danmaku_overlay_window.slint";
 import { DanmakuChatWindow } from "windows/danmaku_chat_window.slint";
-import { SubtitleRow } from "models.slint";
+import { SubtitleRow, DanmakuRow } from "models.slint";
 import { AppTheme } from "theme.slint";
 import { Palette } from "std-widgets.slint";
 
@@ -45,10 +45,17 @@ export component AppWindow inherits Window {
     callback download_one(int);
     callback open_url(string);
     callback dark_mode_changed(bool);
-    callback danmaku_start(int, bool);
-    callback danmaku_stop();
 
-    in-out property <bool> danmaku_running: false;
+    // Danmaku test page
+    in-out property <string> danmaku_input: "";
+    in-out property <string> danmaku_status: "";
+    in-out property <bool> danmaku_connected: false;
+    in property <[DanmakuRow]> danmaku_messages: [];
+
+    callback danmaku_connect(string);
+    callback danmaku_disconnect();
+    callback danmaku_open_chat_window();
+    callback danmaku_open_overlay_window();
 
     HorizontalLayout {
         Sidebar {
@@ -118,9 +125,16 @@ export component AppWindow inherits Window {
                     if (root.page_index == 3): DanmakuView {
                         width: parent.width;
                         height: parent.height;
-                        running <=> root.danmaku_running;
-                        danmaku_start(style_index, always_on_top) => { root.danmaku_start(style_index, always_on_top); }
-                        danmaku_stop() => { root.danmaku_stop(); }
+                        input <=> root.danmaku_input;
+                        status <=> root.danmaku_status;
+                        connected <=> root.danmaku_connected;
+                        messages: root.danmaku_messages;
+
+                        connect(input) => { root.danmaku_connect(input); }
+                        disconnect() => { root.danmaku_disconnect(); }
+                        open_chat_window() => { root.danmaku_open_chat_window(); }
+                        open_overlay_window() => { root.danmaku_open_overlay_window(); }
+                        open_url(url) => { root.open_url(url); }
                     }
 
                     if (root.page_index == 4): SettingsView {

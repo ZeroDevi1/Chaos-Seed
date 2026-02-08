@@ -6,7 +6,7 @@ import {
     FieldLabel,
     ButtonKind,
 } from "../components/widgets.slint";
-import { ScrollView,ListView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 
 export component SubtitleDownloadView inherits VerticalLayout {
     in-out property <string> query: "";
@@ -167,38 +167,60 @@ export component SubtitleDownloadView inherits VerticalLayout {
         border-radius: 6px;
         background: AppTheme.card_bg;
         horizontal-stretch: 1;
+        // Let the results panel take the remaining vertical space, but keep
+        // a minimum height so it never collapses to ~0px.
         vertical-stretch: 1;
-        min-height: 0;
+        min-height: 260px;
 
-        // Use ScrollView to get a robust viewport + clipping + optional scrolling behavior
-        // across render backends.
-        VerticalLayout {
+        clip: true;
+
+        // Use a fixed-size ScrollView (no Layout-managed height) to avoid backend-specific
+        // sizing issues that can collapse the list to 1 row or hide content.
+        inner := Rectangle {
             x: 8px;
             y: 8px;
             width: parent.width - 16px;
             height: parent.height - 16px;
-            spacing: 8px;
-            alignment: start;
+            background: transparent;
+            clip: true;
 
             if (root.results.length == 0): Text {
+                x: 0;
+                y: 0;
+                width: parent.width;
                 text: root.busy ? "正在搜索..." : "暂无结果：请先搜索关键词。";
                 color: AppTheme.text_muted;
                 wrap: word-wrap;
             }
 
-            if (root.results.length > 0): ScrollView {
+            results_scroll := ScrollView {
+                visible: root.results.length > 0;
                 enabled: true;
-                horizontal-stretch: 1;
-                vertical-stretch: 1;
-                // height: parent.height;
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 6px;
-                    alignment: start;
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+
+                property <length> row_h: 52px;
+                property <length> row_gap: 6px;
+                property <length> row_step: row_h + row_gap;
+                property <length> content_h: root.results.length > 0
+                    ? (root.results.length * row_step - row_gap)
+                    : 0px;
+
+                viewport-width: self.visible-width;
+                viewport-height: max(self.visible-height, content_h);
+
+                content := Rectangle {
+                    width: parent.width;
+                    height: results_scroll.content_h;
+                    background: transparent;
 
                     for row[i] in root.results: Rectangle {
-                        horizontal-stretch: 1;
-                        height: 52px;
+                        x: 0;
+                        y: i * results_scroll.row_step;
+                        width: parent.width;
+                        height: results_scroll.row_h;
                         border-radius: 6px;
                         border-width: 1px;
                         border-color: AppTheme.border_color;
@@ -220,6 +242,7 @@ export component SubtitleDownloadView inherits VerticalLayout {
                                 text: row.score;
                                 width: 64px;
                                 color: AppTheme.text_primary;
+                                horizontal-alignment: left;
                             }
 
                             Text {
@@ -227,6 +250,7 @@ export component SubtitleDownloadView inherits VerticalLayout {
                                 horizontal-stretch: 1;
                                 color: AppTheme.text_primary;
                                 overflow: elide;
+                                horizontal-alignment: left;
                             }
 
                             Text {
@@ -247,14 +271,24 @@ export component SubtitleDownloadView inherits VerticalLayout {
                                 width: 160px;
                                 color: AppTheme.text_secondary;
                                 overflow: elide;
+                                horizontal-alignment: right;
                             }
 
-                            AppButton {
-                                kind: ButtonKind.Secondary;
-                                text: "下载";
-                                enabled: !root.busy;
-                                clicked => {
-                                    root.download_one(i);
+                            // Right-align the download button within a fixed-width cell so the
+                            // last two columns ("来源" + "下载") look balanced.
+                            Rectangle {
+                                width: 120px;
+                                height: parent.height;
+                                background: transparent;
+                                AppButton {
+                                    x: parent.width - self.width;
+                                    y: (parent.height - self.height) / 2;
+                                    kind: ButtonKind.Secondary;
+                                    text: "下载";
+                                    enabled: !root.busy;
+                                    clicked => {
+                                        root.download_one(i);
+                                    }
                                 }
                             }
                         }

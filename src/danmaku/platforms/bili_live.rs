@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
 
@@ -23,7 +23,10 @@ use crate::danmaku::proto::bili_live_dm_v2::{BizScene, Dm as DmV2, DmType};
 const SERVER_URL: &str = "wss://broadcastlv.chat.bilibili.com/sub";
 const HEARTBEAT_MS: u64 = 30_000;
 
-pub async fn resolve(http: &reqwest::Client, room_id: &str) -> Result<ResolvedTarget, DanmakuError> {
+pub async fn resolve(
+    http: &reqwest::Client,
+    room_id: &str,
+) -> Result<ResolvedTarget, DanmakuError> {
     let short: u64 = room_id
         .trim()
         .parse()
@@ -63,7 +66,7 @@ pub async fn run(
         _ => {
             return Err(DanmakuError::InvalidInput(
                 "bili_live connector expects ConnectInfo::BiliLive".to_string(),
-            ))
+            ));
         }
     };
 
@@ -88,10 +91,7 @@ pub async fn run(
             "key": token,
         });
         let pkt = encode_packet(json.to_string().as_bytes(), 7, 1);
-        sink.lock()
-            .await
-            .send(Message::Binary(pkt.into()))
-            .await?;
+        sink.lock().await.send(Message::Binary(pkt.into())).await?;
     }
 
     // Heartbeat loop.
@@ -220,7 +220,9 @@ fn parse_packets(mut data: &[u8]) -> Result<Vec<Packet>, DanmakuError> {
         let operation = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
 
         if header_len > packet_len {
-            return Err(DanmakuError::Parse("invalid bilibili header_len".to_string()));
+            return Err(DanmakuError::Parse(
+                "invalid bilibili header_len".to_string(),
+            ));
         }
 
         let body = data[header_len..packet_len].to_vec();
@@ -268,7 +270,9 @@ fn handle_frame(
     live_ok_sent: Arc<AtomicBool>,
 ) -> Result<(), DanmakuError> {
     if depth > 4 {
-        return Err(DanmakuError::Parse("bilibili packet nesting too deep".to_string()));
+        return Err(DanmakuError::Parse(
+            "bilibili packet nesting too deep".to_string(),
+        ));
     }
 
     let packets = parse_packets(data)?;
@@ -299,7 +303,14 @@ fn handle_frame(
                 }
                 2 => {
                     let inflated = inflate_any(&p.body)?;
-                    handle_frame(room_id, tx, &inflated, depth + 1, emoticons.clone(), live_ok_sent.clone())?;
+                    handle_frame(
+                        room_id,
+                        tx,
+                        &inflated,
+                        depth + 1,
+                        emoticons.clone(),
+                        live_ok_sent.clone(),
+                    )?;
                 }
                 _ => {}
             },
@@ -315,8 +326,139 @@ fn handle_json(
     v: &serde_json::Value,
     emoticons: Arc<HashMap<String, EmoticonMeta>>,
 ) {
-    // Try dm_v2 first (IINA+ behavior).
-    if let Some(dm_v2) = v.get("dm_v2").and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
+    let cmd = v.get("cmd").and_then(|x| x.as_str()).unwrap_or("");
+    // Prefer legacy "DANMU_MSG" parsing because it contains the username in `info`.
+    if cmd.starts_with("DANMU_MSG") {
+        let user = v
+            .pointer("/info/2/1")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let Some(info0) = v.pointer("/info/0").and_then(|x| x.as_array()) else {
+            return;
+        };
+
+        // info[0][13]: {"emoticon_unique": "...", "url": "...", "width":..., "height":...}
+        if let Some(obj) = info0.get(13).and_then(|x| x.as_object()) {
+            let unique = obj.get("emoticon_unique").and_then(|x| x.as_str());
+            let url = obj.get("url").and_then(|x| x.as_str());
+            if let (Some(_unique), Some(url)) = (unique, url) {
+                let width = obj.get("width").and_then(|x| x.as_i64()).unwrap_or(180);
+                let c = DanmakuComment {
+                    text: "".to_string(),
+                    image_url: Some(ensure_https(url)),
+                    image_width: scaled_width(width),
+                };
+                let mut ev = DanmakuEvent::new(
+                    Site::BiliLive,
+                    room_id.to_string(),
+                    DanmakuMethod::SendDM,
+                    "",
+                    Some(vec![c]),
+                );
+                ev.user = user;
+                let _ = tx.send(ev);
+                return;
+            }
+        }
+
+        // info[0][15].extra: JSON string; may contain emots / emoticon_unique
+        if let Some(extra_str) = info0
+            .get(15)
+            .and_then(|x| x.as_object())
+            .and_then(|o| o.get("extra"))
+            .and_then(|x| x.as_str())
+        {
+            if let Ok(extra_v) = serde_json::from_str::<serde_json::Value>(extra_str) {
+                let content = extra_v
+                    .get("content")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if let Some(emots) = extra_v.get("emots").and_then(|x| x.as_object()) {
+                    if let Some((_k, v0)) = emots.iter().next() {
+                        if let Some(url) = v0.get("url").and_then(|x| x.as_str()) {
+                            let width = v0.get("width").and_then(|x| x.as_i64()).unwrap_or(180);
+                            let c = DanmakuComment {
+                                text: "".to_string(),
+                                image_url: Some(ensure_https(url)),
+                                image_width: scaled_width(width),
+                            };
+                            let mut ev = DanmakuEvent::new(
+                                Site::BiliLive,
+                                room_id.to_string(),
+                                DanmakuMethod::SendDM,
+                                "",
+                                Some(vec![c]),
+                            );
+                            ev.user = user.clone();
+                            let _ = tx.send(ev);
+                            return;
+                        }
+                    }
+                }
+
+                if let Some(unique) = extra_v.get("emoticon_unique").and_then(|x| x.as_str()) {
+                    if let Some(meta) = emoticons.get(unique) {
+                        let c = DanmakuComment {
+                            text: "".to_string(),
+                            image_url: Some(meta.url.clone()),
+                            image_width: scaled_width(meta.width as i64),
+                        };
+                        let mut ev = DanmakuEvent::new(
+                            Site::BiliLive,
+                            room_id.to_string(),
+                            DanmakuMethod::SendDM,
+                            "",
+                            Some(vec![c]),
+                        );
+                        ev.user = user.clone();
+                        let _ = tx.send(ev);
+                        return;
+                    }
+                }
+
+                if !content.is_empty() {
+                    let c = DanmakuComment::text(content);
+                    let mut ev = DanmakuEvent::new(
+                        Site::BiliLive,
+                        room_id.to_string(),
+                        DanmakuMethod::SendDM,
+                        "",
+                        Some(vec![c]),
+                    );
+                    ev.user = user.clone();
+                    let _ = tx.send(ev);
+                    return;
+                }
+            }
+        }
+
+        if let Some(msg) = v.pointer("/info/1").and_then(|x| x.as_str()) {
+            if !msg.is_empty() {
+                let c = DanmakuComment::text(msg);
+                let mut ev = DanmakuEvent::new(
+                    Site::BiliLive,
+                    room_id.to_string(),
+                    DanmakuMethod::SendDM,
+                    "",
+                    Some(vec![c]),
+                );
+                ev.user = user;
+                let _ = tx.send(ev);
+            }
+        }
+        return;
+    }
+
+    // Fallback: dm_v2 parsing (best-effort, may not include username).
+    if let Some(dm_v2) = v
+        .get("dm_v2")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+    {
         if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(dm_v2) {
             if let Ok(dm) = DmV2::decode(bytes.as_slice()) {
                 // Skip survive scene.
@@ -325,11 +467,7 @@ fn handle_json(
                 }
 
                 if DmType::try_from(dm.dm_type).ok() == Some(DmType::Emoticon) {
-                    if let Some(e) = dm
-                        .emoticons
-                        .iter()
-                        .find_map(|x| x.value.as_ref())
-                    {
+                    if let Some(e) = dm.emoticons.iter().find_map(|x| x.value.as_ref()) {
                         let url = ensure_https(&e.url);
                         let c = DanmakuComment {
                             text: "".to_string(),
@@ -357,134 +495,25 @@ fn handle_json(
                         Some(vec![c]),
                     ));
                 }
-                return;
             }
-        }
-    }
-
-    // Fallback: legacy "DANMU_MSG" parsing.
-    let cmd = v.get("cmd").and_then(|x| x.as_str()).unwrap_or("");
-    if !cmd.starts_with("DANMU_MSG") {
-        return;
-    }
-
-    let Some(info0) = v.pointer("/info/0").and_then(|x| x.as_array()) else {
-        return;
-    };
-
-    // info[0][13]: {"emoticon_unique": "...", "url": "...", "width":..., "height":...}
-    if let Some(obj) = info0.get(13).and_then(|x| x.as_object()) {
-        let unique = obj.get("emoticon_unique").and_then(|x| x.as_str());
-        let url = obj.get("url").and_then(|x| x.as_str());
-        if let (Some(_unique), Some(url)) = (unique, url) {
-            let width = obj
-                .get("width")
-                .and_then(|x| x.as_i64())
-                .unwrap_or(180);
-            let c = DanmakuComment {
-                text: "".to_string(),
-                image_url: Some(ensure_https(url)),
-                image_width: scaled_width(width),
-            };
-            let _ = tx.send(DanmakuEvent::new(
-                Site::BiliLive,
-                room_id.to_string(),
-                DanmakuMethod::SendDM,
-                "",
-                Some(vec![c]),
-            ));
-            return;
-        }
-    }
-
-    // info[0][15].extra: JSON string; may contain emots / emoticon_unique
-    if let Some(extra_str) = info0
-        .get(15)
-        .and_then(|x| x.as_object())
-        .and_then(|o| o.get("extra"))
-        .and_then(|x| x.as_str())
-    {
-        if let Ok(extra_v) = serde_json::from_str::<serde_json::Value>(extra_str) {
-            let content = extra_v
-                .get("content")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            if let Some(emots) = extra_v.get("emots").and_then(|x| x.as_object()) {
-                if let Some((_k, v0)) = emots.iter().next() {
-                    if let Some(url) = v0.get("url").and_then(|x| x.as_str()) {
-                        let width = v0.get("width").and_then(|x| x.as_i64()).unwrap_or(180);
-                        let c = DanmakuComment {
-                            text: "".to_string(),
-                            image_url: Some(ensure_https(url)),
-                            image_width: scaled_width(width),
-                        };
-                        let _ = tx.send(DanmakuEvent::new(
-                            Site::BiliLive,
-                            room_id.to_string(),
-                            DanmakuMethod::SendDM,
-                            "",
-                            Some(vec![c]),
-                        ));
-                        return;
-                    }
-                }
-            }
-
-            if let Some(unique) = extra_v.get("emoticon_unique").and_then(|x| x.as_str()) {
-                if let Some(meta) = emoticons.get(unique) {
-                    let c = DanmakuComment {
-                        text: "".to_string(),
-                        image_url: Some(meta.url.clone()),
-                        image_width: scaled_width(meta.width as i64),
-                    };
-                    let _ = tx.send(DanmakuEvent::new(
-                        Site::BiliLive,
-                        room_id.to_string(),
-                        DanmakuMethod::SendDM,
-                        "",
-                        Some(vec![c]),
-                    ));
-                    return;
-                }
-            }
-
-            if !content.is_empty() {
-                let c = DanmakuComment::text(content);
-                let _ = tx.send(DanmakuEvent::new(
-                    Site::BiliLive,
-                    room_id.to_string(),
-                    DanmakuMethod::SendDM,
-                    "",
-                    Some(vec![c]),
-                ));
-                return;
-            }
-        }
-    }
-
-    if let Some(msg) = v.pointer("/info/1").and_then(|x| x.as_str()) {
-        if !msg.is_empty() {
-            let c = DanmakuComment::text(msg);
-            let _ = tx.send(DanmakuEvent::new(
-                Site::BiliLive,
-                room_id.to_string(),
-                DanmakuMethod::SendDM,
-                "",
-                Some(vec![c]),
-            ));
         }
     }
 }
 
 async fn fetch_room_rid(http: &reqwest::Client, room_id: u64) -> Result<u64, DanmakuError> {
-    let url = format!(
-        "https://api.live.bilibili.com/room/v1/Room/get_info?room_id={room_id}"
-    );
-    let v: serde_json::Value = http.get(url).send().await?.error_for_status()?.json().await?;
+    let url = format!("https://api.live.bilibili.com/room/v1/Room/get_info?room_id={room_id}");
+    let v: serde_json::Value = http
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
     v.pointer("/data/room_id")
-        .and_then(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok())))
+        .and_then(|x| {
+            x.as_u64()
+                .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+        })
         .ok_or_else(|| DanmakuError::Parse("missing data.room_id".to_string()))
 }
 
@@ -500,7 +529,10 @@ async fn fetch_nav_wbi(http: &reqwest::Client) -> Result<(u64, String, String), 
 
     let uid = v
         .pointer("/data/mid")
-        .and_then(|x| x.as_u64().or_else(|| x.as_i64().and_then(|n| u64::try_from(n).ok())))
+        .and_then(|x| {
+            x.as_u64()
+                .or_else(|| x.as_i64().and_then(|n| u64::try_from(n).ok()))
+        })
         .unwrap_or(0);
 
     let img_url = v
@@ -539,9 +571,8 @@ async fn fetch_token(
 ) -> Result<String, DanmakuError> {
     let base_param = format!("id={rid}&type=0&web_location=444.8");
     let signed = wbi_sign(&base_param, img_key, sub_key);
-    let url = format!(
-        "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?{signed}"
-    );
+    let url =
+        format!("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?{signed}");
 
     let v: serde_json::Value = http
         .get(url)
@@ -561,9 +592,9 @@ async fn fetch_token(
 fn wbi_sign(param: &str, img_key: &str, sub_key: &str) -> String {
     // Ported from IINA+ BilbiliShare.swift:biliWbiSign
     const MIXIN_KEY_ENC_TAB: [usize; 64] = [
-        46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9,
-        42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1,
-        60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
+        46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19,
+        29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
+        22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
     ];
 
     fn get_mixin_key(orig: &str) -> String {
@@ -614,8 +645,16 @@ async fn fetch_emoticons(
     http: &reqwest::Client,
     rid: u64,
 ) -> Result<HashMap<String, EmoticonMeta>, DanmakuError> {
-    let url = format!("https://api.live.bilibili.com/xlive/web-ucenter/v2/emoticon/GetEmoticons?platform=pc&room_id={rid}");
-    let v: serde_json::Value = http.get(url).send().await?.error_for_status()?.json().await?;
+    let url = format!(
+        "https://api.live.bilibili.com/xlive/web-ucenter/v2/emoticon/GetEmoticons?platform=pc&room_id={rid}"
+    );
+    let v: serde_json::Value = http
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
 
     let mut map = HashMap::<String, EmoticonMeta>::new();
     let Some(pkgs) = v.pointer("/data/data").and_then(|x| x.as_array()) else {

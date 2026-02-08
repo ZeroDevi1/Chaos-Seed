@@ -815,6 +815,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "httpmock",
+ "image",
  "md5",
  "open",
  "prost",

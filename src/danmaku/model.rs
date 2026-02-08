@@ -52,6 +52,8 @@ pub struct DanmakuEvent {
     pub room_id: String,
     pub received_at: SystemTime,
     pub method: DanmakuMethod,
+    /// Best-effort display name (may be empty if the platform payload doesn't include it).
+    pub user: String,
     pub text: String,
     pub dms: Option<Vec<DanmakuComment>>,
 }
@@ -69,6 +71,7 @@ impl DanmakuEvent {
             room_id: room_id.into(),
             received_at: SystemTime::now(),
             method,
+            user: String::new(),
             text: text.into(),
             dms,
         }
@@ -168,7 +171,9 @@ impl DanmakuSession {
 pub enum DanmakuError {
     #[error("invalid input: {0}")]
     InvalidInput(String),
-    #[error("ambiguous input: {input}. Please provide a full URL or use a platform prefix like `bilibili:`, `douyu:`, `huya:`")]
+    #[error(
+        "ambiguous input: {input}. Please provide a full URL or use a platform prefix like `bilibili:`, `douyu:`, `huya:`"
+    )]
     AmbiguousInput { input: String },
     #[error("url parse error: {0}")]
     Url(#[from] url::ParseError),
@@ -185,4 +190,3 @@ pub enum DanmakuError {
     #[error("parse error: {0}")]
     Parse(String),
 }
-

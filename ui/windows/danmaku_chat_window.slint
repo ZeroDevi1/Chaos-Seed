@@ -1,6 +1,5 @@
 import { AppTheme } from "../theme.slint";
 import { DanmakuRow } from "../models.slint";
-import { CheckBox } from "std-widgets.slint";
 
 export component DanmakuChatWindow inherits Window {
     in-out property <bool> pin_on_top: false;
@@ -8,12 +7,21 @@ export component DanmakuChatWindow inherits Window {
 
     callback close_clicked();
     callback begin_drag();
+    callback pin_toggled();
+    callback open_url(string);
 
     title: "Danmaku Chat";
     no-frame: true;
     resize-border-width: 10px;
     always-on-top: root.pin_on_top;
     background: AppTheme.panel_bg;
+
+    // Keep interactive controls away from the resize hit region (frameless window).
+    property <length> safe_inset: 14px;
+    property <length> titlebar_h: 56px;
+    property <length> ctrl_w: 36px;
+    property <length> ctrl_h: 28px;
+    property <length> ctrl_gap: 8px;
 
     Rectangle {
         width: parent.width;
@@ -25,37 +33,94 @@ export component DanmakuChatWindow inherits Window {
             x: 0;
             y: 0;
             width: parent.width;
-            height: 44px;
+            height: titlebar_h;
             background: AppTheme.card_bg;
             border-width: 1px;
             border-color: AppTheme.border_color;
 
+            // Drag the window by grabbing the title bar.
+            // Keep the draggable area below the buttons (and also exclude the button cluster).
+            drag_area := TouchArea {
+                x: 0;
+                y: 0;
+                width: max(0px, parent.width - (safe_inset * 2 + (ctrl_w * 2 + ctrl_gap)));
+                height: parent.height;
+                z: 0;
+                mouse-cursor: move;
+
+                pointer-event(pe) => {
+                    if (pe.button == PointerEventButton.left && pe.kind == PointerEventKind.down) {
+                        root.begin_drag();
+                    }
+                }
+            }
+
+            // Keep the controls absolutely positioned so they always stick to the top-right
+            // regardless of layout sizing behavior on different backends.
+            property <length> ctrl_cluster_w: ctrl_w * 2 + ctrl_gap;
+            property <length> ctrl_y: (titlebar_h - ctrl_h) / 2;
+
             Text {
-                x: 12px;
-                text: "弹幕 Chat（模拟）";
+                x: safe_inset;
+                y: 0;
+                width: max(0px, parent.width - safe_inset * 2 - ctrl_cluster_w);
+                height: parent.height;
+                text: "弹幕 Chat（解析）";
                 color: AppTheme.text_primary;
                 font-weight: 700;
                 vertical-alignment: center;
+                overflow: elide;
+                z: 1;
             }
 
-            CheckBox {
-                x: 180px;
-                y: 12px;
-                z: 2;
-                checked <=> root.pin_on_top;
-                text: "置顶";
-            }
-
+            // Pin toggle (📍/📌)
             Rectangle {
-                x: parent.width - self.width - 10px;
-                y: 8px;
+                x: parent.width - safe_inset - ctrl_cluster_w;
+                y: ctrl_y;
+                width: ctrl_w;
+                height: ctrl_h;
+                border-radius: 6px;
+                background: root.pin_on_top
+                    ? AppTheme.hover_bg
+                    : (pin_area.has-hover ? AppTheme.hover_bg : transparent);
+                border-width: 1px;
+                border-color: AppTheme.border_color;
                 z: 2;
-                width: 36px;
-                height: 28px;
+
+                Text {
+                    text: root.pin_on_top ? "📌" : "📍";
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 16px;
+                    // Make emoji rendering more reliable on Windows.
+                    font-family: "Segoe UI Emoji";
+                    color: AppTheme.text_primary;
+                }
+
+                pin_area := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.pin_on_top = !root.pin_on_top;
+                        root.pin_toggled();
+                    }
+                }
+            }
+
+            // Close (×)
+            Rectangle {
+                x: parent.width - safe_inset - ctrl_w;
+                y: ctrl_y;
+                width: ctrl_w;
+                height: ctrl_h;
                 border-radius: 6px;
                 background: close_area.has-hover ? AppTheme.hover_bg : transparent;
                 border-width: 1px;
                 border-color: AppTheme.border_color;
+                z: 2;
 
                 Text {
                     text: "×";
@@ -74,58 +139,104 @@ export component DanmakuChatWindow inherits Window {
                     clicked => { root.close_clicked(); }
                 }
             }
-
-            // Drag the window by grabbing the title bar.
-            drag_area := TouchArea {
-                x: 0;
-                y: 0;
-                width: parent.width;
-                height: parent.height;
-                z: 1; // below close button/checkbox touch areas
-                mouse-cursor: move;
-
-                pointer-event(pe) => {
-                    if (pe.button == PointerEventButton.left && pe.kind == PointerEventKind.down) {
-                        root.begin_drag();
-                    }
-                }
-            }
         }
 
         // Chat messages are rendered bottom-up (new messages appear at the bottom and push up).
         Rectangle {
             x: 0;
-            y: 44px;
+            y: titlebar_h;
             width: parent.width;
-            height: parent.height - 44px;
+            height: parent.height - titlebar_h;
             background: AppTheme.panel_bg;
             border-width: 1px;
             border-color: AppTheme.border_color;
             clip: true;
 
             property <length> pad: 12px;
-            property <length> row_h: 22px;
+            property <length> row_min_h: 26px;
             property <length> row_gap: 6px;
-            property <length> row_step: row_h + row_gap;
-            property <int> count: root.messages.length;
 
-            for msg[i] in root.messages: Rectangle {
-                width: parent.width - (pad * 2);
-                height: row_h;
+            inner := Rectangle {
                 x: pad;
-                // Bottom-up: the last item sits at the bottom padding.
-                y: parent.height - pad - row_h - ((count - 1 - i) * row_step);
+                y: pad;
+                width: max(0px, parent.width - (pad * 2));
+                height: max(0px, parent.height - (pad * 2));
                 background: transparent;
-                visible: self.y + self.height > 0px;
+                clip: true;
 
-                Text {
-                    text: msg.user + "：" + msg.text;
+                if (root.messages.length == 0): Text {
+                    x: 0;
+                    y: 0;
                     width: parent.width;
-                    height: parent.height;
-                    color: AppTheme.text_primary;
-                    font-size: 13px;
-                    overflow: elide;
-                    vertical-alignment: center;
+                    text: "等待弹幕...";
+                    color: AppTheme.text_muted;
+                }
+
+                // Use a layout-driven list so rows can auto-grow when the message wraps.
+                // Anchor the whole list to the bottom so it behaves like a chat (newest at the bottom).
+                messages_list := VerticalLayout {
+                    visible: root.messages.length > 0;
+                    x: 0;
+                    width: parent.width;
+                    spacing: row_gap;
+                    alignment: start;
+                    height: self.preferred-height;
+                    y: parent.height - self.height;
+
+                    for msg[i] in root.messages: Rectangle {
+                        width: parent.width;
+                        background: transparent;
+                        height: max(row_min_h, msg_text.preferred-height);
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            spacing: 8px;
+                            alignment: start;
+
+                            msg_text := Text {
+                                text: msg.user + "：" + ((msg.text == "[图片]" || msg.text == "[表情]") ? "" : msg.text);
+                                horizontal-stretch: 1;
+                                color: AppTheme.text_primary;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                                vertical-alignment: top;
+                            }
+
+                            // Inline image thumbnail (click to open the original URL).
+                            Rectangle {
+                                visible: msg.image_url != "";
+                                width: msg.image_w;
+                                height: row_min_h;
+                                background: transparent;
+
+                                Image {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    source: msg.image;
+                                    image-fit: contain;
+                                }
+
+                                Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: "IMG";
+                                    color: AppTheme.text_muted;
+                                    font-size: 10px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    visible: !msg.image_ready;
+                                }
+
+                                TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.open_url(msg.image_url); }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -1,16 +1,23 @@
 import { AppTheme } from "../theme.slint";
-import { AppButton, FieldLabel, ButtonKind } from "../components/widgets.slint";
-import { ComboBox } from "std-widgets.slint";
-// Ensure the window components are compiled and exported for Rust.
-import { DanmakuChatWindow } from "../windows/danmaku_chat_window.slint";
-import { DanmakuOverlayWindow } from "../windows/danmaku_overlay_window.slint";
+import { DanmakuRow } from "../models.slint";
+import {
+    AppButton,
+    AppLineEdit,
+    FieldLabel,
+    ButtonKind,
+} from "../components/widgets.slint";
 
 export component DanmakuView inherits VerticalLayout {
-    in-out property <int> style_index: 0;
-    in-out property <bool> running: false;
+    in-out property <string> input: "";
+    in-out property <string> status: "";
+    in-out property <bool> connected: false;
+    in property <[DanmakuRow]> messages: [];
 
-    callback danmaku_start(style_index: int, always_on_top: bool);
-    callback danmaku_stop();
+    callback connect(string);
+    callback disconnect();
+    callback open_chat_window();
+    callback open_overlay_window();
+    callback open_url(string);
 
     spacing: 12px;
     padding: 24px;
@@ -27,93 +34,180 @@ export component DanmakuView inherits VerticalLayout {
     }
 
     Text {
-        text: "占位：后续将支持解析不同平台直播间 URL（如 B 站/斗鱼/虎牙），连接弹幕流并展示。";
+        text: "输入直播间 URL（B 站/斗鱼/虎牙）后点击“解析/连接”，页面下方会以 Chat 方式实时输出弹幕。";
         color: AppTheme.text_secondary;
         wrap: word-wrap;
     }
 
-    Rectangle {
-        border-width: 1px;
-        border-color: AppTheme.border_color;
-        border-radius: 8px;
-        background: AppTheme.card_bg;
-        horizontal-stretch: 1;
+    // Input + actions
+    VerticalLayout {
+        spacing: 6px;
+        alignment: start;
 
-        VerticalLayout {
-            padding: 14px;
-            spacing: 8px;
+        FieldLabel { label: "直播间地址"; }
+
+        // Row 1: URL + connect/disconnect (responsive, won't cover buttons on narrow widths)
+        HorizontalLayout {
+            spacing: 12px;
             alignment: start;
 
-            Text {
-                text: "计划两种展示形态（本次不实现）：";
-                color: AppTheme.text_primary;
-                font-weight: 600;
+            Rectangle {
+                horizontal-stretch: 1;
+                min-width: 260px;
+                height: 36px;
+                background: transparent;
+
+                AppLineEdit {
+                    width: parent.width;
+                    placeholder-text: "例如：https://live.bilibili.com/1 / https://www.douyu.com/xxx / https://www.huya.com/xxx";
+                    text <=> root.input;
+                    accepted(t) => { root.connect(t); }
+                }
             }
 
-            Text {
-                text: "1) 竖直 Chat：类似 YouTube Chat，背景不透明，弹幕从下向上滚动，可置顶。";
-                color: AppTheme.text_secondary;
-                wrap: word-wrap;
+            AppButton {
+                width: 120px;
+                text: root.connected ? "已连接" : "解析/连接";
+                enabled: !root.connected;
+                clicked => { root.connect(root.input); }
             }
 
-            Text {
-                text: "2) 水平 Overlay：类似 B 站滚动弹幕，背景透明，从右向左滚动，支持置顶（可在 A 直播间叠 B 弹幕）。";
-                color: AppTheme.text_secondary;
-                wrap: word-wrap;
+            AppButton {
+                width: 92px;
+                kind: ButtonKind.Secondary;
+                text: "断开";
+                enabled: root.connected;
+                clicked => { root.disconnect(); }
+            }
+        }
+
+        // Row 2: open floating windows
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: start;
+
+            AppButton {
+                kind: ButtonKind.Secondary;
+                text: "Chat 窗口";
+                enabled: root.connected;
+                clicked => { root.open_chat_window(); }
+            }
+
+            AppButton {
+                kind: ButtonKind.Secondary;
+                text: "Overlay 窗口";
+                enabled: root.connected;
+                clicked => { root.open_overlay_window(); }
             }
         }
     }
 
     Rectangle { height: 1px; background: AppTheme.border_color; }
 
-    // Simulated danmaku launcher
-    VerticalLayout {
-        spacing: 10px;
-        alignment: start;
+    Text {
+        text: root.status;
+        color: AppTheme.text_secondary;
+        wrap: word-wrap;
+    }
 
-        Text {
-            text: "模拟弹幕（开发用）";
-            color: AppTheme.text_primary;
-            font-weight: 600;
-        }
+    // Messages panel (bottom-up chat)
+    Rectangle {
+        border-width: 1px;
+        border-color: AppTheme.border_color;
+        border-radius: 6px;
+        background: AppTheme.card_bg;
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+        min-height: 260px;
+        clip: true;
 
-        HorizontalLayout {
-            spacing: 12px;
-            alignment: start;
+        property <length> pad: 12px;
+        property <length> row_min_h: 26px;
+        property <length> row_gap: 6px;
 
-            VerticalLayout {
-                spacing: 6px;
-                alignment: start;
-                FieldLabel { label: "样式"; }
-                ComboBox {
-                    enabled: !root.running;
-                    model: ["竖直 Chat", "水平 Overlay"];
-                    current-index <=> root.style_index;
-                }
+        inner := Rectangle {
+            x: pad;
+            y: pad;
+            width: max(0px, parent.width - (pad * 2));
+            height: max(0px, parent.height - (pad * 2));
+            background: transparent;
+            clip: true;
+
+            if (root.messages.length == 0): Text {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                text: root.connected ? "已连接：等待弹幕..." : "请先输入直播间地址并点击“解析/连接”。";
+                color: AppTheme.text_muted;
+                wrap: word-wrap;
             }
 
-            Rectangle { horizontal-stretch: 1; }
+            // Use a layout-driven list so rows can auto-grow when the message wraps.
+            // Anchor the whole list to the bottom so it behaves like a chat (newest at the bottom).
+            messages_list := VerticalLayout {
+                visible: root.messages.length > 0;
+                x: 0;
+                width: parent.width;
+                spacing: row_gap;
+                alignment: start;
+                height: self.preferred-height;
+                y: parent.height - self.height;
 
-            AppButton {
-                text: root.running ? "关闭" : "启动";
-                kind: root.running ? ButtonKind.Secondary : ButtonKind.Primary;
-                clicked => {
-                    if (root.running) {
-                        root.danmaku_stop();
-                    } else {
-                        // Overlay 默认置顶；Chat 的置顶开关放在窗口内。
-                        root.danmaku_start(root.style_index, root.style_index == 1);
+                for msg[i] in root.messages: Rectangle {
+                    width: parent.width;
+                    background: transparent;
+                    height: max(row_min_h, msg_text.preferred-height);
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 8px;
+                        alignment: start;
+
+                        msg_text := Text {
+                            text: msg.user + "：" + ((msg.text == "[图片]" || msg.text == "[表情]") ? "" : msg.text);
+                            horizontal-stretch: 1;
+                            color: AppTheme.text_primary;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                            vertical-alignment: top;
+                        }
+
+                        Rectangle {
+                            visible: msg.image_url != "";
+                            width: msg.image_w;
+                            height: row_min_h;
+                            background: transparent;
+
+                            Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: msg.image;
+                                image-fit: contain;
+                            }
+
+                            // Placeholder text while the thumbnail is still loading.
+                            Text {
+                                width: parent.width;
+                                height: parent.height;
+                                text: "IMG";
+                                color: AppTheme.text_muted;
+                                font-size: 10px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                visible: !msg.image_ready;
+                            }
+
+                            TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                mouse-cursor: pointer;
+                                clicked => { root.open_url(msg.image_url); }
+                            }
+                        }
                     }
                 }
             }
-        }
-
-        Text {
-            text: root.running
-                ? "运行中：关闭后将停止随机弹幕生成。"
-                : "提示：启动后会以“人性化”随机间隔生成弹幕，偶尔进入高能爆发期。";
-            color: AppTheme.text_muted;
-            wrap: word-wrap;
         }
     }
 }

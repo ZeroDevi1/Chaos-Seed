@@ -1,8 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
-use crate::danmaku::model::{
-    ConnectOptions, DanmakuError, DanmakuEventTx, Site, ResolvedTarget,
-};
+use crate::danmaku::model::{ConnectOptions, DanmakuError, DanmakuEventTx, ResolvedTarget, Site};
 
 mod bili_live;
 mod douyu;

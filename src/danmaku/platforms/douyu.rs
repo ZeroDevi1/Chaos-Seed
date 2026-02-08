@@ -12,7 +12,10 @@ use crate::danmaku::model::{
 const SERVER_URL: &str = "wss://danmuproxy.douyu.com:8506/";
 const HEARTBEAT_MS: u64 = 30_000;
 
-pub async fn resolve(http: &reqwest::Client, room_id: &str) -> Result<ResolvedTarget, DanmakuError> {
+pub async fn resolve(
+    http: &reqwest::Client,
+    room_id: &str,
+) -> Result<ResolvedTarget, DanmakuError> {
     let rid = fetch_room_id(http, room_id).await?;
     Ok(ResolvedTarget {
         site: Site::Douyu,
@@ -34,7 +37,7 @@ pub async fn run(
         _ => {
             return Err(DanmakuError::InvalidInput(
                 "douyu connector expects ConnectInfo::Douyu".to_string(),
-            ))
+            ));
         }
     };
 
@@ -156,13 +159,15 @@ fn handle_text(room_id: &str, opt: &ConnectOptions, tx: &DanmakuEventTx, text: &
             return;
         }
         let dm = DanmakuComment::text(txt.clone());
-        let _ = tx.send(DanmakuEvent::new(
+        let mut ev = DanmakuEvent::new(
             Site::Douyu,
             room_id.to_string(),
             DanmakuMethod::SendDM,
             "",
             Some(vec![dm]),
-        ));
+        );
+        ev.user = map.get("nn").cloned().unwrap_or_default();
+        let _ = tx.send(ev);
         return;
     }
 
@@ -205,17 +210,26 @@ async fn fetch_room_id(http: &reqwest::Client, room_id: &str) -> Result<String, 
     }
 
     let url = format!("https://www.douyu.com/{rid_raw}");
-    let text = http.get(url).send().await?.error_for_status()?.text().await?;
+    let text = http
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
 
-    let json_text = extract_room_info_json(&text).ok_or_else(|| {
-        DanmakuError::Parse("failed to extract douyu roomInfo json".to_string())
-    })?;
+    let json_text = extract_room_info_json(&text)
+        .ok_or_else(|| DanmakuError::Parse("failed to extract douyu roomInfo json".to_string()))?;
 
     let json_text = json_text.replace("\\\"", "\"").replace("\\\"", "\"");
     let v: serde_json::Value = serde_json::from_str(&json_text)?;
 
     v.pointer("/room/room_id")
-        .and_then(|x| x.as_i64().map(|n| n.to_string()).or_else(|| x.as_str().map(|s| s.to_string())))
+        .and_then(|x| {
+            x.as_i64()
+                .map(|n| n.to_string())
+                .or_else(|| x.as_str().map(|s| s.to_string()))
+        })
         .ok_or_else(|| DanmakuError::Parse("missing room.room_id".to_string()))
 }
 
