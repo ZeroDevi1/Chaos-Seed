@@ -575,6 +575,7 @@ impl DanmakuUiController {
         // refresh immediately instead of waiting for the first timer tick.
         if !is_left_button_down() {
             if let Some(w) = win.upgrade() {
+                reset_pointer_state_in_slint(&w.window());
                 force_hit_test_refresh(w.as_weak());
             }
             return;
@@ -599,6 +600,7 @@ impl DanmakuUiController {
                 // Workaround: some backends don't refresh hit-testing after native move / always-on-top
                 // changes until a resize event occurs. Re-apply the current size to force a refresh.
                 if let Some(w) = win.upgrade() {
+                    reset_pointer_state_in_slint(&w.window());
                     force_hit_test_refresh(w.as_weak());
                 }
             },
@@ -609,6 +611,11 @@ impl DanmakuUiController {
 fn cancel_left_button_in_slint(window: &slint::Window) {
     // Synthetic release to clear any pressed/captured TouchArea state before native move starts.
     // Use a position inside the window; if a pointer grab exists, it'll receive the event anyway.
+    reset_pointer_state_in_slint(window);
+}
+
+fn reset_pointer_state_in_slint(window: &slint::Window) {
+    // Best-effort: clear any stuck pressed/captured state after native move/resize loops.
     window.dispatch_event(slint::platform::WindowEvent::PointerReleased {
         position: slint::LogicalPosition::new(1.0, 1.0),
         button: slint::platform::PointerEventButton::Left,
@@ -633,7 +640,8 @@ where
     let size_px = window.size();
     let size = size_px.to_logical(sf);
 
-    window.set_size(slint::LogicalSize::new(size.width + 1.0, size.height));
+    // Nudge both width/height to increase the chance of a real physical resize under fractional DPI.
+    window.set_size(slint::LogicalSize::new(size.width + 1.0, size.height + 1.0));
     let win2 = win.clone();
     slint::Timer::single_shot(Duration::from_millis(0), move || {
         if let Some(w) = win2.upgrade() {
