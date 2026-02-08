@@ -4,9 +4,9 @@
 
 ## 功能
 
-- 左侧侧边栏：Home / 字幕下载 / About
+- 左侧侧边栏：Home / 字幕下载 / 直播源 / 弹幕 / Settings / About
 - 字幕下载流程：搜索 -> 列表展示 -> 点击单条“下载” -> 选择目录 -> 下载
-- 弹幕（功能层已完成，UI 接入下次做）：BiliLive / Douyu / Huya 连接与解析，输出统一事件流
+- 弹幕：BiliLive / Douyu / Huya 连接与解析，UI 已接入（Chat / Overlay）
 - 业务逻辑纯 Rust（不调用 Python）
 
 ## 构建前提（重要）
@@ -104,7 +104,7 @@ cargo build --release --no-default-features --features renderer-software
 
 ## 弹幕（调试 / CLI 验证）
 
-本仓库已实现弹幕“功能层”（连接/解析/统一事件），但尚未接入 UI。
+本仓库已实现弹幕“功能层”（连接/解析/统一事件）并已接入 UI；同时保留 example 方便快速验证。
 
 你可以用 example 快速验证：
 

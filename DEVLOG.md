@@ -41,3 +41,11 @@
   - 为 release 增加 panic 日志落地（`logs/panic_*.log`）
 - Windows 图标：
   - 生成并嵌入 Windows 资源图标（`.rc + .ico`，通过 build.rs 处理）
+
+## 2026-02-08
+
+### 变更（当前版本迭代）
+- 弹幕 UI 接入：
+  - 新增弹幕相关页面与交互：支持从输入 URL/房间号发起连接，并在 UI 中展示弹幕（Chat / Overlay）。
+  - Overlay 弹幕文字调整为白色（更适合覆盖在视频上层）。
+- 关闭文件日志落地：不再写入 `logs/app.log` 与 `logs/panic_*.log`。
