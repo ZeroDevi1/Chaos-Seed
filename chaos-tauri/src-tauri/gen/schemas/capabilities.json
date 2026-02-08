@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for Chaos Seed (Tauri PoC).","local":true,"windows":["main","chat","overlay"],"permissions":["core:default","core:event:allow-listen","core:event:allow-unlisten","dialog:allow-open"]}}

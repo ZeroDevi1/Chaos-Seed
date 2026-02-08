@@ -1,50 +1,12 @@
-[package]
-name = "chaos-seed"
+[workspace]
+resolver = "2"
+members = ["chaos-core", "chaos-slint", "chaos-tauri/src-tauri", "chaos-ffi"]
+
+# Keep `cargo build` friction low on dev machines that don't have Tauri system deps.
+default-members = ["chaos-core", "chaos-slint", "chaos-ffi"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "Windows GUI app (Rust + Slint) for searching/downloading Xunlei subtitles."
-rust-version = "1.90"
-
-[dependencies]
-slint = { version = "=1.15.0", default-features = false, features = ["raw-window-handle-06"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "1"
-open = "5"
-fastrand = "2"
-raw-window-handle = "0.6"
-tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots", "url"] }
-futures-util = "0.3"
-url = "2"
-flate2 = "1"
-regex = "1"
-tokio-util = "0.7"
-base64 = "0.22"
-bytes = "1"
-md5 = "0.7"
-prost = "0.13"
-prost-derive = "0.13"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-
-[target.'cfg(windows)'.dependencies]
-rfd = "0.14"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System", "Win32_System_LibraryLoader"] }
-
-[dev-dependencies]
-tempfile = "3"
-httpmock = "0.7"
-
-[build-dependencies]
-slint-build = "=1.15.0"
-embed-resource = "3"
-
-[features]
-# Default to software renderer for maximum portability.
-# Skia renderer can fail to link on some MSVC toolset setups (C++ STL mismatch).
-default = ["renderer-software"]
-
-# Feature-forwarding so we can switch renderers without rewriting code.
-renderer-skia = ["slint/backend-winit", "slint/renderer-skia", "slint/compat-1-2"]
-renderer-software = ["slint/backend-winit", "slint/renderer-software", "slint/compat-1-2"]
+rust-version = "1.93.0"
+license = "MIT"

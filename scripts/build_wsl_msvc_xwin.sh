@@ -15,5 +15,5 @@ cargo xwin --version >/dev/null 2>&1 || { echo "missing: cargo-xwin (install: ca
 command -v clang-cl >/dev/null 2>&1 || { echo "missing: clang-cl (install: sudo apt-get install -y clang lld)"; exit 1; }
 
 # Software renderer is much easier to cross-compile than Skia.
-cargo xwin build --release --target x86_64-pc-windows-msvc --no-default-features --features renderer-software
+cargo xwin build -p chaos-slint --release --target x86_64-pc-windows-msvc --no-default-features --features renderer-software
 echo "Built (path may vary): target/x86_64-pc-windows-msvc/release/chaos-seed.exe"

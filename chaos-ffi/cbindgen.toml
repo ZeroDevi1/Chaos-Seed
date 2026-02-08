@@ -1,0 +1,9 @@
+language = "C"
+
+include_guard = "CHAOS_FFI_H"
+pragma_once = true
+
+[parse]
+parse_deps = false
+include = ["chaos-ffi"]
+
