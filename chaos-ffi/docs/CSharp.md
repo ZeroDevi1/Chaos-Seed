@@ -1,13 +1,13 @@
-# C# (WinUI3/Console) P/Invoke Example
+# C#（WinUI3/Console）P/Invoke 示例
 
-This is a minimal example showing how to call `chaos_ffi.dll` from .NET 7+.
+这是一个最小示例，展示如何在 .NET 7+ 中调用 `chaos_ffi.dll`。
 
-Notes:
-- All strings are UTF-8.
-- Any `IntPtr` returned as a string must be freed with `chaos_ffi_string_free`.
-- Danmaku callbacks are invoked on a background thread.
+注意事项：
+- 所有字符串均为 UTF-8。
+- 凡是以字符串形式返回的 `IntPtr`，都必须用 `chaos_ffi_string_free` 释放。
+- 弹幕回调在后台线程触发（不是 UI 线程）。
 
-## Interop definitions
+## 互操作定义
 
 ```csharp
 using System;
@@ -70,7 +70,7 @@ internal static partial class ChaosFfi
 }
 ```
 
-## Subtitle search
+## 字幕搜索
 
 ```csharp
 var p = ChaosFfi.chaos_subtitle_search_json("三体", 20, -1.0, null, 20000);
@@ -80,7 +80,7 @@ var items = JsonDocument.Parse(json).RootElement;
 Console.WriteLine("items=" + items.GetArrayLength());
 ```
 
-## Danmaku (callback + poll)
+## 弹幕（callback + poll）
 
 ```csharp
 var handle = ChaosFfi.chaos_danmaku_connect("https://live.bilibili.com/1");
@@ -107,5 +107,4 @@ for (int i = 0; i < 20; i++)
 ChaosFfi.chaos_danmaku_disconnect(handle);
 ```
 
-In a WinUI 3 app, marshal `Console.WriteLine` parts onto `DispatcherQueue`/UI thread.
-
+在 WinUI 3 应用中，请把 `Console.WriteLine` 这类 UI/日志更新逻辑 marshal 到 `DispatcherQueue`/UI 线程。

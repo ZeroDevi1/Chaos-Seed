@@ -1,27 +1,27 @@
-# chaos-ffi API
+# chaos-ffi API（中文说明）
 
-`chaos-ffi` is a small C ABI adapter over `chaos-core`. All public APIs are JSON-based to keep ABI stable across languages (WinUI 3 / C# / Qt / C++).
+`chaos-ffi` 是 `chaos-core` 的 C ABI 适配层。为了在 WinUI 3 / C# / Qt / C++ 等多语言环境下保持 ABI 稳定，所有对外接口统一采用 **JSON** 作为数据载体。
 
-## Conventions
+## 约定
 
-- **Encoding**: all `char*` are **UTF-8**.
-- **Ownership**: any `char*` returned by this DLL/SO must be freed with `chaos_ffi_string_free`.
-- **Errors**:
-  - If a function fails, it returns `NULL` (or `-1` for `int32_t`).
-  - Call `chaos_ffi_last_error_json()` to retrieve the last error as JSON (and clear it).
-- **Threading**:
-  - The library uses a global multi-thread tokio runtime internally.
-  - Danmaku callbacks are invoked on a **background thread**. UI apps must marshal to the UI thread themselves.
+- **编码**：所有 `char*` 均为 **UTF-8**。
+- **内存所有权**：DLL/SO 返回的 `char*` 由调用方负责释放，必须调用 `chaos_ffi_string_free`。
+- **错误处理**：
+  - 失败时返回 `NULL`（或 `int32_t` 返回 `-1`）。
+  - 再调用 `chaos_ffi_last_error_json()` 获取最近一次错误的 JSON（获取后会清空）。
+- **线程模型**：
+  - 库内部使用一个全局 multi-thread tokio runtime。
+  - 弹幕回调会在**后台线程**触发；UI 程序需要自行 marshal 到 UI 线程。
 
-## Base
+## 基础
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-Returns the API version. Current: `1`.
+返回 API 版本号。当前为 `1`。
 
 ### `char* chaos_ffi_version_json(void)`
 
-Returns:
+返回：
 
 ```json
 {"version":"0.1.0","git":"unknown","api":1}
@@ -29,7 +29,7 @@ Returns:
 
 ### `char* chaos_ffi_last_error_json(void)`
 
-Returns `NULL` if no error is stored. Otherwise returns:
+如果没有错误信息则返回 `NULL`；否则返回：
 
 ```json
 {"message":"...","context":"...optional..."}
@@ -37,13 +37,13 @@ Returns `NULL` if no error is stored. Otherwise returns:
 
 ### `void chaos_ffi_string_free(char* s)`
 
-Frees strings returned by this library.
+释放本库返回的字符串。
 
-## Subtitle (Thunder)
+## 字幕（Thunder）
 
 ### `char* chaos_subtitle_search_json(...)`
 
-Signature:
+签名：
 
 ```c
 char* chaos_subtitle_search_json(
@@ -54,9 +54,9 @@ char* chaos_subtitle_search_json(
   uint32_t timeout_ms);
 ```
 
-Returns JSON array of `ThunderSubtitleItem` (directly from `chaos-core`).
+返回 `ThunderSubtitleItem` 的 JSON 数组（直接序列化 `chaos-core` 中的结构）。
 
-Example element (shape only):
+示例元素（仅展示字段形状）：
 
 ```json
 {"name":"...","ext":"srt","url":"...","score":9.8,"languages":["zh","en"]}
@@ -64,7 +64,7 @@ Example element (shape only):
 
 ### `char* chaos_subtitle_download_item_json(...)`
 
-Signature:
+签名：
 
 ```c
 char* chaos_subtitle_download_item_json(
@@ -75,43 +75,42 @@ char* chaos_subtitle_download_item_json(
   uint8_t overwrite);
 ```
 
-Returns:
+返回：
 
 ```json
 {"path":"C:\\\\out\\\\file.srt","bytes":12345}
 ```
 
-## Danmaku
+## 弹幕（Danmaku）
 
-### Event semantics
+### 事件语义
 
-Events are JSON-serialized `DanmakuEvent` from `chaos-core`.
+事件为 `chaos-core` 的 `DanmakuEvent` JSON 序列化结果。
 
-- `method == "LiveDMServer"`:
-  - `text == ""` means connection OK (best-effort, IINA+-style semantics).
-  - `text == "error"` means connection failure / disconnect.
-- `method == "SendDM"`: actual danmaku message payload.
+- `method == "LiveDMServer"`：
+  - `text == ""` 表示连接 OK（best-effort，对齐 IINA+ 语义）。
+  - `text == "error"` 表示连接失败 / 断线。
+- `method == "SendDM"`：实际弹幕消息事件。
 
 ### `void* chaos_danmaku_connect(const char* input_utf8)`
 
-Returns a handle pointer. On failure returns `NULL` (then read `last_error_json`).
+返回一个 handle 指针。失败返回 `NULL`（再读取 `last_error_json`）。
 
 ### `char* chaos_danmaku_poll_json(void* handle, uint32_t max_events)`
 
-Returns a JSON array of up to `max_events` events. If `max_events == 0`, a default of `50` is used.
+返回最多 `max_events` 条事件的 JSON 数组。如果 `max_events == 0`，默认取 `50`。
 
-### Callback
+### 回调
 
 ```c
 typedef void (*chaos_danmaku_callback)(const char* event_json_utf8, void* user_data);
 int32_t chaos_danmaku_set_callback(void* handle, chaos_danmaku_callback cb, void* user_data);
 ```
 
-- Pass `cb = NULL` to disable callbacks.
-- `event_json_utf8` pointer is only valid **during the callback call**.
-- Callback is invoked from a background thread (not a UI thread).
+- 传入 `cb = NULL` 可关闭回调。
+- `event_json_utf8` 指针仅在**回调执行期间**有效（回调返回后 Rust 会释放）。
+- 回调在后台线程触发（不是 UI 线程）。
 
 ### `int32_t chaos_danmaku_disconnect(void* handle)`
 
-Stops the session, frees the handle, and guarantees no more callbacks after return.
-
+停止 session、释放 handle，并保证函数返回后不再触发回调。
