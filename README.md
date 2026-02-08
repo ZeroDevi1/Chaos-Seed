@@ -25,6 +25,34 @@ rustup override set 1.93.0
 rustc -V
 ```
 
+## Workspace（双 UI）
+
+本仓库已拆成 Cargo workspace：
+
+- `chaos-core`：纯 Rust 核心（字幕 + 弹幕）
+- `chaos-slint`：Slint UI（产物仍为 `chaos-seed` 可执行文件）
+- `chaos-tauri`：Tauri v2 + Vite(TS) UI（PoC）
+- `chaos-ffi`：C ABI 适配层（导出 `chaos-core` 为 dll/so，供 WinUI3/Qt 等调用）
+
+## 架构（当前 / 未来）
+
+```
+Currently Strategy                         Future Strategy
+------------------                         ---------------
+
+[ chaos-core ]  <-- 纯 Rust 业务逻辑，无 UI 依赖 (通用)
+      ^
+      |__________________________________________
+      |                    |                    |
+[ chaos-slint ]      [ chaos-tauri ]      [ chaos-ffi ]  <-- 新增的适配层
+   (Rust UI)           (Web UI)          (DLL 导出层)
+                                                |
+                                          (编译为 .dll/.so)
+                                                |
+                                          [ WinUI 3 App ]
+                                          (C# / XAML)
+```
+
 ## 构建
 
 ### Windows 原生（MSVC）
@@ -89,13 +117,13 @@ cargo install cargo-xwin
 - Skia renderer：
 
 ```bash
-cargo build --release --no-default-features --features renderer-skia
+cargo build -p chaos-slint --release --no-default-features --features renderer-skia
 ```
 
 - Software renderer：
 
 ```bash
-cargo build --release --no-default-features --features renderer-software
+cargo build -p chaos-slint --release --no-default-features --features renderer-software
 ```
 
 ## 参考项目
@@ -109,19 +137,49 @@ cargo build --release --no-default-features --features renderer-software
 你可以用 example 快速验证：
 
 ```bash
-cargo run --example danmaku_dump -- 'https://live.bilibili.com/47867'
-cargo run --example danmaku_dump -- 'https://www.douyu.com/9999'
-cargo run --example danmaku_dump -- 'https://www.huya.com/660000'
+cargo run -p chaos-core --example danmaku_dump -- 'https://live.bilibili.com/47867'
+cargo run -p chaos-core --example danmaku_dump -- 'https://www.douyu.com/9999'
+cargo run -p chaos-core --example danmaku_dump -- 'https://www.huya.com/660000'
 ```
 
 输入也支持平台前缀：
 
 ```bash
-cargo run --example danmaku_dump -- 'bilibili:47867'
-cargo run --example danmaku_dump -- 'douyu:https://www.douyu.com/9999'
-cargo run --example danmaku_dump -- 'huya:660000'
+cargo run -p chaos-core --example danmaku_dump -- 'bilibili:47867'
+cargo run -p chaos-core --example danmaku_dump -- 'douyu:https://www.douyu.com/9999'
+cargo run -p chaos-core --example danmaku_dump -- 'huya:660000'
 ```
 
 事件语义（对齐 IINA+）：
 - `LiveDMServer`：`text == ""` 表示连接 OK；`text == "error"` 表示失败/断线
 - `SendDM`：`dms` 中包含弹幕内容；表情弹幕会带 `image_url` 与（可选）`image_width`
+
+## Tauri（PoC）
+
+仅 Rust 侧编译检查：
+
+```bash
+cargo build -p chaos-tauri --release
+```
+
+Linux 上若缺少系统依赖（GTK/WebKit 等）会编译失败；请按 Tauri 官方文档安装依赖后再构建/运行。
+
+前端开发运行（在 `chaos-tauri/` 下）：
+
+```bash
+pnpm install
+pnpm tauri:dev
+```
+
+## chaos-ffi（dll/so 导出）
+
+构建：
+
+```bash
+cargo build -p chaos-ffi --release
+```
+
+文档：
+- `chaos-ffi/docs/API.md`
+- `chaos-ffi/docs/CSharp.md`
+- `chaos-ffi/docs/BUILD.md`

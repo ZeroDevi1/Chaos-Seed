@@ -48,4 +48,7 @@
 - 弹幕 UI 接入：
   - 新增弹幕相关页面与交互：支持从输入 URL/房间号发起连接，并在 UI 中展示弹幕（Chat / Overlay）。
   - Overlay 弹幕文字调整为白色（更适合覆盖在视频上层）。
+- 工程结构升级（为多 UI 与跨语言调用铺路）：
+  - 拆分 `chaos-core`（纯业务）与 UI 层（`chaos-slint` / `chaos-tauri`）。
+  - 新增 `chaos-ffi`：以 C ABI + JSON 形式导出 `chaos-core` 能力，便于 WinUI3/Qt 调用。
 - 关闭文件日志落地：不再写入 `logs/app.log` 与 `logs/panic_*.log`。

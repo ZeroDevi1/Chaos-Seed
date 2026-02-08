@@ -8,6 +8,7 @@
 - Fluent 风格 icon（字体或矢量资源）替换占位符
 - 侧边栏折叠状态持久化（下次启动保持）
 - 系统深色/浅色偏好跟随（可手动覆盖）
+- Tauri UI：FAST design-token recursion / 布局对不齐问题（评估替代 front 方案，必要时切换或放弃 tauri）
 
 ## 播放（直播源解析与播放）
 - 直播源解析：支持常见聚合格式（例如 m3u / json），并提供分组/搜索
@@ -27,5 +28,6 @@
 
 ## 工程化 / 发布
 - 配置系统（保存主题/侧边栏/常用设置）
+- chaos-ffi：导出 chaos-core 为 dll/so（跨语言稳定 ABI，供 WinUI3/Qt 等调用）
 - CI（Windows 原生构建 + WSL 交叉构建校验）
 - Release 打包（版本号、校验和、更新日志）
