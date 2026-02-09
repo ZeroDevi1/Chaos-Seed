@@ -8,7 +8,8 @@
 - Fluent 风格 icon（字体或矢量资源）替换占位符
 - 侧边栏折叠状态持久化（下次启动保持）
 - 系统深色/浅色偏好跟随（可手动覆盖）
-- Tauri UI：FAST design-token recursion / 布局对不齐问题（评估替代 front 方案，必要时切换或放弃 tauri）
+- 主题与 Backdrop（Mica）在浅/深色下的一致性（避免“割裂/透底”）
+- Fluent Web Components 视觉/交互进一步贴近系统（间距、字体、边框、hover）
 
 ## 播放（直播源解析与播放）
 - 直播源解析（core/ffi）已支持 Huya / Douyu / BiliLive；下一步是 UI/播放接入与清晰度/线路切换
@@ -18,7 +19,7 @@
 
 ## 弹幕（悬浮窗/滚动）
 - 弹幕源接入（BiliLive / Douyu / Huya 核心连接与解析已完成 2026-02-07，commit: `a37fce7`）
-- 弹幕 UI 接入（Chat / Overlay）与交互（已完成 2026-02-08，commit: `6dea058`）
+- 弹幕 UI 接入（Chat / Overlay）与交互（已完成；持续优化性能/观感）
 - 悬浮窗：置顶、透明度、字体/速度/密度可调
 - 多屏/多显示器适配与快捷键控制
 

@@ -63,4 +63,15 @@
   - `chaos-ffi` 导出 livestream JSON API：`decode_manifest` + `resolve_variant`。
   - `chaos-ffi` 内置 cbindgen 头文件生成器（`gen_header`），可随时生成/更新 `include/chaos_ffi_bindings.h`。
   - feature gated 的 live-check（真实 URL 运行时参数传入，可 `--dump-json` 输出解析结果）。
-- commit: `68a4017`
+- Tauri UI（弹幕 / 多窗口 / 主题）：
+  - Chat/Overlay 多窗口彻底可用（Windows/WebView2）：修复子窗口白屏/卡死/无法关闭、同源 URL 加载与启动参数注入；并将 child window 的调试输出改为可控开关。
+  - 弹幕按窗口订阅推送：高频 `danmaku_msg` 只发给订阅窗口；打开 Chat/Overlay 后主窗停止刷新，降低压力。
+  - 弹幕渲染低延迟：从“定时 flush”改为尽快渲染（并在高压时分帧排空），减少“延时感”。
+  - Settings 页布局更原生、弹幕滚动行为修正、浅/深色主题 + Mica 下减少割裂。
+- commits（关键节点）：
+  - livestream core/ffi：`68a4017`
+  - windows 多窗口稳定：`1be9028`
+  - 弹幕按窗口订阅/状态保持：`5f4434b`
+  - UI 精修（Chat/Overlay/Settings/滚动/主题基线）：`aa22f62`
+  - 弹幕低延迟 + 主窗停推兜底：`bfadcd4`
+  - 主题：Mica 下浅色不透底 + 深色融合：`4d05c31`

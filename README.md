@@ -7,7 +7,7 @@
 - 字幕（已完成）：Thunder 搜索 / 列表展示 / 单条下载（每次下载选择目录，支持超时与重试）
 - 弹幕（已完成）：BiliLive / Douyu / Huya 连接与解析；UI 已接入（Chat / Overlay）
 - 直播源解析（已完成 core/ffi）：BiliLive / Douyu / Huya 的 `manifest/variants` 解析 + `resolve_variant` 二段补全
-- UI（进行中）：直播播放与清晰度/线路切换的 UI/播放层仍在完善中
+- UI（进行中）：直播源解析（manifest/variants）UI 设计与接入；播放层（播放器/清晰度切换）后置
 
 ## 构建前提（重要）
 
@@ -31,7 +31,7 @@ rustc -V
 
 - `chaos-core`：纯 Rust 核心（字幕 + 弹幕 + 直播源解析）
 - `chaos-slint`：Slint UI（产物仍为 `chaos-seed` 可执行文件）
-- `chaos-tauri`：Tauri v2 + Vite(TS) UI（PoC）
+- `chaos-tauri`：Tauri v2 + Vite(TS) UI（当前主 UI 方案）
 - `chaos-ffi`：C ABI 适配层（导出 `chaos-core` 为 dll/so，供 WinUI3/Qt 等调用）
 
 ## 架构（当前 / 未来）
@@ -154,9 +154,9 @@ cargo run -p chaos-core --example danmaku_dump -- 'huya:<RID>'
 - `LiveDMServer`：`text == ""` 表示连接 OK；`text == "error"` 表示失败/断线
 - `SendDM`：`dms` 中包含弹幕内容；表情弹幕会带 `image_url` 与（可选）`image_width`
 
-## Tauri（PoC）
+## Tauri（当前 UI）
 
-仅 Rust 侧编译检查：
+仅 Rust 侧编译检查（不跑前端构建）：
 
 ```bash
 cargo build -p chaos-tauri --release
@@ -169,6 +169,12 @@ Linux 上若缺少系统依赖（GTK/WebKit 等）会编译失败；请按 Tauri
 ```bash
 pnpm install
 pnpm tauri:dev
+```
+
+构建二进制（不打包安装器，适合 CI/快速验证）：
+
+```bash
+pnpm tauri:build:nobundle
 ```
 
 ## chaos-ffi（dll/so 导出）
