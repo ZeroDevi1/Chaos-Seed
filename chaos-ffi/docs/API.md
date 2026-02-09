@@ -81,6 +81,73 @@ char* chaos_subtitle_download_item_json(
 {"path":"C:\\\\out\\\\file.srt","bytes":12345}
 ```
 
+## 直播源解析（Livestream）
+
+`chaos-core` 内已实现虎牙/斗鱼/B站直播（BiliLive）的直播源解析；`chaos-ffi` 将其以 **JSON in/out** 方式导出，方便 C/C#/Qt 等调用。
+
+### `char* chaos_livestream_decode_manifest_json(const char* input_utf8, uint8_t drop_inaccessible_high_qualities)`
+
+- `input_utf8`：支持完整 URL 或平台前缀（复用 `chaos-core` 的解析规则）
+  - `<BILILIVE_URL>`
+  - `<HUYA_URL>`
+  - `bilibili:<ROOM_ID>` / `huya:<ROOM_ID>` / `douyu:<ROOM_ID>`
+- `drop_inaccessible_high_qualities`：
+  - `1`（默认推荐）：对齐 IINA+ 行为：当已拿到某个画质的可播放 URL 时，丢弃“更高但当前无 URL”的画质项
+  - `0`：保留所有画质项（即使 `url == null`）
+
+返回 `LiveManifest` 的 JSON（字段形状）：
+
+```json
+{
+  "site": "BiliLive",
+  "room_id": "<ROOM_ID>",
+  "raw_input": "<BILILIVE_URL>",
+  "info": {
+    "title": "...",
+    "name": "...",
+    "avatar": "...",
+    "cover": "...",
+    "is_living": true
+  },
+  "playback": {
+    "referer": "https://live.bilibili.com/",
+    "user_agent": null
+  },
+  "variants": [
+    {
+      "id": "bili_live:2000:原画",
+      "label": "原画",
+      "quality": 2000,
+      "rate": null,
+      "url": "https://...",
+      "backup_urls": ["https://..."]
+    }
+  ]
+}
+```
+
+### `char* chaos_livestream_resolve_variant_json(const char* input_utf8, const char* variant_id_utf8)`
+
+用于“二段解析”补齐 URL（主要是 BiliLive / Douyu 的部分画质需要二次请求）。
+
+典型流程：
+1) 调用 `chaos_livestream_decode_manifest_json(input, 1)` 获取 `variants`
+2) 选择一个 `variants[i].id`（例如 `bili_live:2000:原画` 或 `douyu:2:原画`）
+3) 调用 `chaos_livestream_resolve_variant_json(input, variant_id)` 获取补齐后的 `StreamVariant`
+
+返回 `StreamVariant` JSON（字段形状）：
+
+```json
+{
+  "id": "douyu:2:原画",
+  "label": "原画",
+  "quality": 2000,
+  "rate": 2,
+  "url": "https://...",
+  "backup_urls": ["https://..."]
+}
+```
+
 ## 弹幕（Danmaku）
 
 ### 事件语义

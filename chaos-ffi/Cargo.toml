@@ -7,11 +7,12 @@ license.workspace = true
 description = "C ABI adapter for chaos-core (JSON-based, for WinUI3/Qt/etc)."
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 chaos-core = { path = "../chaos-core" }
 libc = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
@@ -19,3 +20,21 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 [dev-dependencies]
 serde_json = "1"
 
+[features]
+live-tests = []
+gen-header = ["dep:cbindgen"]
+
+[dependencies.cbindgen]
+version = "0.29"
+optional = true
+
+[[bin]]
+name = "gen_header"
+path = "src/bin/gen_header.rs"
+required-features = ["gen-header"]
+
+[[test]]
+name = "livestream_live"
+path = "tests/livestream_live.rs"
+harness = false
+required-features = ["live-tests"]

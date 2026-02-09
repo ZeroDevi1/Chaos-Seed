@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use libc::{c_char, c_void};
 
-use chaos_core::{danmaku, subtitle};
+use chaos_core::{danmaku, livestream, subtitle};
 
 const API_VERSION: u32 = 1;
 
@@ -79,6 +79,22 @@ fn runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("tokio runtime")
     })
+}
+
+fn livestream_http() -> &'static reqwest::Client {
+    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
+    HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("chaos-seed/0.1")
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("reqwest client")
+    })
+}
+
+fn livestream_cfg() -> &'static livestream::LivestreamConfig {
+    static CFG: OnceLock<livestream::LivestreamConfig> = OnceLock::new();
+    CFG.get_or_init(livestream::LivestreamConfig::default)
 }
 
 #[unsafe(no_mangle)]
@@ -236,6 +252,106 @@ pub extern "C" fn chaos_subtitle_download_item_json(
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_livestream_decode_manifest_json(
+    input_utf8: *const c_char,
+    drop_inaccessible_high_qualities: u8,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let input = require_cstr(input_utf8, "input_utf8")?.trim().to_string();
+        if input.is_empty() {
+            set_last_error("input_utf8 is empty", None);
+            return Err(());
+        }
+
+        let (site, room_id) =
+            chaos_core::danmaku::sites::parse_target_hint(&input).map_err(|e| {
+                set_last_error("invalid input_utf8", Some(e.to_string()));
+            })?;
+
+        let opt = livestream::ResolveOptions {
+            drop_inaccessible_high_qualities: drop_inaccessible_high_qualities != 0,
+        };
+
+        let man = runtime()
+            .block_on(livestream::platforms::decode_manifest(
+                livestream_http(),
+                livestream_cfg(),
+                site,
+                &room_id,
+                &input,
+                opt,
+            ))
+            .map_err(|e| {
+                set_last_error("livestream decode failed", Some(e.to_string()));
+            })?;
+
+        serde_json::to_string(&man).map_err(|e| {
+            set_last_error("failed to serialize manifest", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_livestream_decode_manifest_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_livestream_resolve_variant_json(
+    input_utf8: *const c_char,
+    variant_id_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let input = require_cstr(input_utf8, "input_utf8")?.trim().to_string();
+        if input.is_empty() {
+            set_last_error("input_utf8 is empty", None);
+            return Err(());
+        }
+        let variant_id = require_cstr(variant_id_utf8, "variant_id_utf8")?
+            .trim()
+            .to_string();
+        if variant_id.is_empty() {
+            set_last_error("variant_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        let (site, room_id) =
+            chaos_core::danmaku::sites::parse_target_hint(&input).map_err(|e| {
+                set_last_error("invalid input_utf8", Some(e.to_string()));
+            })?;
+
+        let v = runtime()
+            .block_on(livestream::platforms::resolve_variant(
+                livestream_http(),
+                livestream_cfg(),
+                site,
+                &room_id,
+                &variant_id,
+            ))
+            .map_err(|e| {
+                set_last_error("livestream resolve_variant failed", Some(e.to_string()));
+            })?;
+
+        serde_json::to_string(&v).map_err(|e| {
+            set_last_error("failed to serialize variant", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_livestream_resolve_variant_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
 pub type ChaosDanmakuCallback =
     Option<extern "C" fn(event_json_utf8: *const c_char, user_data: *mut c_void)>;
 
@@ -255,8 +371,7 @@ impl DanmakuHandle {
     ) -> Self {
         let queue: Arc<Mutex<VecDeque<danmaku::model::DanmakuEvent>>> =
             Arc::new(Mutex::new(VecDeque::new()));
-        let callback: Arc<Mutex<(ChaosDanmakuCallback, usize)>> =
-            Arc::new(Mutex::new((None, 0)));
+        let callback: Arc<Mutex<(ChaosDanmakuCallback, usize)>> = Arc::new(Mutex::new((None, 0)));
         let disposed: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
         let queue2 = Arc::clone(&queue);
@@ -374,7 +489,11 @@ pub extern "C" fn chaos_danmaku_poll_json(handle: *mut c_void, max_events: u32) 
             return Err(());
         }
         let h = unsafe { &*(handle as *mut DanmakuHandle) };
-        let n = if max_events == 0 { 50 } else { max_events as usize };
+        let n = if max_events == 0 {
+            50
+        } else {
+            max_events as usize
+        };
         let mut out = Vec::new();
         {
             let mut q = h.queue.lock().unwrap();
@@ -477,6 +596,24 @@ mod tests {
     #[test]
     fn danmaku_poll_rejects_null_handle() {
         let p = chaos_danmaku_poll_json(ptr::null_mut(), 10);
+        assert!(p.is_null());
+        let err = chaos_ffi_last_error_json();
+        assert!(!err.is_null());
+        chaos_ffi_string_free(err);
+    }
+
+    #[test]
+    fn livestream_decode_rejects_null_input() {
+        let p = chaos_livestream_decode_manifest_json(ptr::null(), 1);
+        assert!(p.is_null());
+        let err = chaos_ffi_last_error_json();
+        assert!(!err.is_null());
+        chaos_ffi_string_free(err);
+    }
+
+    #[test]
+    fn livestream_resolve_rejects_null_args() {
+        let p = chaos_livestream_resolve_variant_json(ptr::null(), ptr::null());
         assert!(p.is_null());
         let err = chaos_ffi_last_error_json();
         assert!(!err.is_null());

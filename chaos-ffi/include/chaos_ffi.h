@@ -2,47 +2,31 @@
 
 #include <stdint.h>
 
-#ifdef _WIN32
-#  define CHAOS_FFI_EXPORT __declspec(dllimport)
-#else
-#  define CHAOS_FFI_EXPORT
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// All returned `char*` are UTF-8 and must be freed by `chaos_ffi_string_free`.
+// Compatibility: keep the export macro symbol available to consumers.
+// Note: the generated bindings currently do not use it in prototypes.
+#ifdef _WIN32
+#  ifdef CHAOS_FFI_BUILD
+#    define CHAOS_FFI_EXPORT __declspec(dllexport)
+#  else
+#    define CHAOS_FFI_EXPORT __declspec(dllimport)
+#  endif
+#else
+#  define CHAOS_FFI_EXPORT
+#endif
 
-CHAOS_FFI_EXPORT uint32_t chaos_ffi_api_version(void);
-CHAOS_FFI_EXPORT char* chaos_ffi_version_json(void);
-CHAOS_FFI_EXPORT char* chaos_ffi_last_error_json(void);
-CHAOS_FFI_EXPORT void chaos_ffi_string_free(char* s);
+// NOTE:
+// - All returned `char*` are UTF-8 and must be freed by `chaos_ffi_string_free`.
+// - This header is a stable wrapper; the function prototypes live in the generated bindings.
 
-// Subtitle (Thunder) - JSON in/out
-CHAOS_FFI_EXPORT char* chaos_subtitle_search_json(
-    const char* query_utf8,
-    uint32_t limit,
-    double min_score_or_neg1,
-    const char* lang_utf8_or_null,
-    uint32_t timeout_ms);
+#include "chaos_ffi_bindings.h"
 
-CHAOS_FFI_EXPORT char* chaos_subtitle_download_item_json(
-    const char* item_json_utf8,
-    const char* out_dir_utf8,
-    uint32_t timeout_ms,
-    uint32_t retries,
-    uint8_t overwrite);
-
-// Danmaku - handle-based API
-typedef void (*chaos_danmaku_callback)(const char* event_json_utf8, void* user_data);
-
-CHAOS_FFI_EXPORT void* chaos_danmaku_connect(const char* input_utf8);
-CHAOS_FFI_EXPORT int32_t chaos_danmaku_set_callback(void* handle, chaos_danmaku_callback cb, void* user_data);
-CHAOS_FFI_EXPORT char* chaos_danmaku_poll_json(void* handle, uint32_t max_events);
-CHAOS_FFI_EXPORT int32_t chaos_danmaku_disconnect(void* handle);
+// Backward-compatible alias for older headers.
+typedef ChaosDanmakuCallback chaos_danmaku_callback;
 
 #ifdef __cplusplus
 } // extern "C"
 #endif
-

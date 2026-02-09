@@ -5,5 +5,4 @@ pragma_once = true
 
 [parse]
 parse_deps = false
-include = ["chaos-ffi"]
-
+include = ["chaos_ffi"]
