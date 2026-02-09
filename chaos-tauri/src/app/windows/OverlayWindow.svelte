@@ -20,6 +20,7 @@
     y: number
     w: number
     speedPxPerSec: number
+    laneIndex: number
   }
 
   type QueueItem = {
@@ -131,6 +132,19 @@
     // Opaque overlay uses a stable dark background regardless of theme (better readability).
     const bg = '#1f1f1f'
 
+    const sprites: Sprite[] = []
+    const laneHeight = 32
+    const topPad = 12
+    const bottomPad = 32
+
+    function computeLaneCount(height: number): number {
+      const usable = Math.max(0, Math.floor(height - topPad - bottomPad))
+      return Math.max(1, Math.floor(usable / laneHeight))
+    }
+
+    let laneCursor = 0
+    let laneCount = 1
+
     let w = 0
     let h = 0
     function resize() {
@@ -142,6 +156,16 @@
       canvas2.style.width = `${w}px`
       canvas2.style.height = `${h}px`
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+      laneCount = computeLaneCount(h)
+      // Reflow existing sprites without dropping them (resize should not interrupt the stream).
+      const yMax = Math.max(topPad, h - bottomPad - laneHeight)
+      for (let i = 0; i < sprites.length; i++) {
+        const s = sprites[i]
+        s.laneIndex = s.laneIndex % laneCount
+        s.y = topPad + s.laneIndex * laneHeight
+        s.y = Math.min(s.y, yMax)
+      }
     }
     resize()
     window.addEventListener('resize', resize)
@@ -153,12 +177,6 @@
     let lastMsgAt = 0
     const dedupeWindowMs = 80
     const recent = new Map<string, number>()
-
-    const sprites: Sprite[] = []
-    let lane = 0
-    const laneCount = 10
-    const laneHeight = 32
-    const topPad = 12
 
     const imgCache = new Map<string, { img: HTMLImageElement; objectUrl?: string; lastUsedAt: number }>()
     const imgInflight = new Map<string, Promise<HTMLImageElement>>()
@@ -296,8 +314,9 @@
         const gap = item.img && text ? 8 : 0
         const tw = imgW + gap + textW
 
-        const y = topPad + (lane % laneCount) * laneHeight
-        lane++
+        const laneIndex = laneCursor % laneCount
+        laneCursor++
+        const y = topPad + laneIndex * laneHeight
         const durationMs = 8000
         const distance = w + tw + 80
         const speedPxPerSec = distance / (durationMs / 1000)
@@ -309,7 +328,8 @@
           x: w + 40,
           y,
           w: tw,
-          speedPxPerSec
+          speedPxPerSec,
+          laneIndex
         })
       }
 

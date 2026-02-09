@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use chaos_core::danmaku::client::DanmakuClient;
 use chaos_core::danmaku::model::{ConnectOptions, DanmakuSession};
+use chaos_core::now_playing;
 use chaos_core::subtitle;
 use chaos_core::subtitle::models::ThunderSubtitleItem;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -118,6 +119,21 @@ fn open_url(url: String) -> Result<(), String> {
         other => return Err(format!("unsupported url scheme: {other}")),
     }
     open::that(url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn now_playing_snapshot(
+    include_thumbnail: Option<bool>,
+    max_thumbnail_bytes: Option<u32>,
+    max_sessions: Option<u32>,
+) -> Result<String, String> {
+    let opt = now_playing::NowPlayingOptions {
+        include_thumbnail: include_thumbnail.unwrap_or(false),
+        max_thumbnail_bytes: max_thumbnail_bytes.unwrap_or(262_144) as usize,
+        max_sessions: max_sessions.unwrap_or(32) as usize,
+    };
+    let snap = now_playing::snapshot(opt).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -310,8 +326,8 @@ async fn danmaku_connect(
                     .cloned()
                     .collect()
             };
-            let suppress_main =
-                app2.get_webview_window("chat").is_some() || app2.get_webview_window("overlay").is_some();
+            let suppress_main = app2.get_webview_window("chat").is_some()
+                || app2.get_webview_window("overlay").is_some();
 
             for msg in danmaku_ui::map_event_to_ui(ev) {
                 for label in &subs {
@@ -695,6 +711,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             subtitle_search,
             subtitle_download,
+            now_playing_snapshot,
             get_app_info,
             open_url,
             danmaku_fetch_image,

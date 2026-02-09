@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use libc::{c_char, c_void};
 
-use chaos_core::{danmaku, livestream, subtitle};
+use chaos_core::{danmaku, livestream, now_playing, subtitle};
 
-const API_VERSION: u32 = 1;
+const API_VERSION: u32 = 2;
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -140,6 +140,41 @@ pub extern "C" fn chaos_ffi_string_free(s: *mut c_char) {
     }
     unsafe {
         drop(CString::from_raw(s));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_now_playing_snapshot_json(
+    include_thumbnail: u8,
+    max_thumbnail_bytes: u32,
+    max_sessions: u32,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let opt = now_playing::NowPlayingOptions {
+            include_thumbnail: include_thumbnail != 0,
+            max_thumbnail_bytes: (max_thumbnail_bytes as usize).max(1),
+            max_sessions: (max_sessions as usize).max(1),
+        };
+
+        let snap = now_playing::snapshot(opt).map_err(|e| {
+            set_last_error("now playing snapshot failed", Some(e.to_string()));
+        })?;
+
+        serde_json::to_string(&snap).map_err(|e| {
+            set_last_error(
+                "failed to serialize now playing snapshot",
+                Some(e.to_string()),
+            );
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_now_playing_snapshot_json", None);
+            ptr::null_mut()
+        }
     }
 }
 
@@ -618,5 +653,16 @@ mod tests {
         let err = chaos_ffi_last_error_json();
         assert!(!err.is_null());
         chaos_ffi_string_free(err);
+    }
+
+    #[test]
+    fn now_playing_snapshot_returns_json_payload() {
+        let p = chaos_now_playing_snapshot_json(0, 64, 8);
+        assert!(!p.is_null());
+        let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap().to_string();
+        chaos_ffi_string_free(p);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert!(v.get("supported").is_some());
+        assert!(v.get("sessions").is_some());
     }
 }

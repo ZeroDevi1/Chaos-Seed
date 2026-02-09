@@ -18,6 +18,10 @@ char *chaos_ffi_last_error_json(void);
 
 void chaos_ffi_string_free(char *s);
 
+char *chaos_now_playing_snapshot_json(uint8_t include_thumbnail,
+                                      uint32_t max_thumbnail_bytes,
+                                      uint32_t max_sessions);
+
 char *chaos_subtitle_search_json(const char *query_utf8,
                                  uint32_t limit,
                                  double min_score_or_neg1,

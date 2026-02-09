@@ -17,14 +17,14 @@
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-返回 API 版本号。当前为 `1`。
+返回 API 版本号。当前为 `2`。
 
 ### `char* chaos_ffi_version_json(void)`
 
 返回：
 
 ```json
-{"version":"0.1.0","git":"unknown","api":1}
+{"version":"0.1.0","git":"unknown","api":2}
 ```
 
 ### `char* chaos_ffi_last_error_json(void)`
@@ -38,6 +38,52 @@
 ### `void chaos_ffi_string_free(char* s)`
 
 释放本库返回的字符串。
+
+## 系统媒体（Win11 Now Playing）
+
+Windows 11/10+ 提供系统级的媒体会话（GSMTC / Global System Media Transport Controls）。本接口用于获取当前系统中的媒体 sessions，并返回“推荐的正在播放会话（best-effort）”。
+
+### `char* chaos_now_playing_snapshot_json(uint8_t include_thumbnail, uint32_t max_thumbnail_bytes, uint32_t max_sessions)`
+
+签名：
+
+```c
+char* chaos_now_playing_snapshot_json(
+  uint8_t include_thumbnail,
+  uint32_t max_thumbnail_bytes,
+  uint32_t max_sessions);
+```
+
+- `include_thumbnail`：`1` 表示读取封面缩略图并以 base64 输出；`0` 不读取封面（更快）。
+- `max_thumbnail_bytes`：封面最大读取字节数（建议 `262144`=256KB）。
+- `max_sessions`：最多返回多少个会话（建议 `32`）。
+
+返回 `NowPlayingSnapshot` JSON（字段形状）：
+
+```json
+{
+  "supported": true,
+  "retrieved_at_unix_ms": 0,
+  "picked_app_id": "Spotify",
+  "now_playing": {
+    "app_id": "Spotify",
+    "is_current": true,
+    "playback_status": "Playing",
+    "title": "Song",
+    "artist": "Artist",
+    "album_title": "Album",
+    "position_ms": 1234,
+    "duration_ms": 234567,
+    "thumbnail": { "mime": "image/png", "base64": "..." },
+    "error": null
+  },
+  "sessions": []
+}
+```
+
+说明：
+- **非 Windows 平台**：不会报错；返回 `supported=false` 且 `sessions=[]`，`now_playing=null`。
+- **无媒体会话**：`sessions=[]`，`now_playing=null`。
 
 ## 字幕（Thunder）
 

@@ -86,6 +86,9 @@ type Opts = {
   statusEl?: HTMLElement
   maxItems?: number
   flushIntervalMs?: number
+  // Max DOM rows rendered per flush. Smaller values reduce "burst" feeling when messages arrive in batches.
+  // Remaining messages are drained over `requestAnimationFrame`.
+  maxBatch?: number
   stickToBottom?: boolean
   onOpenUrl?: (url: string) => void
   afterFlush?: (listCount: number) => void
@@ -151,7 +154,7 @@ export function createDanmakuListStore(opts: Opts): DanmakuListStore {
   // Default to frame-batched rendering for low latency (no visible "timer refresh" feel).
   // Tests can still force interval flushing via `flushIntervalMs`.
   const flushIntervalMs = opts.flushIntervalMs ?? 0
-  const maxBatch = 80
+  const maxBatch = opts.maxBatch ?? 12
   const dedupeWindowMs = 80
 
   let queue: DanmakuUiMessage[] = []

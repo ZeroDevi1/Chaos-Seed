@@ -38,3 +38,9 @@ name = "livestream_live"
 path = "tests/livestream_live.rs"
 harness = false
 required-features = ["live-tests"]
+
+[[test]]
+name = "now_playing_live"
+path = "tests/now_playing_live.rs"
+harness = false
+required-features = ["live-tests"]

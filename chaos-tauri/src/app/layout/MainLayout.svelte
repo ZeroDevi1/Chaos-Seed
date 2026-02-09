@@ -15,7 +15,8 @@
     { label: '首页', path: '/', icon: 'home' },
     { label: '字幕下载', path: '/subtitle', icon: 'subtitle' },
     { label: '直播源', path: '/live-source', icon: 'live' },
-    { label: '弹幕', path: '/danmaku', icon: 'danmaku' }
+    { label: '弹幕', path: '/danmaku', icon: 'danmaku' },
+    { label: '歌词', path: '/lyrics', icon: 'subtitle' }
   ]
 
   const BOTTOM_ITEMS: NavItem[] = [

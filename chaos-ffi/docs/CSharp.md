@@ -30,6 +30,12 @@ internal static partial class ChaosFfi
     [LibraryImport(Dll)]
     internal static partial void chaos_ffi_string_free(IntPtr s);
 
+    [LibraryImport(Dll)]
+    internal static partial IntPtr chaos_now_playing_snapshot_json(
+        byte include_thumbnail,
+        uint max_thumbnail_bytes,
+        uint max_sessions);
+
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_subtitle_search_json(
         string query_utf8,
@@ -76,6 +82,39 @@ internal static partial class ChaosFfi
         if (p == IntPtr.Zero) return null;
         try { return Marshal.PtrToStringUTF8(p); }
         finally { chaos_ffi_string_free(p); }
+    }
+}
+```
+
+## 系统媒体（Win11 Now Playing）
+
+```csharp
+static string TakeOrThrow(IntPtr p, string what)
+{
+    var s = ChaosFfi.TakeString(p);
+    if (!string.IsNullOrEmpty(s)) return s;
+    var err = ChaosFfi.TakeString(ChaosFfi.chaos_ffi_last_error_json());
+    throw new Exception($"{what} failed: {err}");
+}
+
+// include_thumbnail=1, max_thumbnail_bytes=256KB, max_sessions=32
+var json = TakeOrThrow(ChaosFfi.chaos_now_playing_snapshot_json(1, 262_144, 32), "now_playing_snapshot");
+using var doc = JsonDocument.Parse(json);
+var root = doc.RootElement;
+Console.WriteLine("supported=" + root.GetProperty("supported").GetBoolean());
+Console.WriteLine("sessions=" + root.GetProperty("sessions").GetArrayLength());
+
+if (root.TryGetProperty("now_playing", out var np) && np.ValueKind != JsonValueKind.Null)
+{
+    Console.WriteLine("app_id=" + np.GetProperty("app_id").GetString());
+    Console.WriteLine("title=" + np.GetProperty("title").GetString());
+    Console.WriteLine("artist=" + np.GetProperty("artist").GetString());
+
+    if (np.TryGetProperty("thumbnail", out var th) && th.ValueKind == JsonValueKind.Object)
+    {
+        var b64 = th.GetProperty("base64").GetString() ?? "";
+        var bytes = Convert.FromBase64String(b64);
+        Console.WriteLine("thumbnail_bytes=" + bytes.Length);
     }
 }
 ```

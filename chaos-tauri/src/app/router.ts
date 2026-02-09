@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage.svelte'
 import SubtitleDownloadPage from './pages/SubtitleDownloadPage.svelte'
 import LiveSourcePage from './pages/LiveSourcePage.svelte'
 import DanmakuPage from './pages/DanmakuPage.svelte'
+import LyricsPage from './pages/LyricsPage.svelte'
 import SettingsPage from './pages/SettingsPage.svelte'
 import AboutPage from './pages/AboutPage.svelte'
 
@@ -20,6 +21,7 @@ export const ROUTES: RouteDef[] = [
   // Keep Danmaku alive so the user can switch pages without losing input / connection / list state.
   // We explicitly control backend subscriptions based on route focus + chat window presence.
   { path: '/danmaku', component: DanmakuPage, keepAlive: true },
+  { path: '/lyrics', component: LyricsPage, keepAlive: true },
   { path: '/settings', component: SettingsPage, keepAlive: true },
   { path: '/about', component: AboutPage, keepAlive: true }
 ]
