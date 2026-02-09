@@ -46,6 +46,16 @@ internal static partial class ChaosFfi
         uint retries,
         byte overwrite);
 
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_livestream_decode_manifest_json(
+        string input_utf8,
+        byte drop_inaccessible_high_qualities);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_livestream_resolve_variant_json(
+        string input_utf8,
+        string variant_id_utf8);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void chaos_danmaku_callback(IntPtr event_json_utf8, IntPtr user_data);
 
@@ -78,6 +88,34 @@ var json = ChaosFfi.TakeString(p) ?? throw new Exception("search failed: " + Cha
 
 var items = JsonDocument.Parse(json).RootElement;
 Console.WriteLine("items=" + items.GetArrayLength());
+```
+
+## 直播源解析（manifest + 二段解析）
+
+```csharp
+static string TakeOrThrow(IntPtr p, string what)
+{
+    var s = ChaosFfi.TakeString(p);
+    if (!string.IsNullOrEmpty(s)) return s;
+    var err = ChaosFfi.TakeString(ChaosFfi.chaos_ffi_last_error_json());
+    throw new Exception($"{what} failed: {err}");
+}
+
+var input = "https://live.bilibili.com/1";
+
+// 1) decode manifest
+var manifestJson = TakeOrThrow(ChaosFfi.chaos_livestream_decode_manifest_json(input, 1), "decode_manifest");
+Console.WriteLine(manifestJson);
+
+// 2) pick a variant_id from manifest.variants[i].id, then resolve (optional, platform-dependent)
+// Here we just show how you'd call it:
+var variantId = "bili_live:2000:原画";
+var variantJson = TakeOrThrow(ChaosFfi.chaos_livestream_resolve_variant_json(input, variantId), "resolve_variant");
+Console.WriteLine(variantJson);
+
+// Player-side hints:
+// - Use manifest.playback.referer / user_agent as request headers.
+// - Prefer variant.url; fallback to variant.backup_urls.
 ```
 
 ## 弹幕（callback + poll）
