@@ -546,8 +546,14 @@ async fn open_chat_window(app: AppHandle) -> Result<(), String> {
             }
         });
     }
-    if cfg!(debug_assertions) && std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
-        w.open_devtools();
+    // `cfg!(debug_assertions)` is a runtime check and still compiles the block in release,
+    // but `open_devtools` is not always available depending on tauri/wry feature flags.
+    // Gate it at compile time so release builds never reference the method.
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
+            w.open_devtools();
+        }
     }
 
     Ok(())
@@ -632,8 +638,11 @@ async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(),
             }
         });
     }
-    if cfg!(debug_assertions) && std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
-        w.open_devtools();
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
+            w.open_devtools();
+        }
     }
     Ok(())
 }
