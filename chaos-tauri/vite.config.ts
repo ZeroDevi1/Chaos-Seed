@@ -12,7 +12,9 @@ export default defineConfig({
   clearScreen: false,
   server: {
     strictPort: true,
-    port: 5173
+    port: 5173,
+    // Avoid IPv6/localhost resolution differences across WebView2 instances on Windows.
+    host: '127.0.0.1'
   },
   resolve: {
     alias: {

@@ -309,11 +309,45 @@ fn ensure_window(app: &AppHandle, label: &str) -> Option<tauri::WebviewWindow> {
     Some(w)
 }
 
-// NOTE: We intentionally use `WebviewUrl::App("index.html")` for child windows even in dev.
+fn child_url_from_main(app: &AppHandle, view: &str, overlay_opaque: Option<bool>) -> tauri::WebviewUrl {
+    // Prefer reusing the main window's origin in dev mode (http(s) dev server),
+    // since it is the most reliable way to ensure child windows load the exact same frontend.
+    if let Some(main) = app.get_webview_window("main") {
+        if let Ok(mut u) = main.url() {
+            let scheme = u.scheme().to_ascii_lowercase();
+            if scheme == "http" || scheme == "https" {
+                u.set_fragment(None);
+                u.set_username("").ok();
+                u.set_password(None).ok();
+                u.set_path("/");
+                u.set_query(None);
+                let mut pairs: Vec<(String, String)> = Vec::new();
+                pairs.push(("view".to_string(), view.to_string()));
+                if view == "overlay" {
+                    if overlay_opaque.unwrap_or(false) {
+                        pairs.push(("overlay".to_string(), "opaque".to_string()));
+                    }
+                }
+                let query = url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+                    .finish();
+                u.set_query(Some(&query));
+                return tauri::WebviewUrl::External(u);
+            }
+        }
+    }
+
+    // Fallback for non-http schemes (tauri:// in production): use the app URL + init script boot params.
+    tauri::WebviewUrl::App("index.html".into())
+}
+
+// NOTE: Child windows must load the same frontend origin as the main window.
 //
-// In Tauri dev mode, the runtime proxies the app URL to the Vite dev server. This avoids potential
-// `localhost` resolution / IPv6 / WebView2 quirks that can affect `WebviewUrl::External(http://localhost:...)`,
-// and makes child windows behave like the main window.
+// In dev mode, the main window is typically `http(s)://...` (Vite dev server). We reuse that URL so
+// Chat/Overlay are guaranteed to load the same assets (and we avoid `tauri://` proxy quirks).
+//
+// In production, the main window uses the app protocol (`tauri://...`). We fall back to
+// `WebviewUrl::App("index.html")` and use init-script boot params (since `App(PathBuf)` cannot carry query).
 
 fn child_init_script(boot: serde_json::Value) -> String {
     // A tiny debug strip that renders even if the app bundle fails to mount.
@@ -380,8 +414,8 @@ fn open_chat_window(app: AppHandle) -> Result<(), String> {
     }
     let boot = serde_json::json!({ "view": "chat", "label": "chat", "build": env!("CARGO_PKG_VERSION") });
     let init_script = child_init_script(boot);
-    let url = tauri::WebviewUrl::App("index.html".into());
-    println!("[tauri] open_chat_window url={url} (app url; dev is proxied)");
+    let url = child_url_from_main(&app, "chat", None);
+    println!("[tauri] open_chat_window url={url}");
     let eval_script = init_script.clone();
     let w = tauri::WebviewWindowBuilder::new(
         &app,
@@ -411,6 +445,9 @@ fn open_chat_window(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let _ = w.show();
     let _ = w.set_focus();
+    if cfg!(debug_assertions) && std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
+        w.open_devtools();
+    }
 
     Ok(())
 }
@@ -430,8 +467,8 @@ fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), Strin
         "build": env!("CARGO_PKG_VERSION")
     });
     let init_script = child_init_script(boot);
-    let url = tauri::WebviewUrl::App("index.html".into());
-    println!("[tauri] open_overlay_window opaque={opaque} url={url} (app url; dev is proxied)");
+    let url = child_url_from_main(&app, "overlay", Some(opaque));
+    println!("[tauri] open_overlay_window opaque={opaque} url={url}");
     let eval_script = init_script.clone();
 
     let w = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
@@ -461,6 +498,9 @@ fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), Strin
     let _ = w.set_focus();
     // Ensure overlay never blocks clicks, even before the frontend mounts / permissions are evaluated in JS.
     let _ = w.set_ignore_cursor_events(true);
+    if cfg!(debug_assertions) && std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
+        w.open_devtools();
+    }
     Ok(())
 }
 
@@ -488,6 +528,24 @@ fn set_backdrop(app: AppHandle, mode: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            let label = window.label();
+            if label != "chat" && label != "overlay" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    println!("[tauri] window CloseRequested label={label}");
+                }
+                tauri::WindowEvent::Focused(focused) => {
+                    println!("[tauri] window Focused label={label} focused={focused}");
+                }
+                tauri::WindowEvent::Destroyed => {
+                    println!("[tauri] window Destroyed label={label}");
+                }
+                _ => {}
+            }
+        })
         .setup(|app| {
             // Enable Mica by default on Windows for a more native Win11 look.
             // The frontend can later call `set_backdrop` to switch to `none` without restarting.
