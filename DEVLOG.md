@@ -68,6 +68,10 @@
   - 弹幕按窗口订阅推送：高频 `danmaku_msg` 只发给订阅窗口；打开 Chat/Overlay 后主窗停止刷新，降低压力。
   - 弹幕渲染低延迟：从“定时 flush”改为尽快渲染（并在高压时分帧排空），减少“延时感”。
   - Settings 页布局更原生、弹幕滚动行为修正、浅/深色主题 + Mica 下减少割裂。
+- Tauri UI（直播源 / 播放器）：
+  - 直播源页接入解析能力：输入 URL → 解析 manifest/variants → 下拉选择线路/清晰度；文本区实时显示直连 URL（含 backup_urls）。
+  - 新窗口播放器（Master 风格）：Hls.js + Libmedia AvPlayer 多内核；支持 failover（候选 URL 顺序与重试）、播放器窗口关闭即销毁并终止播放。
+  - Windows dev 兼容性：libmedia 相关依赖从 Vite optimizeDeps 排除；建议遇到异常时删除 `chaos-tauri/node_modules/.vite` 后重启。
 - commits（关键节点）：
   - livestream core/ffi：`68a4017`
   - windows 多窗口稳定：`1be9028`
@@ -75,3 +79,4 @@
   - UI 精修（Chat/Overlay/Settings/滚动/主题基线）：`aa22f62`
   - 弹幕低延迟 + 主窗停推兜底：`bfadcd4`
   - 主题：Mica 下浅色不透底 + 深色融合：`4d05c31`
+  - livestream UI + player：`ee0ef1d`

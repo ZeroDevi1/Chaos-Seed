@@ -7,7 +7,8 @@
 - 字幕（已完成）：Thunder 搜索 / 列表展示 / 单条下载（每次下载选择目录，支持超时与重试）
 - 弹幕（已完成）：BiliLive / Douyu / Huya 连接与解析；UI 已接入（Chat / Overlay）
 - 直播源解析（已完成 core/ffi）：BiliLive / Douyu / Huya 的 `manifest/variants` 解析 + `resolve_variant` 二段补全
-- UI（进行中）：直播源解析（manifest/variants）UI 设计与接入；播放层（播放器/清晰度切换）后置
+- UI（已完成初版）：直播源解析 UI（manifest/variants）+ 新窗口播放器（Master 风格；Hls.js + Libmedia AvPlayer），支持清晰度/线路切换、直连 URL 调试显示、关闭窗口自动停止播放
+- UI（后续增强）：反盗链/本地代理（Referer/UA/Cookie 注入）、播放诊断与更完善的自动重试策略、播放器观感与快捷键
 
 ## 构建前提（重要）
 
@@ -170,6 +171,8 @@ Linux 上若缺少系统依赖（GTK/WebKit 等）会编译失败；请按 Tauri
 pnpm install
 pnpm tauri:dev
 ```
+
+Windows 开发时如果遇到依赖预构建（`node_modules/.vite/deps/*`）相关报错或播放器黑屏，请先删除 `chaos-tauri/node_modules/.vite` 后重启 `tauri:dev`。
 
 构建二进制（不打包安装器，适合 CI/快速验证）：
 

@@ -22,29 +22,41 @@
 - P1-14 UI：Chat/Overlay 精简 + 弹幕外层滚动条修复 + Settings 原生化布局 + 主题基线：Done @ 2026-02-09（commit: `aa22f62`）
 - P1-15 弹幕渲染：低延迟（Rust 推送后尽快渲染）+ 打开 Chat/Overlay 后主窗停止刷新：Done @ 2026-02-09（commit: `bfadcd4`）
 - P1-16 主题：Mica 下浅色不透底 + 深色表面融合（减少割裂）：Done @ 2026-02-09（commit: `4d05c31`）
+- P1-17 直播源：解析 UI + 新窗口播放器（线路/清晰度切换 + 关闭即停止）：Done @ 2026-02-09（commit: `ee0ef1d`）
 
 ## Next（近期要交付）
 
-### P1：直播源解析 UI 设计与接入（manifest/variants）
+### P0：播放器诊断与兼容模式开关
 
 **交付目标**
-- UI 侧接入 `chaos-core/chaos-ffi` 的直播解析能力：
-  - 输入 URL/房间号 → 解析出 `title / is_living / variants`
-  - 列表展示清晰度/线路（variants），并能点击切换
-  - 对需要二段解析的平台：点击 variant 时调用 `resolve_variant` 补齐最终 URL
-- “先可用、后播放器”：本阶段只需要把最终 URL + playback hints（UA/Referer 等）展示出来并支持复制到剪贴板。
+- 播放器窗口提供“诊断信息”与“兼容模式”：
+  - 显示当前引擎（HLS/AvPlayer/Native）、当前实际在播 URL（含候选序号）、最近一次错误原因
+  - 提供开关：启用/禁用 AvPlayer 的 Hardware/WebCodecs（遇到黑屏/有声无画时快速切换）
 
 **验收标准**
-- 能输入 URL → 显示标题与开播状态 → 显示 variants 列表（含 label/quality）
-- 切换 variant 时，若需要二段解析能正确补齐 URL（BiliLive/Douyu）
-- 能将最终 URL 显示出来（至少支持复制到剪贴板），并一并显示/复制 referer/user-agent 等 playback hints 供播放层使用
+- 能复现“黑屏/有声无画”时，用户无需打开 DevTools 也能看到关键诊断信息
+- 切换兼容模式后无需重启应用即可重建播放器并重新播放
 
 ---
 
-### P2：直播播放层（后置）
+### P1：反盗链与请求头注入（按需）
 
 **交付目标**
-- 选定可分发的播放方案（内置播放器 / WebView / 外部播放器），并打通“选 variant → 播放”的最短路径。
+- 对需要 Referer/UA 的直播源提供注入能力（优先最小实现）：
+  - HLS：通过 `hls.js` 的 xhrSetup/headers 注入
+  - AvPlayer：通过 `load(..., { http: { headers } })` 注入
+- 若仍不够（部分平台强依赖 cookie 或更复杂校验），再引入本地代理方案
 
 **验收标准**
-- 至少能用选定方案播放一个平台的直播流（先 POC，再工程化）。
+- 对至少一个平台（优先 Huya 或 BiliLive）验证注入生效并稳定播放
+
+---
+
+### P2：播放体验优化
+
+**交付目标**
+- 自动重试策略完善（例如优先 backup_urls、失败回退、超时提示）
+- 播放控制栏交互优化（快捷键/全屏/音量等）
+
+**验收标准**
+- URL 失效/节点不可用时能自动切换到可用节点并给出提示

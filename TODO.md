@@ -12,10 +12,11 @@
 - Fluent Web Components 视觉/交互进一步贴近系统（间距、字体、边框、hover）
 
 ## 播放（直播源解析与播放）
-- 直播源解析（core/ffi）已支持 Huya / Douyu / BiliLive；下一步是 UI/播放接入与清晰度/线路切换
+- 直播源解析（core/ffi）已支持 Huya / Douyu / BiliLive；Tauri UI 已接入：解析（manifest/variants）+ 清晰度/线路切换 + 新窗口播放（Hls.js/AvPlayer）
 - 直播源解析：支持常见聚合格式（例如 m3u / json），并提供分组/搜索
-- 播放器接入：内置播放器或 WebView 播放（优先可分发方案）
-- 播放体验：清晰度/线路切换、错误提示与重试
+- 播放器接入（持续演进）：更完善的播放控制栏/快捷键/状态面板（码率、延迟、丢帧等）
+- 播放体验：错误提示、自动重试与 CDN failover 策略完善（不同平台/线路的兼容性）
+- 反盗链（必要时）：本地代理注入 Referer/UA/Cookie；或对 HLS 请求做 header 注入
 - 获取实时播放的音频/媒体信息（Win11 System Media Session），用于本地音乐自动匹配在线歌词
 
 ## 歌词（实时 / 桌面歌词）
