@@ -72,6 +72,8 @@
   async function openOverlayWindow() {
     try {
       await invoke('open_overlay_window', { opaque: get(prefs).overlayMode === 'opaque' })
+      // Best-effort: immediately stop pushing high-frequency messages to the main window.
+      void invoke('danmaku_set_msg_subscription', { enabled: false }).catch(() => {})
     } catch {
       // ignore
     }
@@ -95,6 +97,7 @@
 
     let routePath = ''
     let chatOpen = false
+    let overlayOpen = false
 
     const setSubscription = (enabled: boolean) => {
       if (subscribed === enabled) return
@@ -103,7 +106,7 @@
     }
 
     const recompute = () => {
-      const want = shouldSubscribeMainDanmaku({ routePath, chatOpen })
+      const want = shouldSubscribeMainDanmaku({ routePath, chatOpen, overlayOpen })
       setSubscription(want)
     }
 
@@ -114,6 +117,7 @@
 
     unPresence = windowPresence.subscribe((s) => {
       chatOpen = s.chatOpen
+      overlayOpen = s.overlayOpen
       recompute()
     })
 

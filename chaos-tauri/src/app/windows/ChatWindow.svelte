@@ -91,9 +91,11 @@
   })
 </script>
 
-<div class="window-root">
-  <div class="page" style="height: 100%">
-    <div class="text-secondary">{connStatus}</div>
+<div class="chat-root">
+  {#if connStatus}
+    <div class="chat-status text-secondary">{connStatus}</div>
+  {/if}
+  <div class="chat-body">
     <DanmakuList
       bind:store={listStore}
       emptyText="等待弹幕..."

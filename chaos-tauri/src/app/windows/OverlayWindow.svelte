@@ -101,10 +101,10 @@
     const context: CanvasRenderingContext2D = ctx
 
     // Visual rule:
-    // - Transparent overlay: pure black text, NO shadow (avoid "double" look).
-    // - Opaque overlay: white text, subtle shadow allowed.
-    const fg = opaque ? '#ffffff' : '#000000'
-    const shadow = opaque ? 'rgba(0,0,0,0.65)' : 'transparent'
+    // - Transparent overlay: WHITE text (per requirement), avoid blur shadows that look like "double".
+    //   Use a crisp outline instead for readability on bright backgrounds.
+    // - Opaque overlay: white text, no heavy shadow (avoid duplicate-looking glyphs).
+    const fg = '#ffffff'
     // Opaque overlay uses a stable dark background regardless of theme (better readability).
     const bg = '#1f1f1f'
 
@@ -197,7 +197,8 @@
       const dt = Math.min(80, Math.max(0, ts - lastTs))
       lastTs = ts
 
-      spawn(2)
+      // Spawn more per frame to reduce perceived latency (avoid "timer refresh" feel).
+      spawn(6)
 
       if (opaque) {
         context.fillStyle = bg
@@ -208,10 +209,13 @@
 
       context.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
       context.fillStyle = fg
-      context.shadowColor = shadow
-      context.shadowBlur = opaque ? 2 : 0
-      context.shadowOffsetX = 0
-      context.shadowOffsetY = 1
+      context.shadowBlur = 0
+      if (!opaque) {
+        context.lineJoin = 'round'
+        context.miterLimit = 2
+        context.lineWidth = 3
+        context.strokeStyle = 'rgba(0,0,0,0.65)'
+      }
       for (let i = 0; i < sprites.length; i++) {
         sprites[i].x -= sprites[i].speedPxPerSec * (dt / 1000)
       }
@@ -221,6 +225,10 @@
       for (let i = 0; i < sprites.length; i++) {
         const s = sprites[i]
         if (s.x + s.w < -40) continue
+        if (!opaque) {
+          // Crisp outline helps on transparent overlays without looking like blurred double text.
+          context.strokeText(s.text, s.x, s.y + 18)
+        }
         context.fillText(s.text, s.x, s.y + 18)
         sprites[write++] = s
       }
@@ -232,9 +240,12 @@
         context.shadowBlur = 0
         context.fillStyle = fg
         const y = 24
+        if (!opaque) context.strokeText('等待弹幕...（ESC 关闭）', 12, y)
         context.fillText('等待弹幕...（ESC 关闭）', 12, y)
         if (clickThrough) {
-          context.fillText('鼠标穿透已开启：Alt+Tab 聚焦后按 F2 切换交互', 12, y + 20)
+          const hint = '鼠标穿透已开启：Alt+Tab 聚焦后按 F2 切换交互'
+          if (!opaque) context.strokeText(hint, 12, y + 20)
+          context.fillText(hint, 12, y + 20)
         }
         context.restore()
       }
@@ -256,18 +267,11 @@
         context.globalAlpha = 0.7
         context.fillStyle = fg
         const y = Math.max(18, h - 14)
-        context.fillText('鼠标穿透已开启：Alt+Tab 聚焦后按 F2 切换交互，ESC 关闭', 12, y)
+        const hint = '鼠标穿透已开启：Alt+Tab 聚焦后按 F2 切换交互，ESC 关闭'
+        if (!opaque) context.strokeText(hint, 12, y)
+        context.fillText(hint, 12, y)
         context.restore()
       }
-
-      // Visual resize hint: a thick border so the user can see the window edges clearly.
-      context.save()
-      context.shadowBlur = 0
-      context.globalAlpha = 0.35
-      context.strokeStyle = opaque ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)'
-      context.lineWidth = 6
-      context.strokeRect(3, 3, Math.max(1, w - 6), Math.max(1, h - 6))
-      context.restore()
 
       raf = requestAnimationFrame(frame)
     }

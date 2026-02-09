@@ -298,7 +298,9 @@ async fn danmaku_connect(
         let _ = emit_to_known_windows(&app2, "danmaku_status", "已连接");
         while let Some(ev) = rx.recv().await {
             // Only push high-frequency danmaku messages to subscribed windows.
-            // This keeps background / hidden pages from doing unnecessary DOM work.
+            // Additionally: when any auxiliary renderer window is open (Chat/Overlay),
+            // we suppress `main` even if it's accidentally subscribed. This makes the
+            // behavior robust against missed frontend events and prevents the "main still refreshes" issue.
             let subs: Vec<String> = {
                 let st = app2.state::<DanmakuState>();
                 st.msg_subscribers
@@ -308,9 +310,14 @@ async fn danmaku_connect(
                     .cloned()
                     .collect()
             };
+            let suppress_main =
+                app2.get_webview_window("chat").is_some() || app2.get_webview_window("overlay").is_some();
 
             for msg in danmaku_ui::map_event_to_ui(ev) {
                 for label in &subs {
+                    if suppress_main && label == "main" {
+                        continue;
+                    }
                     let _ = app2.emit_to(label.as_str(), "danmaku_msg", msg.clone());
                 }
             }

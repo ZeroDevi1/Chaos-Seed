@@ -148,7 +148,9 @@ function renderRow(msg: DanmakuUiMessage, onOpenUrl?: (url: string) => void): HT
 
 export function createDanmakuListStore(opts: Opts): DanmakuListStore {
   const maxItems = opts.maxItems ?? 400
-  const flushIntervalMs = opts.flushIntervalMs ?? 50
+  // Default to frame-batched rendering for low latency (no visible "timer refresh" feel).
+  // Tests can still force interval flushing via `flushIntervalMs`.
+  const flushIntervalMs = opts.flushIntervalMs ?? 0
   const maxBatch = 80
   const dedupeWindowMs = 80
 
@@ -156,6 +158,10 @@ export function createDanmakuListStore(opts: Opts): DanmakuListStore {
   let dropped = 0
   let disposed = false
   const recent = new Map<string, number>()
+  const useInterval = Number.isFinite(flushIntervalMs) && flushIntervalMs > 0
+  let scheduledMicro = false
+  let scheduledRaf = false
+  let raf = 0
 
   function enqueue(msg: DanmakuUiMessage) {
     if (disposed) return
@@ -182,6 +188,33 @@ export function createDanmakuListStore(opts: Opts): DanmakuListStore {
       dropped += queue.length - keep.length
       queue = keep
     }
+
+    if (!useInterval) scheduleFlushMicro()
+  }
+
+  function scheduleFlushMicro() {
+    if (disposed) return
+    if (scheduledMicro) return
+    scheduledMicro = true
+    // Render ASAP after a Rust push (no perceptible timer delay).
+    // If we still have backlog after the microtask flush, continue draining over animation frames
+    // to avoid starving input/painter.
+    queueMicrotask(() => {
+      scheduledMicro = false
+      flush()
+      if (queue.length > 0) scheduleFlushRaf()
+    })
+  }
+
+  function scheduleFlushRaf() {
+    if (disposed) return
+    if (scheduledRaf) return
+    scheduledRaf = true
+    raf = requestAnimationFrame(() => {
+      scheduledRaf = false
+      flush()
+      if (queue.length > 0) scheduleFlushRaf()
+    })
   }
 
   function flush() {
@@ -211,7 +244,7 @@ export function createDanmakuListStore(opts: Opts): DanmakuListStore {
     opts.afterFlush?.(opts.listEl.childElementCount)
   }
 
-  const timer = window.setInterval(flush, flushIntervalMs)
+  const timer = useInterval ? window.setInterval(flush, flushIntervalMs) : 0
 
   return {
     enqueue,
@@ -223,7 +256,8 @@ export function createDanmakuListStore(opts: Opts): DanmakuListStore {
     },
     dispose: () => {
       disposed = true
-      window.clearInterval(timer)
+      if (timer) window.clearInterval(timer)
+      if (raf) cancelAnimationFrame(raf)
     }
   }
 }

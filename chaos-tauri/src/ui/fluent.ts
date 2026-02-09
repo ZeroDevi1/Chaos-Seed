@@ -14,8 +14,8 @@ import {
 
 export type ResolvedTheme = 'light' | 'dark'
 
-// Match our CSS accent (Win11 Fluent blue): #0078D4
-const ACCENT = SwatchRGB.create(0, 120, 212)
+// Match our CSS accent (WeChat-like green): #07C160
+const ACCENT = SwatchRGB.create(7, 193, 96)
 
 let registered = false
 const appliedCache = new WeakMap<HTMLElement, { lum?: number; accent?: unknown }>()
