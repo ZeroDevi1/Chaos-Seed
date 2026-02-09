@@ -59,6 +59,9 @@
   async function openChatWindow() {
     try {
       await invoke('open_chat_window')
+      // Best-effort: immediately stop pushing high-frequency messages to the main window.
+      // The window presence event may arrive slightly later; this avoids "main still renders" perception.
+      void invoke('danmaku_set_msg_subscription', { enabled: false }).catch(() => {})
       const mode = get(prefs).backdropMode
       void invoke('set_backdrop', { mode }).catch(() => {})
     } catch {

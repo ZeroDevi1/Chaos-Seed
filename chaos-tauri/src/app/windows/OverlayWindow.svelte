@@ -18,7 +18,6 @@
   const opaque = window.__CHAOS_SEED_BOOT?.overlayOpaque ?? params.get('overlay') === 'opaque'
 
   let canvasEl: HTMLCanvasElement | null = null
-  let msgCount = 0
   let win: ReturnType<typeof getCurrentWebviewWindow> | null = null
   let clickThrough = false
 
@@ -29,16 +28,6 @@
     } catch {
       // ignore
     }
-  }
-
-  function startDrag(ev: PointerEvent) {
-    if (ev.button !== 0) return
-    // Don't start dragging when the user is clicking the close button.
-    const t = ev.target as HTMLElement | null
-    if (t && typeof t.closest === 'function' && t.closest('button')) return
-    // Drag undecorated window.
-    if (!win) return
-    void win.startDragging()
   }
 
   onMount(() => {
@@ -112,11 +101,12 @@
     const context: CanvasRenderingContext2D = ctx
 
     // Visual rule:
-    // - Transparent overlay: black text
-    // - Opaque overlay: white text
+    // - Transparent overlay: pure black text, NO shadow (avoid "double" look).
+    // - Opaque overlay: white text, subtle shadow allowed.
     const fg = opaque ? '#ffffff' : '#000000'
-    const shadow = opaque ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)'
-    const bg = '#0b1220'
+    const shadow = opaque ? 'rgba(0,0,0,0.65)' : 'transparent'
+    // Opaque overlay uses a stable dark background regardless of theme (better readability).
+    const bg = '#1f1f1f'
 
     let w = 0
     let h = 0
@@ -138,6 +128,8 @@
     let qHead = 0
     let dropped = 0
     let lastMsgAt = 0
+    const dedupeWindowMs = 80
+    const recent = new Map<string, number>()
 
     const sprites: Sprite[] = []
     let lane = 0
@@ -146,6 +138,17 @@
     const topPad = 12
 
     function enqueue(msg: DanmakuUiMessage) {
+      const key = `${msg.user}|${msg.text}|${msg.image_url ?? ''}|${msg.image_width ?? ''}`
+      const now = performance.now()
+      const last = recent.get(key)
+      if (last !== undefined && now - last < dedupeWindowMs) return
+      recent.set(key, now)
+      if (recent.size > 800) {
+        for (const [k, t] of recent) {
+          if (now - t > 5000) recent.delete(k)
+        }
+      }
+
       queue.push(msg)
       lastMsgAt = performance.now()
       if (queue.length > 600) {
@@ -206,7 +209,7 @@
       context.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
       context.fillStyle = fg
       context.shadowColor = shadow
-      context.shadowBlur = 3
+      context.shadowBlur = opaque ? 2 : 0
       context.shadowOffsetX = 0
       context.shadowOffsetY = 1
       for (let i = 0; i < sprites.length; i++) {
@@ -280,7 +283,6 @@
         void invoke('danmaku_set_msg_subscription', { enabled: true }).catch(() => {})
 
         const un = await listen<DanmakuUiMessage>('danmaku_msg', (e) => {
-          msgCount++
           enqueue(e.payload)
         })
         if (disposed) return un()
@@ -295,11 +297,5 @@
 </script>
 
 <div class={opaque ? 'overlay-root overlay-opaque' : 'overlay-root'}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="overlay-controls" on:pointerdown={startDrag}>
-    <span class="overlay-title">Overlay ({msgCount})</span>
-    <span class="overlay-spacer"></span>
-    <button class="overlay-btn" type="button" on:click|stopPropagation={closeSelf}>关闭</button>
-  </div>
   <canvas bind:this={canvasEl} class="overlay-canvas"></canvas>
 </div>

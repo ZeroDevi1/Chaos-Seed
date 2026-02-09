@@ -109,14 +109,16 @@
   <main class="main-col">
     <div class="content">
       {#each KEEP_ROUTES as r (r.path)}
-        <div style:display={selectedPath === r.path ? 'block' : 'none'}>
+        <div class="route-host" style:display={selectedPath === r.path ? 'flex' : 'none'}>
           <svelte:component this={r.component} />
         </div>
       {/each}
 
       {#if !activeDef.keepAlive}
         {#key selectedPath}
-          <svelte:component this={activeDef.component} />
+          <div class="route-host">
+            <svelte:component this={activeDef.component} />
+          </div>
         {/key}
       {/if}
     </div>

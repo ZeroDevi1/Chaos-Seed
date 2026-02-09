@@ -9,7 +9,6 @@
   import type { DanmakuUiMessage } from '@/shared/types'
 
   let connStatus = ''
-  let msgCount = 0
   let listStore: DanmakuListStore | null = null
 
   let win: ReturnType<typeof getCurrentWebviewWindow> | null = null
@@ -79,7 +78,6 @@
     void (async () => {
       try {
         const un = await listen<DanmakuUiMessage>('danmaku_msg', (e) => {
-          msgCount++
           listStore?.enqueue(e.payload)
         })
         if (disposed) return un()
@@ -95,12 +93,6 @@
 
 <div class="window-root">
   <div class="page" style="height: 100%">
-    <div class="row gap-12 wrap align-center">
-      <h2 class="heading" style="margin: 0">弹幕 - Chat ({msgCount})</h2>
-      <div class="topbar-spacer"></div>
-      <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-      <fluent-button appearance="outline" class="w-92" on:click={closeSelf}>关闭</fluent-button>
-    </div>
     <div class="text-secondary">{connStatus}</div>
     <DanmakuList
       bind:store={listStore}
