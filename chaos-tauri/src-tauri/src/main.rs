@@ -336,9 +336,19 @@ fn child_init_script(boot: serde_json::Value) -> String {
     // A tiny debug strip that renders even if the app bundle fails to mount.
     // This is critical for diagnosing "blank/transparent" windows in release builds.
     let boot_json = boot.to_string();
+    // Force a distinctive title so we can tell if the window actually loaded our injected boot params.
+    // Webviews often overwrite the native window title with `document.title`.
+    let title = boot
+        .get("view")
+        .and_then(|v| v.as_str())
+        .map(|v| format!("Chaos Seed [{v}]"))
+        .unwrap_or_else(|| "Chaos Seed [boot]".to_string());
+    let title_json = serde_json::Value::String(title).to_string();
+
     format!(
         r#"
 window.__CHAOS_SEED_BOOT = {boot_json};
+(function() {{ try {{ document.title = {title_json}; }} catch (e) {{}} }})();
 (function() {{
   function safe(v) {{ try {{ return JSON.stringify(v); }} catch (e) {{ return String(v); }} }}
   function text() {{
@@ -389,6 +399,8 @@ fn open_chat_window(app: AppHandle) -> Result<(), String> {
     let init_script = child_init_script(boot);
     let url = make_child_url(&app, "chat", false)
         .unwrap_or_else(|| tauri::WebviewUrl::App("index.html".into()));
+    println!("[tauri] open_chat_window url={url}");
+    let eval_script = init_script.clone();
     let w = tauri::WebviewWindowBuilder::new(
         &app,
         "chat",
@@ -400,6 +412,19 @@ fn open_chat_window(app: AppHandle) -> Result<(), String> {
         // Transparent multi-window WebView2 can be flaky on some machines; keep Chat opaque for stability.
         .transparent(false)
         .initialization_script(init_script)
+        .on_page_load(move |window, payload| {
+            use tauri::webview::PageLoadEvent;
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    println!("[tauri] chat PageLoad Started url={}", payload.url());
+                }
+                PageLoadEvent::Finished => {
+                    println!("[tauri] chat PageLoad Finished url={}", payload.url());
+                    // Fallback: inject the boot bar again after load in case init scripts didn't run.
+                    let _ = window.eval(eval_script.clone());
+                }
+            }
+        })
         .build()
         .map_err(|e| e.to_string())?;
     let _ = w.show();
@@ -425,6 +450,8 @@ fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), Strin
     let init_script = child_init_script(boot);
     let url = make_child_url(&app, "overlay", opaque)
         .unwrap_or_else(|| tauri::WebviewUrl::App("index.html".into()));
+    println!("[tauri] open_overlay_window opaque={opaque} url={url}");
+    let eval_script = init_script.clone();
 
     let w = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
         .title("弹幕 - Overlay")
@@ -435,6 +462,18 @@ fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), Strin
         .transparent(!opaque)
         .always_on_top(true)
         .initialization_script(init_script)
+        .on_page_load(move |window, payload| {
+            use tauri::webview::PageLoadEvent;
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    println!("[tauri] overlay PageLoad Started url={}", payload.url());
+                }
+                PageLoadEvent::Finished => {
+                    println!("[tauri] overlay PageLoad Finished url={}", payload.url());
+                    let _ = window.eval(eval_script.clone());
+                }
+            }
+        })
         .build()
         .map_err(|e| e.to_string())?;
     let _ = w.show();
