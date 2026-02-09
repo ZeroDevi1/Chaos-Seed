@@ -44,12 +44,16 @@
       win = null
     }
 
+    // Prefer Chat as the primary renderer when it is open (main window will unsubscribe).
+    void invoke('danmaku_set_msg_subscription', { enabled: true }).catch(() => {})
+
     const cleanup = () => {
       disposed = true
       unStatus?.()
       unMsg?.()
       if (onKey) window.removeEventListener('keydown', onKey, true)
       if (onUnload) window.removeEventListener('beforeunload', onUnload, true)
+      void invoke('danmaku_set_msg_subscription', { enabled: false }).catch(() => {})
     }
 
     onUnload = () => cleanup()

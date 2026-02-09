@@ -1,9 +1,9 @@
 <script lang="ts">
+  import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
   import { onMount } from 'svelte'
 
-  import { resolvedTheme } from '@/stores/prefs'
   import type { DanmakuUiMessage } from '@/shared/types'
 
   type Sprite = {
@@ -20,7 +20,7 @@
   let canvasEl: HTMLCanvasElement | null = null
   let msgCount = 0
   let win: ReturnType<typeof getCurrentWebviewWindow> | null = null
-  let clickThrough = true
+  let clickThrough = false
 
   async function closeSelf() {
     if (!win) return
@@ -47,7 +47,6 @@
     let stopResize: (() => void) | undefined
     let stopAnim: (() => void) | undefined
     let stopKey: (() => void) | undefined
-    let unTheme: (() => void) | undefined
     let onUnload: (() => void) | undefined
 
     try {
@@ -61,9 +60,9 @@
       stopAnim?.()
       stopResize?.()
       stopKey?.()
-      unTheme?.()
       unMsg?.()
       if (onUnload) window.removeEventListener('beforeunload', onUnload, true)
+      void invoke('danmaku_set_msg_subscription', { enabled: false }).catch(() => {})
     }
     onUnload = () => cleanup()
     window.addEventListener('beforeunload', onUnload, true)
@@ -88,8 +87,8 @@
       }
     }
 
-    // Default: let clicks pass through to the main window so the overlay doesn't "freeze" the UI.
-    void applyClickThrough(true)
+    // Default: interactive. Use F2 to toggle click-through on demand.
+    void applyClickThrough(false)
 
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') {
@@ -112,17 +111,12 @@
     if (!ctx) throw new Error('canvas 2d context not available')
     const context: CanvasRenderingContext2D = ctx
 
-    let bg = 'rgba(0,0,0,0)'
-    let fg = '#ffffff'
-
-    function refreshColors() {
-      const st = getComputedStyle(document.documentElement)
-      bg = st.getPropertyValue('--app-bg').trim() || '#000000'
-      fg = st.getPropertyValue('--text-primary').trim() || '#ffffff'
-    }
-    refreshColors()
-
-    unTheme = resolvedTheme.subscribe(() => refreshColors())
+    // Visual rule:
+    // - Transparent overlay: black text
+    // - Opaque overlay: white text
+    const fg = opaque ? '#ffffff' : '#000000'
+    const shadow = opaque ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)'
+    const bg = '#0b1220'
 
     let w = 0
     let h = 0
@@ -211,7 +205,7 @@
 
       context.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
       context.fillStyle = fg
-      context.shadowColor = 'rgba(0,0,0,0.75)'
+      context.shadowColor = shadow
       context.shadowBlur = 3
       context.shadowOffsetX = 0
       context.shadowOffsetY = 1
@@ -263,6 +257,15 @@
         context.restore()
       }
 
+      // Visual resize hint: a thick border so the user can see the window edges clearly.
+      context.save()
+      context.shadowBlur = 0
+      context.globalAlpha = 0.35
+      context.strokeStyle = opaque ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)'
+      context.lineWidth = 6
+      context.strokeRect(3, 3, Math.max(1, w - 6), Math.max(1, h - 6))
+      context.restore()
+
       raf = requestAnimationFrame(frame)
     }
     raf = requestAnimationFrame(frame)
@@ -273,6 +276,9 @@
 
     void (async () => {
       try {
+        // Overlay is a renderer: subscribe to high-frequency danmaku messages while it is open.
+        void invoke('danmaku_set_msg_subscription', { enabled: true }).catch(() => {})
+
         const un = await listen<DanmakuUiMessage>('danmaku_msg', (e) => {
           msgCount++
           enqueue(e.payload)

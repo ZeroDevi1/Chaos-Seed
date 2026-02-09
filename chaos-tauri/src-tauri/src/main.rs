@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -16,6 +17,9 @@ mod danmaku_ui;
 const HOMEPAGE: &str = "https://github.com/ZeroDevi1/Chaos-Seed";
 
 struct ActiveDanmaku {
+    input: String,
+    site: String,
+    room_id: String,
     session: DanmakuSession,
     reader_task: tokio::task::JoinHandle<()>,
 }
@@ -23,6 +27,13 @@ struct ActiveDanmaku {
 #[derive(Default)]
 struct DanmakuState {
     active: Mutex<Option<ActiveDanmaku>>,
+    msg_subscribers: Mutex<HashSet<String>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct WindowStatePayload {
+    label: String,
+    open: bool,
 }
 
 async fn stop_active(active: ActiveDanmaku) {
@@ -286,15 +297,31 @@ async fn danmaku_connect(
     let reader_task = tokio::spawn(async move {
         let _ = emit_to_known_windows(&app2, "danmaku_status", "已连接");
         while let Some(ev) = rx.recv().await {
-            // Map core events to UI-friendly messages.
+            // Only push high-frequency danmaku messages to subscribed windows.
+            // This keeps background / hidden pages from doing unnecessary DOM work.
+            let subs: Vec<String> = {
+                let st = app2.state::<DanmakuState>();
+                st.msg_subscribers
+                    .lock()
+                    .expect("danmaku subscribers mutex")
+                    .iter()
+                    .cloned()
+                    .collect()
+            };
+
             for msg in danmaku_ui::map_event_to_ui(ev) {
-                let _ = emit_to_known_windows(&app2, "danmaku_msg", msg);
+                for label in &subs {
+                    let _ = app2.emit_to(label.as_str(), "danmaku_msg", msg.clone());
+                }
             }
         }
         let _ = emit_to_known_windows(&app2, "danmaku_status", "已断开");
     });
 
     *state.active.lock().expect("danmaku mutex") = Some(ActiveDanmaku {
+        input: input.clone(),
+        site: site.clone(),
+        room_id: room_id.clone(),
         session,
         reader_task,
     });
@@ -309,6 +336,25 @@ async fn danmaku_disconnect(app: AppHandle, state: State<'_, DanmakuState>) -> R
         stop_active(active).await;
     }
     let _ = emit_to_known_windows(&app, "danmaku_status", "已断开");
+    Ok(())
+}
+
+#[tauri::command]
+fn danmaku_set_msg_subscription(
+    window: tauri::Window,
+    state: State<'_, DanmakuState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let label = window.label().to_string();
+    let mut subs = state
+        .msg_subscribers
+        .lock()
+        .expect("danmaku subscribers mutex");
+    if enabled {
+        subs.insert(label);
+    } else {
+        subs.remove(&label);
+    }
     Ok(())
 }
 
@@ -363,12 +409,21 @@ fn child_url_from_main(
 // In production, the main window uses the app protocol (`tauri://...`). We fall back to
 // `WebviewUrl::App("index.html")` and use init-script boot params (since `App(PathBuf)` cannot carry query).
 
+fn debug_enabled() -> bool {
+    match std::env::var("CHAOS_SEED_DEBUG") {
+        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true"),
+        Err(_) => false,
+    }
+}
+
 fn child_init_script(boot: serde_json::Value) -> String {
-    // A tiny debug strip that renders even if the app bundle fails to mount.
-    // This is critical for diagnosing "blank/transparent" windows in release builds.
     let boot_json = boot.to_string();
-    // Force a distinctive title so we can tell if the window actually loaded our injected boot params.
-    // Webviews often overwrite the native window title with `document.title`.
+    if !debug_enabled() {
+        return format!("window.__CHAOS_SEED_BOOT = {boot_json};");
+    }
+
+    // A tiny debug strip that renders even if the app bundle fails to mount.
+    // Enabled only when CHAOS_SEED_DEBUG=1.
     let title = boot
         .get("view")
         .and_then(|v| v.as_str())
@@ -430,16 +485,23 @@ async fn open_chat_window(app: AppHandle) -> Result<(), String> {
         serde_json::json!({ "view": "chat", "label": "chat", "build": env!("CARGO_PKG_VERSION") });
     let init_script = child_init_script(boot);
     let url = child_url_from_main(&app, "chat", None);
-    println!("[tauri] open_chat_window url={url}");
-    let eval_script = init_script.clone();
-    let w = tauri::WebviewWindowBuilder::new(&app, "chat", url)
+    if debug_enabled() {
+        println!("[tauri] open_chat_window url={url}");
+    }
+    let mut builder = tauri::WebviewWindowBuilder::new(&app, "chat", url)
         .title("弹幕 - Chat")
         .inner_size(420.0, 640.0)
         .resizable(true)
         // Transparent multi-window WebView2 can be flaky on some machines; keep Chat opaque for stability.
         .transparent(false)
-        .initialization_script(init_script)
-        .on_page_load(move |window, payload| {
+        .initialization_script(init_script);
+    if debug_enabled() {
+        let eval_script = child_init_script(serde_json::json!({
+            "view": "chat",
+            "label": "chat",
+            "build": env!("CARGO_PKG_VERSION")
+        }));
+        builder = builder.on_page_load(move |window, payload| {
             use tauri::webview::PageLoadEvent;
             match payload.event() {
                 PageLoadEvent::Started => {
@@ -451,11 +513,39 @@ async fn open_chat_window(app: AppHandle) -> Result<(), String> {
                     let _ = window.eval(eval_script.clone());
                 }
             }
-        })
-        .build()
-        .map_err(|e| e.to_string())?;
+        });
+    }
+    let w = builder.build().map_err(|e| e.to_string())?;
     let _ = w.show();
     let _ = w.set_focus();
+    let _ = app.emit(
+        "chaos_window_state",
+        WindowStatePayload {
+            label: "chat".to_string(),
+            open: true,
+        },
+    );
+    {
+        let app2 = app.clone();
+        let label = "chat".to_string();
+        w.on_window_event(move |ev| {
+            if matches!(ev, tauri::WindowEvent::Destroyed) {
+                let st = app2.state::<DanmakuState>();
+                let mut subs = st
+                    .msg_subscribers
+                    .lock()
+                    .expect("danmaku subscribers mutex");
+                subs.remove(&label);
+                let _ = app2.emit(
+                    "chaos_window_state",
+                    WindowStatePayload {
+                        label: label.clone(),
+                        open: false,
+                    },
+                );
+            }
+        });
+    }
     if cfg!(debug_assertions) && std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
         w.open_devtools();
     }
@@ -465,9 +555,7 @@ async fn open_chat_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), String> {
-    if let Some(w) = ensure_window(&app, "overlay") {
-        // Safety net: ensure overlay won't block clicks even if frontend failed to mount.
-        let _ = w.set_ignore_cursor_events(true);
+    if let Some(_w) = ensure_window(&app, "overlay") {
         return Ok(());
     }
     let opaque = opaque.unwrap_or(false);
@@ -479,19 +567,27 @@ async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(),
     });
     let init_script = child_init_script(boot);
     let url = child_url_from_main(&app, "overlay", Some(opaque));
-    println!("[tauri] open_overlay_window opaque={opaque} url={url}");
-    let eval_script = init_script.clone();
-
-    let w = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
+    if debug_enabled() {
+        println!("[tauri] open_overlay_window opaque={opaque} url={url}");
+    }
+    let mut builder = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
         .title("弹幕 - Overlay")
         .inner_size(960.0, 320.0)
         .resizable(true)
-        .decorations(false)
+        // Keep native titlebar so the window can be moved/resized/closed without relying on JS.
+        .decorations(true)
         // Default to opaque on Windows for stability; transparent overlay is still available via settings.
         .transparent(!opaque)
         .always_on_top(true)
-        .initialization_script(init_script)
-        .on_page_load(move |window, payload| {
+        .initialization_script(init_script);
+    if debug_enabled() {
+        let eval_script = child_init_script(serde_json::json!({
+            "view": "overlay",
+            "label": "overlay",
+            "overlayOpaque": opaque,
+            "build": env!("CARGO_PKG_VERSION")
+        }));
+        builder = builder.on_page_load(move |window, payload| {
             use tauri::webview::PageLoadEvent;
             match payload.event() {
                 PageLoadEvent::Started => {
@@ -502,13 +598,40 @@ async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(),
                     let _ = window.eval(eval_script.clone());
                 }
             }
-        })
-        .build()
-        .map_err(|e| e.to_string())?;
+        });
+    }
+
+    let w = builder.build().map_err(|e| e.to_string())?;
     let _ = w.show();
     let _ = w.set_focus();
-    // Ensure overlay never blocks clicks, even before the frontend mounts / permissions are evaluated in JS.
-    let _ = w.set_ignore_cursor_events(true);
+    let _ = app.emit(
+        "chaos_window_state",
+        WindowStatePayload {
+            label: "overlay".to_string(),
+            open: true,
+        },
+    );
+    {
+        let app2 = app.clone();
+        let label = "overlay".to_string();
+        w.on_window_event(move |ev| {
+            if matches!(ev, tauri::WindowEvent::Destroyed) {
+                let st = app2.state::<DanmakuState>();
+                let mut subs = st
+                    .msg_subscribers
+                    .lock()
+                    .expect("danmaku subscribers mutex");
+                subs.remove(&label);
+                let _ = app2.emit(
+                    "chaos_window_state",
+                    WindowStatePayload {
+                        label: label.clone(),
+                        open: false,
+                    },
+                );
+            }
+        });
+    }
     if cfg!(debug_assertions) && std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
         w.open_devtools();
     }
@@ -539,24 +662,6 @@ fn set_backdrop(app: AppHandle, mode: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
-        .on_window_event(|window, event| {
-            let label = window.label();
-            if label != "chat" && label != "overlay" {
-                return;
-            }
-            match event {
-                tauri::WindowEvent::CloseRequested { .. } => {
-                    println!("[tauri] window CloseRequested label={label}");
-                }
-                tauri::WindowEvent::Focused(focused) => {
-                    println!("[tauri] window Focused label={label} focused={focused}");
-                }
-                tauri::WindowEvent::Destroyed => {
-                    println!("[tauri] window Destroyed label={label}");
-                }
-                _ => {}
-            }
-        })
         .setup(|app| {
             // Enable Mica by default on Windows for a more native Win11 look.
             // The frontend can later call `set_backdrop` to switch to `none` without restarting.
@@ -579,6 +684,7 @@ fn main() {
             danmaku_fetch_image,
             danmaku_connect,
             danmaku_disconnect,
+            danmaku_set_msg_subscription,
             open_chat_window,
             open_overlay_window,
             set_backdrop

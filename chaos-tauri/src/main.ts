@@ -3,12 +3,14 @@ import './style.css'
 import './ui/fluent'
 
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { mount, unmount } from 'svelte'
 
 import MainApp from './app/MainApp.svelte'
 import ChatApp from './app/ChatApp.svelte'
 import OverlayApp from './app/OverlayApp.svelte'
 import { resolveView } from './shared/bootView'
+import { windowPresence } from './stores/windowPresence'
 import { prefs, resolvedTheme } from './stores/prefs'
 import type { BackdropMode } from './shared/prefs'
 import { installDisableZoom } from './ui/disableZoom'
@@ -40,6 +42,18 @@ async function main() {
 
   // Reduce "WebView app" vibes: disable browser zoom shortcuts in the embedded webview.
   installDisableZoom()
+
+  let unWindowState: (() => void) | undefined
+  void (async () => {
+    try {
+      const un = await listen<{ label: string; open: boolean }>('chaos_window_state', (e) => {
+        windowPresence.setOpen(e.payload.label, e.payload.open)
+      })
+      unWindowState = un
+    } catch {
+      // ignore
+    }
+  })()
 
   let label: string | undefined
   try {
@@ -77,6 +91,7 @@ async function main() {
     stopCrossSync()
     unTheme()
     unBackdrop()
+    unWindowState?.()
     try {
       if (app) unmount(app)
     } catch {

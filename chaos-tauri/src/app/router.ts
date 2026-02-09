@@ -17,8 +17,9 @@ export const ROUTES: RouteDef[] = [
   { path: '/', component: HomePage, keepAlive: true },
   { path: '/subtitle', component: SubtitleDownloadPage, keepAlive: true },
   { path: '/live-source', component: LiveSourcePage, keepAlive: true },
-  // Danmaku page manages event listeners; don't keep it alive to avoid background subscriptions.
-  { path: '/danmaku', component: DanmakuPage, keepAlive: false },
+  // Keep Danmaku alive so the user can switch pages without losing input / connection / list state.
+  // We explicitly control backend subscriptions based on route focus + chat window presence.
+  { path: '/danmaku', component: DanmakuPage, keepAlive: true },
   { path: '/settings', component: SettingsPage, keepAlive: true },
   { path: '/about', component: AboutPage, keepAlive: true }
 ]
@@ -64,4 +65,3 @@ export function startRouter(): () => void {
   window.addEventListener('hashchange', update)
   return () => window.removeEventListener('hashchange', update)
 }
-

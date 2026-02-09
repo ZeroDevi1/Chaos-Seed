@@ -5,7 +5,10 @@
   import { get } from 'svelte/store'
 
   import DanmakuList from '@/app/components/DanmakuList.svelte'
+  import { routeStore } from '@/app/router'
+  import { shouldSubscribeMainDanmaku } from '@/shared/danmakuSubscription'
   import { prefs } from '@/stores/prefs'
+  import { windowPresence } from '@/stores/windowPresence'
   import type { DanmakuUiMessage } from '@/shared/types'
   import type { DanmakuListStore } from '@/danmaku/store'
 
@@ -83,6 +86,33 @@
     let disposed = false
     let unStatus: (() => void) | undefined
     let unMsg: (() => void) | undefined
+    let unRoute: (() => void) | undefined
+    let unPresence: (() => void) | undefined
+    let subscribed: boolean | null = null
+
+    let routePath = ''
+    let chatOpen = false
+
+    const setSubscription = (enabled: boolean) => {
+      if (subscribed === enabled) return
+      subscribed = enabled
+      void invoke('danmaku_set_msg_subscription', { enabled }).catch(() => {})
+    }
+
+    const recompute = () => {
+      const want = shouldSubscribeMainDanmaku({ routePath, chatOpen })
+      setSubscription(want)
+    }
+
+    unRoute = routeStore.subscribe((s) => {
+      routePath = s.path
+      recompute()
+    })
+
+    unPresence = windowPresence.subscribe((s) => {
+      chatOpen = s.chatOpen
+      recompute()
+    })
 
     void (async () => {
       try {
@@ -113,6 +143,10 @@
       disposed = true
       unStatus?.()
       unMsg?.()
+      unRoute?.()
+      unPresence?.()
+      // Best-effort: don't keep pushing high-frequency events to the main window once the app is closing.
+      setSubscription(false)
     }
   })
 </script>

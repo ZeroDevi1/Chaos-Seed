@@ -7,6 +7,7 @@ describe('router', () => {
     expect(resolveRoute('/')?.path).toBe('/')
     expect(resolveRoute('/subtitle')?.path).toBe('/subtitle')
     expect(resolveRoute('/danmaku')?.path).toBe('/danmaku')
+    expect(resolveRoute('/danmaku')?.keepAlive).toBe(true)
     expect(resolveRoute('/settings')?.path).toBe('/settings')
     expect(resolveRoute('/about')?.path).toBe('/about')
   })
@@ -24,4 +25,3 @@ describe('router', () => {
     expect(getHashPath('#/subtitle/')).toBe('/subtitle')
   })
 })
-
