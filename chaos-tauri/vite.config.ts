@@ -10,6 +10,26 @@ export default defineConfig({
     })
   ],
   clearScreen: false,
+  optimizeDeps: {
+    // libmedia packages are large and can be incompatible with Vite's dep optimizer on some
+    // Windows setups (missing chunk files under `node_modules/.vite/deps/*`).
+    // Keep them excluded so the dev server serves them as-is.
+    include: ['hls.js'],
+    exclude: [
+      '@libmedia/avplayer',
+      '@libmedia/avutil',
+      '@libmedia/avcodec',
+      '@libmedia/avformat',
+      '@libmedia/avpipeline',
+      '@libmedia/avnetwork',
+      '@libmedia/avrender',
+      '@libmedia/avprotocol',
+      '@libmedia/common',
+      '@libmedia/cheap',
+      '@libmedia/audioresample',
+      '@libmedia/audiostretchpitch'
+    ]
+  },
   server: {
     strictPort: true,
     port: 5173,

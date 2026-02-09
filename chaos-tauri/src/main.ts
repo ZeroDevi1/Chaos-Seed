@@ -9,6 +9,7 @@ import { mount, unmount } from 'svelte'
 import MainApp from './app/MainApp.svelte'
 import ChatApp from './app/ChatApp.svelte'
 import OverlayApp from './app/OverlayApp.svelte'
+import PlayerApp from './app/PlayerApp.svelte'
 import { resolveView } from './shared/bootView'
 import { windowPresence } from './stores/windowPresence'
 import { prefs, resolvedTheme } from './stores/prefs'
@@ -27,8 +28,8 @@ function mountError(e: unknown) {
   root.appendChild(pre)
 }
 
-function applyBackdrop(mode: BackdropMode, view: 'main' | 'chat' | 'overlay') {
-  if (view === 'overlay') {
+function applyBackdrop(mode: BackdropMode, view: 'main' | 'chat' | 'overlay' | 'player') {
+  if (view === 'overlay' || view === 'player') {
     document.documentElement.dataset.backdrop = 'none'
     return
   }
@@ -74,13 +75,13 @@ async function main() {
 
   let prevBackdrop: BackdropMode | null = null
   const unBackdrop = prefs.subscribe((s) => {
-    if (view === 'overlay') return
+  if (view === 'overlay' || view === 'player') return
     if (prevBackdrop === s.backdropMode) return
     prevBackdrop = s.backdropMode
     applyBackdrop(s.backdropMode, view)
   })
-  // Ensure overlay never tries to use backdrop CSS.
-  if (view === 'overlay') applyBackdrop('none', view)
+  // Ensure overlay/player never tries to use backdrop CSS.
+  if (view === 'overlay' || view === 'player') applyBackdrop('none', view)
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -107,6 +108,11 @@ async function main() {
 
   if (view === 'overlay') {
     app = mount(OverlayApp, { target: root })
+    return
+  }
+
+  if (view === 'player') {
+    app = mount(PlayerApp, { target: root })
     return
   }
 

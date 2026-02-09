@@ -24,6 +24,9 @@
     "@fluentui/web-components": "^2.6.1",
     "@microsoft/fast-element": "1.13.0",
     "@microsoft/fast-foundation": "2.49.6",
+    "@libmedia/avplayer": "^1.2.2",
+    "@libmedia/avutil": "^1.2.0",
+    "hls.js": "^1.6.15",
     "svelte": "^5.38.6"
   },
   "devDependencies": {

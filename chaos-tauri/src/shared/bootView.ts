@@ -1,4 +1,4 @@
-export type BootView = 'main' | 'chat' | 'overlay'
+export type BootView = 'main' | 'chat' | 'overlay' | 'player'
 
 export type ResolveViewInput = {
   boot: unknown
@@ -15,6 +15,7 @@ function viewFromQuery(search: string): BootView | null {
   const view = (params.get('view') || '').toLowerCase()
   if (view === 'chat') return 'chat'
   if (view === 'overlay') return 'overlay'
+  if (view === 'player') return 'player'
   if (view === 'main') return 'main'
   return null
 }
@@ -22,7 +23,7 @@ function viewFromQuery(search: string): BootView | null {
 function viewFromBoot(boot: unknown): BootView | null {
   if (!boot || typeof boot !== 'object') return null
   const v = (boot as { view?: unknown }).view
-  if (v === 'chat' || v === 'overlay' || v === 'main') return v
+  if (v === 'chat' || v === 'overlay' || v === 'player' || v === 'main') return v
   return null
 }
 
@@ -30,6 +31,7 @@ function viewFromLabel(label: string | null | undefined): BootView | null {
   const l = normalizeLabel(label)
   if (l === 'chat') return 'chat'
   if (l === 'overlay') return 'overlay'
+  if (l === 'player') return 'player'
   if (l === 'main') return 'main'
   return null
 }

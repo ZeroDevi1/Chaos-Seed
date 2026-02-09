@@ -7,13 +7,16 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use chaos_core::danmaku::client::DanmakuClient;
-use chaos_core::danmaku::model::{ConnectOptions, DanmakuSession};
+use chaos_core::danmaku::model::{ConnectOptions, DanmakuSession, Site};
+use chaos_core::livestream::client::LivestreamClient;
+use chaos_core::livestream::model::ResolveOptions;
 use chaos_core::now_playing;
 use chaos_core::subtitle;
 use chaos_core::subtitle::models::ThunderSubtitleItem;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod danmaku_ui;
+mod livestream_ui;
 
 const HOMEPAGE: &str = "https://github.com/ZeroDevi1/Chaos-Seed";
 
@@ -55,6 +58,16 @@ fn emit_to_known_windows<S: serde::Serialize + Clone>(
     Ok(())
 }
 
+fn parse_site_str(site: &str) -> Result<Site, String> {
+    let s = site.trim().to_ascii_lowercase();
+    match s.as_str() {
+        "bili_live" | "bili" | "bilibili" | "bl" => Ok(Site::BiliLive),
+        "douyu" | "dy" => Ok(Site::Douyu),
+        "huya" | "hy" => Ok(Site::Huya),
+        _ => Err(format!("unsupported site: {site}")),
+    }
+}
+
 #[tauri::command]
 async fn subtitle_search(
     query: String,
@@ -76,6 +89,33 @@ async fn subtitle_search(
     )
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn livestream_decode_manifest(
+    input: String,
+) -> Result<livestream_ui::LivestreamUiManifest, String> {
+    let client = LivestreamClient::new().map_err(|e| e.to_string())?;
+    let man = client
+        .decode_manifest(&input, ResolveOptions::default())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(livestream_ui::map_manifest(man))
+}
+
+#[tauri::command]
+async fn livestream_resolve_variant(
+    site: String,
+    room_id: String,
+    variant_id: String,
+) -> Result<livestream_ui::LivestreamUiVariant, String> {
+    let site = parse_site_str(&site)?;
+    let client = LivestreamClient::new().map_err(|e| e.to_string())?;
+    let v = client
+        .resolve_variant(site, &room_id, &variant_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(livestream_ui::map_variant(v))
 }
 
 #[tauri::command]
@@ -671,6 +711,92 @@ async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(),
 }
 
 #[tauri::command]
+async fn open_player_window(
+    app: AppHandle,
+    req: livestream_ui::PlayerBootRequest,
+) -> Result<(), String> {
+    if let Some(_w) = ensure_window(&app, "player") {
+        // Best-effort: ask the player window to load a new source.
+        let _ = emit_to_known_windows(&app, "player_load", req);
+        return Ok(());
+    }
+
+    let boot = serde_json::json!({
+        "view": "player",
+        "label": "player",
+        "player": req,
+        "build": env!("CARGO_PKG_VERSION")
+    });
+    let init_script = child_init_script(boot);
+    let url = child_url_from_main(&app, "player", None);
+    if debug_enabled() {
+        println!("[tauri] open_player_window url={url}");
+    }
+
+    let mut builder = tauri::WebviewWindowBuilder::new(&app, "player", url)
+        .title("播放器 - Live")
+        .inner_size(960.0, 540.0)
+        .resizable(true)
+        .transparent(false)
+        .initialization_script(init_script);
+
+    if debug_enabled() {
+        let eval_script = child_init_script(serde_json::json!({
+            "view": "player",
+            "label": "player",
+            "build": env!("CARGO_PKG_VERSION")
+        }));
+        builder = builder.on_page_load(move |window, payload| {
+            use tauri::webview::PageLoadEvent;
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    println!("[tauri] player PageLoad Started url={}", payload.url());
+                }
+                PageLoadEvent::Finished => {
+                    println!("[tauri] player PageLoad Finished url={}", payload.url());
+                    let _ = window.eval(eval_script.clone());
+                }
+            }
+        });
+    }
+
+    let w = builder.build().map_err(|e| e.to_string())?;
+    let _ = w.show();
+    let _ = w.set_focus();
+    let _ = app.emit(
+        "chaos_window_state",
+        WindowStatePayload {
+            label: "player".to_string(),
+            open: true,
+        },
+    );
+    {
+        let app2 = app.clone();
+        let label = "player".to_string();
+        w.on_window_event(move |ev| {
+            if matches!(ev, tauri::WindowEvent::Destroyed) {
+                let _ = app2.emit(
+                    "chaos_window_state",
+                    WindowStatePayload {
+                        label: label.clone(),
+                        open: false,
+                    },
+                );
+            }
+        });
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
+            w.open_devtools();
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn set_backdrop(app: AppHandle, mode: String) -> Result<(), String> {
     // Best-effort: on non-Windows, or if a window is missing/not transparent, just no-op.
     #[cfg(target_os = "windows")]
@@ -714,12 +840,15 @@ fn main() {
             now_playing_snapshot,
             get_app_info,
             open_url,
+            livestream_decode_manifest,
+            livestream_resolve_variant,
             danmaku_fetch_image,
             danmaku_connect,
             danmaku_disconnect,
             danmaku_set_msg_subscription,
             open_chat_window,
             open_overlay_window,
+            open_player_window,
             set_backdrop
         ])
         .run(tauri::generate_context!())
