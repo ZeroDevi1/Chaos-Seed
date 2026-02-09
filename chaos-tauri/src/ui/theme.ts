@@ -1,4 +1,4 @@
-import { getThemeMode, setThemeMode, ThemeMode } from '../shared/prefs'
+import { getThemeMode, setThemeMode, type ThemeMode } from '../shared/prefs'
 
 export type ResolvedTheme = 'light' | 'dark'
 

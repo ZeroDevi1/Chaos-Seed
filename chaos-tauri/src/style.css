@@ -66,6 +66,20 @@ html[data-theme='dark'] {
   --button-secondary-fg: var(--text-primary);
 }
 
+/* Optional Win11-style backdrop (Mica): make app surfaces slightly translucent so the OS effect can show through.
+   The actual window effect is applied by Tauri on Windows; this is just the webview side. */
+html[data-backdrop='mica'][data-theme='light'] {
+  --app-bg: transparent;
+  --sidebar-bg: color-mix(in srgb, #ffffff 70%, transparent);
+  --card-bg: color-mix(in srgb, #ffffff 78%, transparent);
+}
+
+html[data-backdrop='mica'][data-theme='dark'] {
+  --app-bg: transparent;
+  --sidebar-bg: color-mix(in srgb, #0f172a 72%, transparent);
+  --card-bg: color-mix(in srgb, #0b1220 78%, transparent);
+}
+
 html,
 body,
 #app {

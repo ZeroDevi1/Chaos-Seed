@@ -1,6 +1,6 @@
 import { el } from '../shared/dom'
 import { getSidebarCollapsed, setSidebarCollapsed } from '../shared/prefs'
-import { ThemeController } from './theme'
+import type { ThemeController } from './theme'
 
 export type NavIndex = 0 | 1 | 2 | 3 | 4 | 5
 
@@ -136,4 +136,3 @@ export function createLayout(theme: ThemeController): Layout {
     }
   }
 }
-

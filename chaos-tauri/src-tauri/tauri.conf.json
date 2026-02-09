@@ -16,7 +16,8 @@
         "title": "Chaos Seed",
         "width": 1000,
         "height": 700,
-        "resizable": true
+        "resizable": true,
+        "transparent": true
       }
     ],
     "security": {

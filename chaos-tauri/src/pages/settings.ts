@@ -36,8 +36,8 @@ export async function buildSettingsPage(
   const overlayRow = el('div', { className: 'row gap-12 wrap align-center' })
   overlayRow.appendChild(el('div', { className: 'field-label', text: 'Overlay 模式' }))
   const overlaySel = el('select', { className: 'select' }) as HTMLSelectElement
-  overlaySel.appendChild(new Option('透明（默认）', 'transparent'))
-  overlaySel.appendChild(new Option('不透明（更稳）', 'opaque'))
+  overlaySel.appendChild(new Option('透明（可能不稳定）', 'transparent'))
+  overlaySel.appendChild(new Option('不透明（更稳，推荐）', 'opaque'))
   overlaySel.value = getOverlayMode()
   overlaySel.onchange = () => setOverlayMode(overlaySel.value as OverlayMode)
   overlayRow.appendChild(overlaySel)
@@ -56,4 +56,3 @@ export async function buildSettingsPage(
     un()
   }
 }
-

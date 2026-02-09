@@ -1,15 +1,27 @@
 import { describe, expect, it } from 'vitest'
 
-import { createAppRouter } from './router'
+import { getHashPath, resolveRoute } from './router'
 
 describe('router', () => {
   it('resolves known routes', () => {
-    const router = createAppRouter()
-    expect(router.resolve('/').matched).toHaveLength(1)
-    expect(router.resolve('/subtitle').matched).toHaveLength(1)
-    expect(router.resolve('/danmaku').matched).toHaveLength(1)
-    expect(router.resolve('/settings').matched).toHaveLength(1)
-    expect(router.resolve('/about').matched).toHaveLength(1)
+    expect(resolveRoute('/')?.path).toBe('/')
+    expect(resolveRoute('/subtitle')?.path).toBe('/subtitle')
+    expect(resolveRoute('/danmaku')?.path).toBe('/danmaku')
+    expect(resolveRoute('/settings')?.path).toBe('/settings')
+    expect(resolveRoute('/about')?.path).toBe('/about')
+  })
+
+  it('returns null for unknown routes', () => {
+    expect(resolveRoute('/nope')).toBeNull()
+    expect(resolveRoute('subtitle')).toBeNull()
+  })
+
+  it('parses hash into a normalized path', () => {
+    expect(getHashPath('')).toBe('/')
+    expect(getHashPath('#/')).toBe('/')
+    expect(getHashPath('#/subtitle')).toBe('/subtitle')
+    expect(getHashPath('#subtitle')).toBe('/subtitle')
+    expect(getHashPath('#/subtitle/')).toBe('/subtitle')
   })
 })
 

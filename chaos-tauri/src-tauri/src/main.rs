@@ -309,50 +309,177 @@ fn ensure_window(app: &AppHandle, label: &str) -> Option<tauri::WebviewWindow> {
     Some(w)
 }
 
+fn make_child_url(app: &AppHandle, view: &str, overlay_opaque: bool) -> Option<tauri::WebviewUrl> {
+    let main = app.get_webview_window("main")?;
+    let mut url = main.url().ok()?;
+    url.set_fragment(None);
+    url.set_query(None);
+    // Use an explicit file path so the asset protocol always resolves correctly.
+    url.set_path("/index.html");
+
+    // Encode view in query so dev/release behave identically and we can still fall back to window label.
+    let mut ser = url::form_urlencoded::Serializer::new(String::new());
+    ser.append_pair("view", view);
+    if view == "overlay" && overlay_opaque {
+        ser.append_pair("overlay", "opaque");
+    }
+    let q = ser.finish();
+    url.set_query(Some(&q));
+
+    Some(match url.scheme() {
+        "http" | "https" => tauri::WebviewUrl::External(url),
+        _ => tauri::WebviewUrl::CustomProtocol(url),
+    })
+}
+
+fn child_init_script(boot: serde_json::Value) -> String {
+    // A tiny debug strip that renders even if the app bundle fails to mount.
+    // This is critical for diagnosing "blank/transparent" windows in release builds.
+    let boot_json = boot.to_string();
+    format!(
+        r#"
+window.__CHAOS_SEED_BOOT = {boot_json};
+(function() {{
+  function safe(v) {{ try {{ return JSON.stringify(v); }} catch (e) {{ return String(v); }} }}
+  function text() {{
+    var b = window.__CHAOS_SEED_BOOT;
+    var hasTauri = typeof window.__TAURI__ !== 'undefined';
+    var out = '[ChaosSeed BOOT] ' + (b && b.label ? b.label : '?') + ' view=' + (b && b.view ? b.view : '?');
+    out += ' opaque=' + (b && b.overlayOpaque ? '1' : '0');
+    out += '\\nurl=' + String(window.location.href);
+    out += '\\n__TAURI__=' + (hasTauri ? 'yes' : 'no');
+    out += '\\nboot=' + safe(b);
+    if (window.__CHAOS_SEED_LAST_ERR) out += '\\nERR=' + window.__CHAOS_SEED_LAST_ERR;
+    return out;
+  }}
+  function mount() {{
+    try {{
+      var d = document.getElementById('__chaos_seed_boot_bar');
+      if (!d) {{
+        d = document.createElement('div');
+        d.id = '__chaos_seed_boot_bar';
+        d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483647;' +
+          'background:rgba(0,0,0,0.85);color:#a7f3d0;font:12px/1.35 ui-monospace,Consolas,monospace;' +
+          'padding:6px 8px;white-space:pre-wrap;pointer-events:none;';
+        document.documentElement.appendChild(d);
+      }}
+      d.textContent = text();
+    }} catch (e) {{}}
+  }}
+  window.addEventListener('error', function(ev) {{
+    try {{ window.__CHAOS_SEED_LAST_ERR = String(ev && (ev.message || ev.error || ev)); mount(); }} catch (e) {{}}
+  }});
+  window.addEventListener('unhandledrejection', function(ev) {{
+    try {{ window.__CHAOS_SEED_LAST_ERR = String(ev && (ev.reason || ev)); mount(); }} catch (e) {{}}
+  }});
+  window.addEventListener('DOMContentLoaded', mount, {{ once: true }});
+  if (document.readyState === 'interactive' || document.readyState === 'complete') mount();
+  setInterval(mount, 1000);
+}})();
+"#
+    )
+}
+
 #[tauri::command]
 fn open_chat_window(app: AppHandle) -> Result<(), String> {
     if ensure_window(&app, "chat").is_some() {
         return Ok(());
     }
-    tauri::WebviewWindowBuilder::new(
+    let boot = serde_json::json!({ "view": "chat", "label": "chat", "build": env!("CARGO_PKG_VERSION") });
+    let init_script = child_init_script(boot);
+    let url = make_child_url(&app, "chat", false)
+        .unwrap_or_else(|| tauri::WebviewUrl::App("index.html".into()));
+    let w = tauri::WebviewWindowBuilder::new(
         &app,
         "chat",
-        tauri::WebviewUrl::App("index.html?view=chat".into()),
+        url,
     )
         .title("弹幕 - Chat")
         .inner_size(420.0, 640.0)
         .resizable(true)
+        // Transparent multi-window WebView2 can be flaky on some machines; keep Chat opaque for stability.
+        .transparent(false)
+        .initialization_script(init_script)
         .build()
         .map_err(|e| e.to_string())?;
+    let _ = w.show();
+    let _ = w.set_focus();
+
     Ok(())
 }
 
 #[tauri::command]
 fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), String> {
-    if ensure_window(&app, "overlay").is_some() {
+    if let Some(w) = ensure_window(&app, "overlay") {
+        // Safety net: ensure overlay won't block clicks even if frontend failed to mount.
+        let _ = w.set_ignore_cursor_events(true);
         return Ok(());
     }
     let opaque = opaque.unwrap_or(false);
-    let url = if opaque {
-        "index.html?view=overlay&overlay=opaque"
-    } else {
-        "index.html?view=overlay"
-    };
+    let boot = serde_json::json!({
+        "view": "overlay",
+        "label": "overlay",
+        "overlayOpaque": opaque,
+        "build": env!("CARGO_PKG_VERSION")
+    });
+    let init_script = child_init_script(boot);
+    let url = make_child_url(&app, "overlay", opaque)
+        .unwrap_or_else(|| tauri::WebviewUrl::App("index.html".into()));
 
-    tauri::WebviewWindowBuilder::new(&app, "overlay", tauri::WebviewUrl::App(url.into()))
+    let w = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
         .title("弹幕 - Overlay")
         .inner_size(960.0, 320.0)
         .resizable(true)
         .decorations(false)
+        // Default to opaque on Windows for stability; transparent overlay is still available via settings.
         .transparent(!opaque)
         .always_on_top(true)
+        .initialization_script(init_script)
         .build()
         .map_err(|e| e.to_string())?;
+    let _ = w.show();
+    let _ = w.set_focus();
+    // Ensure overlay never blocks clicks, even before the frontend mounts / permissions are evaluated in JS.
+    let _ = w.set_ignore_cursor_events(true);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_backdrop(app: AppHandle, mode: String) -> Result<(), String> {
+    // Best-effort: on non-Windows, or if a window is missing/not transparent, just no-op.
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::window::{Effect, EffectsBuilder};
+
+        let m = mode.trim().to_ascii_lowercase();
+        for label in ["main", "chat"] {
+            let Some(w) = app.get_webview_window(label) else {
+                continue;
+            };
+            if m == "mica" {
+                let _ = w.set_effects(EffectsBuilder::new().effect(Effect::Mica).build());
+            } else {
+                let _ = w.set_effects(None);
+            }
+        }
+    }
     Ok(())
 }
 
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            // Enable Mica by default on Windows for a more native Win11 look.
+            // The frontend can later call `set_backdrop` to switch to `none` without restarting.
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::window::{Effect, EffectsBuilder};
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.set_effects(EffectsBuilder::new().effect(Effect::Mica).build());
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .manage(DanmakuState::default())
         .invoke_handler(tauri::generate_handler![
@@ -364,7 +491,8 @@ fn main() {
             danmaku_connect,
             danmaku_disconnect,
             open_chat_window,
-            open_overlay_window
+            open_overlay_window,
+            set_backdrop
         ])
         .run(tauri::generate_context!())
         .expect("tauri run");

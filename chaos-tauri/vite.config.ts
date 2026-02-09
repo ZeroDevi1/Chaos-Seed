@@ -1,16 +1,12 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+import { svelte } from '@sveltejs/vite-plugin-svelte'
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte'
 import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   plugins: [
-    vue({
-      template: {
-        compilerOptions: {
-          // Treat Fluent custom elements as native elements.
-          isCustomElement: (tag) => tag.startsWith('fluent-')
-        }
-      }
+    svelte({
+      preprocess: vitePreprocess()
     })
   ],
   clearScreen: false,
