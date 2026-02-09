@@ -16,6 +16,7 @@
 - P1-8 新增页面占位（Settings / 直播源 / 弹幕）+ 侧边栏导航调整：Done @ 2026-02-08（commit: `6dea058`）
 - P1-9 弹幕 - UI 接入（Chat / Overlay）与交互：Done @ 2026-02-08（commit: `6dea058`）
 - P0-10 工程重构：拆分 chaos-core / chaos-slint / chaos-tauri + 新增 chaos-ffi（dll/so 导出层）：Done @ 2026-02-08（commit: `a0b9ff5`）
+- P1-11 直播源解析：Huya / Douyu / BiliLive core + chaos-ffi 导出 + header 生成器 + live-check：Done @ 2026-02-09（commit: `68a4017`）
 
 ## Next（近期要交付）
 
@@ -41,10 +42,17 @@
 
 ---
 
-### P1：直播源解析（核心层）——准备统一结构与入口（先计划）
+### P1：直播源 UI 接入（仅展示 + 清晰度/线路切换；播放器后置）
 
 **交付目标**
-- 在 `chaos-core` 规划直播源解析的数据结构与模块入口（例如 `live_source` 模块、统一输出结构），为后续实现做准备。
+- UI 侧接入 `chaos-core/chaos-ffi` 的直播解析能力：
+  - 输入 URL/房间号 → 解析出 `title / is_living / variants`
+  - 列表展示清晰度/线路（variants）
+  - 用户点击某个 variant：
+    - 若 `url` 已存在：直接使用/复制/交给播放器层
+    - 若 `url` 为空：调用 `resolve_variant` 补齐后再使用
 
 **验收标准**
-- 在 `TODO_NEXT.md` 中写清：目标输入格式（m3u/json）、输出结构草案、错误处理与最小验收用例（不要求本轮实现代码）。
+- 能输入 URL → 显示标题与开播状态 → 显示 variants 列表（含 label/quality）
+- 切换 variant 时，若需要二段解析能正确补齐 URL（BiliLive/Douyu）
+- 能将最终 URL 显示出来（至少支持复制到剪贴板），并保留 referer/user-agent 等 playback hints 供播放层使用

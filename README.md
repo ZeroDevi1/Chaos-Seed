@@ -1,13 +1,13 @@
 # chaos-seed
 
-一个 Windows GUI（Rust + Slint）小工具：在迅雷字幕接口中搜索字幕，并支持逐条下载到你选择的目录（每次下载都会弹出目录选择）。
+一个 Windows GUI（Rust + Slint）应用 + 纯 Rust 核心（`chaos-core`）：提供字幕下载、弹幕接入与直播源解析等能力；并通过 `chaos-ffi` 以 C ABI + JSON 形式对外导出，便于 WinUI3/Qt 等调用。
 
 ## 功能
 
-- 左侧侧边栏：Home / 字幕下载 / 直播源 / 弹幕 / Settings / About
-- 字幕下载流程：搜索 -> 列表展示 -> 点击单条“下载” -> 选择目录 -> 下载
-- 弹幕：BiliLive / Douyu / Huya 连接与解析，UI 已接入（Chat / Overlay）
-- 业务逻辑纯 Rust（不调用 Python）
+- 字幕（已完成）：Thunder 搜索 / 列表展示 / 单条下载（每次下载选择目录，支持超时与重试）
+- 弹幕（已完成）：BiliLive / Douyu / Huya 连接与解析；UI 已接入（Chat / Overlay）
+- 直播源解析（已完成 core/ffi）：BiliLive / Douyu / Huya 的 `manifest/variants` 解析 + `resolve_variant` 二段补全
+- UI（进行中）：直播播放与清晰度/线路切换的 UI/播放层仍在完善中
 
 ## 构建前提（重要）
 
@@ -29,7 +29,7 @@ rustc -V
 
 本仓库已拆成 Cargo workspace：
 
-- `chaos-core`：纯 Rust 核心（字幕 + 弹幕）
+- `chaos-core`：纯 Rust 核心（字幕 + 弹幕 + 直播源解析）
 - `chaos-slint`：Slint UI（产物仍为 `chaos-seed` 可执行文件）
 - `chaos-tauri`：Tauri v2 + Vite(TS) UI（PoC）
 - `chaos-ffi`：C ABI 适配层（导出 `chaos-core` 为 dll/so，供 WinUI3/Qt 等调用）
@@ -137,17 +137,17 @@ cargo build -p chaos-slint --release --no-default-features --features renderer-s
 你可以用 example 快速验证：
 
 ```bash
-cargo run -p chaos-core --example danmaku_dump -- 'https://live.bilibili.com/47867'
-cargo run -p chaos-core --example danmaku_dump -- 'https://www.douyu.com/9999'
-cargo run -p chaos-core --example danmaku_dump -- 'https://www.huya.com/660000'
+cargo run -p chaos-core --example danmaku_dump -- 'https://live.bilibili.com/<RID>'
+cargo run -p chaos-core --example danmaku_dump -- 'https://www.douyu.com/<RID>'
+cargo run -p chaos-core --example danmaku_dump -- 'https://www.huya.com/<RID>'
 ```
 
 输入也支持平台前缀：
 
 ```bash
-cargo run -p chaos-core --example danmaku_dump -- 'bilibili:47867'
-cargo run -p chaos-core --example danmaku_dump -- 'douyu:https://www.douyu.com/9999'
-cargo run -p chaos-core --example danmaku_dump -- 'huya:660000'
+cargo run -p chaos-core --example danmaku_dump -- 'bilibili:<RID>'
+cargo run -p chaos-core --example danmaku_dump -- 'douyu:https://www.douyu.com/<RID>'
+cargo run -p chaos-core --example danmaku_dump -- 'huya:<RID>'
 ```
 
 事件语义（对齐 IINA+）：
@@ -183,3 +183,16 @@ cargo build -p chaos-ffi --release
 - `chaos-ffi/docs/API.md`
 - `chaos-ffi/docs/CSharp.md`
 - `chaos-ffi/docs/BUILD.md`
+
+Header 生成（cbindgen，Rust 内置生成器）：
+
+```bash
+cargo run -p chaos-ffi --features gen-header --bin gen_header
+```
+
+直播源解析（真实 URL 校验，运行时传参；不在仓库中写死 URL）：
+
+```bash
+cargo test -p chaos-ffi --features live-tests --test livestream_live -- \
+  --bili-url <URL> --huya-url <URL> --dump-json
+```

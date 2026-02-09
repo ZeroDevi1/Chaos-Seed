@@ -11,6 +11,7 @@
 - Tauri UI：FAST design-token recursion / 布局对不齐问题（评估替代 front 方案，必要时切换或放弃 tauri）
 
 ## 播放（直播源解析与播放）
+- 直播源解析（core/ffi）已支持 Huya / Douyu / BiliLive；下一步是 UI/播放接入与清晰度/线路切换
 - 直播源解析：支持常见聚合格式（例如 m3u / json），并提供分组/搜索
 - 播放器接入：内置播放器或 WebView 播放（优先可分发方案）
 - 播放体验：清晰度/线路切换、错误提示与重试

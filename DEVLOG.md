@@ -52,3 +52,15 @@
   - 拆分 `chaos-core`（纯业务）与 UI 层（`chaos-slint` / `chaos-tauri`）。
   - 新增 `chaos-ffi`：以 C ABI + JSON 形式导出 `chaos-core` 能力，便于 WinUI3/Qt 调用。
 - 关闭文件日志落地：不再写入 `logs/app.log` 与 `logs/panic_*.log`。
+
+## 2026-02-09
+
+### 变更（当前版本迭代）
+- 直播源解析（core）：
+  - `chaos-core` 新增 `livestream` 模块（`LiveManifest/StreamVariant` + `resolve_variant`），支持 Huya / Douyu / BiliLive。
+  - 全离线 `httpmock` 测试覆盖关键解析链路与签名/排序逻辑。
+- 直播源解析（FFI）：
+  - `chaos-ffi` 导出 livestream JSON API：`decode_manifest` + `resolve_variant`。
+  - `chaos-ffi` 内置 cbindgen 头文件生成器（`gen_header`），可随时生成/更新 `include/chaos_ffi_bindings.h`。
+  - feature gated 的 live-check（真实 URL 运行时参数传入，可 `--dump-json` 输出解析结果）。
+- commit: `68a4017`
