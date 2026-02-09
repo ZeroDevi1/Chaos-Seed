@@ -309,28 +309,11 @@ fn ensure_window(app: &AppHandle, label: &str) -> Option<tauri::WebviewWindow> {
     Some(w)
 }
 
-fn make_child_url(app: &AppHandle, view: &str, overlay_opaque: bool) -> Option<tauri::WebviewUrl> {
-    let main = app.get_webview_window("main")?;
-    let mut url = main.url().ok()?;
-    url.set_fragment(None);
-    url.set_query(None);
-    // Use an explicit file path so the asset protocol always resolves correctly.
-    url.set_path("/index.html");
-
-    // Encode view in query so dev/release behave identically and we can still fall back to window label.
-    let mut ser = url::form_urlencoded::Serializer::new(String::new());
-    ser.append_pair("view", view);
-    if view == "overlay" && overlay_opaque {
-        ser.append_pair("overlay", "opaque");
-    }
-    let q = ser.finish();
-    url.set_query(Some(&q));
-
-    Some(match url.scheme() {
-        "http" | "https" => tauri::WebviewUrl::External(url),
-        _ => tauri::WebviewUrl::CustomProtocol(url),
-    })
-}
+// NOTE: We intentionally use `WebviewUrl::App("index.html")` for child windows even in dev.
+//
+// In Tauri dev mode, the runtime proxies the app URL to the Vite dev server. This avoids potential
+// `localhost` resolution / IPv6 / WebView2 quirks that can affect `WebviewUrl::External(http://localhost:...)`,
+// and makes child windows behave like the main window.
 
 fn child_init_script(boot: serde_json::Value) -> String {
     // A tiny debug strip that renders even if the app bundle fails to mount.
@@ -397,9 +380,8 @@ fn open_chat_window(app: AppHandle) -> Result<(), String> {
     }
     let boot = serde_json::json!({ "view": "chat", "label": "chat", "build": env!("CARGO_PKG_VERSION") });
     let init_script = child_init_script(boot);
-    let url = make_child_url(&app, "chat", false)
-        .unwrap_or_else(|| tauri::WebviewUrl::App("index.html".into()));
-    println!("[tauri] open_chat_window url={url}");
+    let url = tauri::WebviewUrl::App("index.html".into());
+    println!("[tauri] open_chat_window url={url} (app url; dev is proxied)");
     let eval_script = init_script.clone();
     let w = tauri::WebviewWindowBuilder::new(
         &app,
@@ -448,9 +430,8 @@ fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), Strin
         "build": env!("CARGO_PKG_VERSION")
     });
     let init_script = child_init_script(boot);
-    let url = make_child_url(&app, "overlay", opaque)
-        .unwrap_or_else(|| tauri::WebviewUrl::App("index.html".into()));
-    println!("[tauri] open_overlay_window opaque={opaque} url={url}");
+    let url = tauri::WebviewUrl::App("index.html".into());
+    println!("[tauri] open_overlay_window opaque={opaque} url={url} (app url; dev is proxied)");
     let eval_script = init_script.clone();
 
     let w = tauri::WebviewWindowBuilder::new(&app, "overlay", url)
