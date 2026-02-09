@@ -6,12 +6,27 @@
 
   import type { DanmakuUiMessage } from '@/shared/types'
 
+  type DanmakuImageReply = {
+    mime: string
+    bytes: number[]
+  }
+
   type Sprite = {
     text: string
+    img?: HTMLImageElement
+    imgW?: number
+    imgH?: number
     x: number
     y: number
     w: number
     speedPxPerSec: number
+  }
+
+  type QueueItem = {
+    text: string
+    img?: HTMLImageElement
+    imgW?: number
+    imgH?: number
   }
 
   const params = new URLSearchParams(window.location.search)
@@ -37,6 +52,7 @@
     let stopAnim: (() => void) | undefined
     let stopKey: (() => void) | undefined
     let onUnload: (() => void) | undefined
+    const objectUrls: string[] = []
 
     try {
       win = getCurrentWebviewWindow()
@@ -52,6 +68,13 @@
       unMsg?.()
       if (onUnload) window.removeEventListener('beforeunload', onUnload, true)
       void invoke('danmaku_set_msg_subscription', { enabled: false }).catch(() => {})
+      for (const u of objectUrls) {
+        try {
+          URL.revokeObjectURL(u)
+        } catch {
+          // ignore
+        }
+      }
     }
     onUnload = () => cleanup()
     window.addEventListener('beforeunload', onUnload, true)
@@ -124,7 +147,7 @@
     window.addEventListener('resize', resize)
     stopResize = () => window.removeEventListener('resize', resize)
 
-    let queue: DanmakuUiMessage[] = []
+    let queue: QueueItem[] = []
     let qHead = 0
     let dropped = 0
     let lastMsgAt = 0
@@ -134,8 +157,91 @@
     const sprites: Sprite[] = []
     let lane = 0
     const laneCount = 10
-    const laneHeight = 28
+    const laneHeight = 32
     const topPad = 12
+
+    const imgCache = new Map<string, { img: HTMLImageElement; objectUrl?: string; lastUsedAt: number }>()
+    const imgInflight = new Map<string, Promise<HTMLImageElement>>()
+    const MAX_CACHED_IMAGES = 120
+
+    function evictImagesIfNeeded() {
+      if (imgCache.size <= MAX_CACHED_IMAGES) return
+      const entries = [...imgCache.entries()]
+      entries.sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)
+      const toEvict = entries.slice(0, Math.max(10, Math.floor(entries.length / 4)))
+      for (const [key, v] of toEvict) {
+        imgCache.delete(key)
+        if (v.objectUrl) {
+          try {
+            URL.revokeObjectURL(v.objectUrl)
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+
+    async function loadImage(msg: DanmakuUiMessage, url: string): Promise<HTMLImageElement> {
+      const cached = imgCache.get(url)
+      if (cached) {
+        cached.lastUsedAt = Date.now()
+        return cached.img
+      }
+      const inflight = imgInflight.get(url)
+      if (inflight) return inflight
+
+      const p = (async () => {
+        // Prefer proxy-loading via Rust to avoid hotlink/referrer issues.
+        let objectUrl: string | undefined
+        try {
+          const reply = await invoke<DanmakuImageReply>('danmaku_fetch_image', {
+            url,
+            site: msg.site,
+            room_id: msg.room_id
+          })
+          const mime = reply.mime?.trim() || 'image/png'
+          const buf = new Uint8Array(reply.bytes)
+          const blob = new Blob([buf], { type: mime })
+          objectUrl = URL.createObjectURL(blob)
+          objectUrls.push(objectUrl)
+        } catch {
+          // Fallback: try direct URL (may still work for some platforms).
+          objectUrl = undefined
+        }
+
+        const img = new Image()
+        img.decoding = 'async'
+        img.loading = 'eager'
+        img.src = objectUrl ?? url
+        // Wait for load/decode so we can measure dimensions reliably.
+        await (img.decode?.() ?? new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve()
+          img.onerror = () => reject(new Error('image load failed'))
+        }))
+
+        imgCache.set(url, { img, objectUrl, lastUsedAt: Date.now() })
+        imgInflight.delete(url)
+        evictImagesIfNeeded()
+        return img
+      })().catch((e) => {
+        imgInflight.delete(url)
+        throw e
+      })
+
+      imgInflight.set(url, p)
+      return p
+    }
+
+    function pushQueue(item: QueueItem) {
+      queue.push(item)
+      lastMsgAt = performance.now()
+      if (queue.length > 600) {
+        const keep = queue.slice(-120)
+        dropped += queue.length - keep.length
+        queue = keep
+        qHead = 0
+      }
+    }
 
     function enqueue(msg: DanmakuUiMessage) {
       const key = `${msg.user}|${msg.text}|${msg.image_url ?? ''}|${msg.image_width ?? ''}`
@@ -149,14 +255,30 @@
         }
       }
 
-      queue.push(msg)
-      lastMsgAt = performance.now()
-      if (queue.length > 600) {
-        const keep = queue.slice(-120)
-        dropped += queue.length - keep.length
-        queue = keep
-        qHead = 0
+      const imageUrl = msg.image_url ?? undefined
+      const rawText = (msg.text || '').toString()
+      const text =
+        imageUrl && (rawText === '[图片]' || rawText === '[表情]') ? '' : rawText.trim()
+
+      if (imageUrl) {
+        void loadImage(msg, imageUrl)
+          .then((img) => {
+            if (disposed) return
+            const targetH = 24
+            const ratio = img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : 1
+            const imgH = targetH
+            const imgW = Math.max(18, Math.min(96, Math.round(targetH * ratio)))
+            pushQueue({ text, img, imgW, imgH })
+          })
+          .catch(() => {
+            // If the image fails to load, fall back to text so the message isn't lost.
+            if (disposed) return
+            pushQueue({ text: text || '[表情]' })
+          })
+        return
       }
+
+      pushQueue({ text })
     }
 
     function spawn(maxPerFrame: number) {
@@ -164,22 +286,31 @@
       if (pending <= 0) return
       const n = Math.min(maxPerFrame, pending)
       for (let i = 0; i < n; i++) {
-        const msg = queue[qHead++]!
-        const shownText =
-          msg.image_url && (msg.text === '[图片]' || msg.text === '[表情]') ? '[表情]' : msg.text
-        const text = (shownText || '').trim()
-        if (!text) continue
+        const item = queue[qHead++]!
+        const text = (item.text || '').trim()
+        if (!text && !item.img) continue
 
         context.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
-        const m = context.measureText(text)
-        const tw = Math.ceil(m.width)
+        const textW = text ? Math.ceil(context.measureText(text).width) : 0
+        const imgW = item.img ? (item.imgW ?? 24) : 0
+        const gap = item.img && text ? 8 : 0
+        const tw = imgW + gap + textW
 
         const y = topPad + (lane % laneCount) * laneHeight
         lane++
         const durationMs = 8000
         const distance = w + tw + 80
         const speedPxPerSec = distance / (durationMs / 1000)
-        sprites.push({ text, x: w + 40, y, w: tw, speedPxPerSec })
+        sprites.push({
+          text,
+          img: item.img,
+          imgW: item.imgW,
+          imgH: item.imgH,
+          x: w + 40,
+          y,
+          w: tw,
+          speedPxPerSec
+        })
       }
 
       // Compact occasionally so the array doesn't grow forever.
@@ -227,9 +358,25 @@
         if (s.x + s.w < -40) continue
         if (!opaque) {
           // Crisp outline helps on transparent overlays without looking like blurred double text.
-          context.strokeText(s.text, s.x, s.y + 18)
+          if (s.img) {
+            // no outline needed for the image
+          }
+          if (s.text) context.strokeText(s.text, s.x + (s.img ? (s.imgW ?? 24) + (s.text ? 8 : 0) : 0), s.y + 18)
         }
-        context.fillText(s.text, s.x, s.y + 18)
+        if (s.img) {
+          const ih = s.imgH ?? 24
+          const iw = s.imgW ?? 24
+          const iy = s.y + 18 - ih + 4
+          try {
+            context.drawImage(s.img, s.x, iy, iw, ih)
+          } catch {
+            // ignore draw errors
+          }
+        }
+        if (s.text) {
+          const tx = s.x + (s.img ? (s.imgW ?? 24) + (s.text ? 8 : 0) : 0)
+          context.fillText(s.text, tx, s.y + 18)
+        }
         sprites[write++] = s
       }
       sprites.length = write
