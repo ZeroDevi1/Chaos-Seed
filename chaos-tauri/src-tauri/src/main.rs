@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::PathBuf;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -138,7 +138,9 @@ fn image_referer(site: Option<String>, room_id: Option<String>, url: &url::Url) 
 }
 
 fn is_local_or_private_host(u: &url::Url) -> bool {
-    let Some(host) = u.host_str() else { return true };
+    let Some(host) = u.host_str() else {
+        return true;
+    };
     let h = host.to_lowercase();
     if h == "localhost" {
         return true;
@@ -146,7 +148,9 @@ fn is_local_or_private_host(u: &url::Url) -> bool {
     if let Ok(ip) = host.parse::<IpAddr>() {
         return match ip {
             IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-            IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
+            IpAddr::V6(v6) => {
+                v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
+            }
         };
     }
     false
@@ -162,9 +166,13 @@ mod tests {
 
     #[test]
     fn blocks_localhost_and_private_ipv4() {
-        assert!(is_local_or_private_host(&parse("http://localhost:8080/a.png")));
+        assert!(is_local_or_private_host(&parse(
+            "http://localhost:8080/a.png"
+        )));
         assert!(is_local_or_private_host(&parse("http://127.0.0.1/a.png")));
-        assert!(is_local_or_private_host(&parse("http://192.168.1.10/a.png")));
+        assert!(is_local_or_private_host(&parse(
+            "http://192.168.1.10/a.png"
+        )));
         assert!(is_local_or_private_host(&parse("http://10.0.0.5/a.png")));
     }
 
@@ -182,7 +190,9 @@ mod tests {
 
     #[test]
     fn allows_public_hosts() {
-        assert!(!is_local_or_private_host(&parse("https://example.com/a.png")));
+        assert!(!is_local_or_private_host(&parse(
+            "https://example.com/a.png"
+        )));
         assert!(!is_local_or_private_host(&parse("http://8.8.8.8/a.png")));
     }
 }
@@ -309,7 +319,11 @@ fn ensure_window(app: &AppHandle, label: &str) -> Option<tauri::WebviewWindow> {
     Some(w)
 }
 
-fn child_url_from_main(app: &AppHandle, view: &str, overlay_opaque: Option<bool>) -> tauri::WebviewUrl {
+fn child_url_from_main(
+    app: &AppHandle,
+    view: &str,
+    overlay_opaque: Option<bool>,
+) -> tauri::WebviewUrl {
     // Prefer reusing the main window's origin in dev mode (http(s) dev server),
     // since it is the most reliable way to ensure child windows load the exact same frontend.
     if let Some(main) = app.get_webview_window("main") {
@@ -408,20 +422,17 @@ window.__CHAOS_SEED_BOOT = {boot_json};
 }
 
 #[tauri::command]
-fn open_chat_window(app: AppHandle) -> Result<(), String> {
+async fn open_chat_window(app: AppHandle) -> Result<(), String> {
     if ensure_window(&app, "chat").is_some() {
         return Ok(());
     }
-    let boot = serde_json::json!({ "view": "chat", "label": "chat", "build": env!("CARGO_PKG_VERSION") });
+    let boot =
+        serde_json::json!({ "view": "chat", "label": "chat", "build": env!("CARGO_PKG_VERSION") });
     let init_script = child_init_script(boot);
     let url = child_url_from_main(&app, "chat", None);
     println!("[tauri] open_chat_window url={url}");
     let eval_script = init_script.clone();
-    let w = tauri::WebviewWindowBuilder::new(
-        &app,
-        "chat",
-        url,
-    )
+    let w = tauri::WebviewWindowBuilder::new(&app, "chat", url)
         .title("弹幕 - Chat")
         .inner_size(420.0, 640.0)
         .resizable(true)
@@ -453,7 +464,7 @@ fn open_chat_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), String> {
+async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), String> {
     if let Some(w) = ensure_window(&app, "overlay") {
         // Safety net: ensure overlay won't block clicks even if frontend failed to mount.
         let _ = w.set_ignore_cursor_events(true);

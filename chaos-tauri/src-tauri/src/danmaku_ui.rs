@@ -31,7 +31,11 @@ pub fn map_event_to_ui(ev: DanmakuEvent) -> Vec<DanmakuUiMessage> {
         c: &DanmakuComment,
     ) {
         let text = c.text.trim().to_string();
-        let image_url = c.image_url.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
+        let image_url = c
+            .image_url
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
 
         // If we only have an image, keep a stable placeholder text so the UI can show a row.
         let text = if text.is_empty() && image_url.is_some() {
@@ -62,7 +66,9 @@ pub fn map_event_to_ui(ev: DanmakuEvent) -> Vec<DanmakuUiMessage> {
             received_at_ms: ev.received_at_ms,
             user: user.to_string(),
             text,
-            image_url: image_url.map(|s| s.to_string()).or_else(|| c.image_url.clone()),
+            image_url: image_url
+                .map(|s| s.to_string())
+                .or_else(|| c.image_url.clone()),
             image_width: c.image_width,
         });
     }
