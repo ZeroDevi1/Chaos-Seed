@@ -28,17 +28,115 @@ const AVCodecID = {
 
 import type { PlayerEngine, PlayerSource } from '../types'
 
+type Uint8ArrayInterface = {
+  set(array: ArrayLike<number>, offset?: number): void
+  length: number
+}
+
 // Same CDN base as 115Master (fastly jsdelivr). Keep remote WASM to avoid bundling complexity.
 const CDN_URL_WASM = 'https://fastly.jsdelivr.net/gh/zhaohappy/libmedia@latest/dist'
 
 type AVPlayerCtor = new (options: AVPlayerOptions) => {
-  load: (url: string, opts?: any) => Promise<void>
+  load: (source: any, opts?: any) => Promise<void>
   play: (opts?: any) => Promise<void>
   pause: () => Promise<void> | void
   setPlaybackRate: (rate: number) => void
   setVolume: (volume: number) => void
   resize: (width: number, height: number) => void
   destroy: () => Promise<void>
+}
+
+type StreamReadReply = {
+  eof: boolean
+  dataB64: string
+}
+
+function b64ToBytes(b64: string): Uint8Array {
+  const s = (b64 || '').toString()
+  if (!s) return new Uint8Array(0)
+  const bin = atob(s)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) & 0xff
+  return out
+}
+
+type TauriStreamIOLoaderCtor = new (input: { url: string; referer?: string; userAgent?: string }) => {
+  open(): Promise<number>
+  read(buffer: Uint8ArrayInterface): Promise<number>
+  seek(pos: bigint): Promise<number>
+  size(): Promise<bigint>
+  stop(): Promise<void>
+}
+
+function createTauriStreamIOLoaderCtor(CustomIOLoaderBase: any): TauriStreamIOLoaderCtor {
+  return class TauriStreamIOLoader extends CustomIOLoaderBase {
+    private handle: string | null = null
+    private stopped = false
+    private readonly url: string
+    private readonly referer?: string
+    private readonly userAgent?: string
+
+    constructor(input: { url: string; referer?: string; userAgent?: string }) {
+      super()
+      this.url = input.url
+      this.referer = input.referer
+      this.userAgent = input.userAgent
+    }
+
+    get ext(): string {
+      return 'flv'
+    }
+
+    get name(): string {
+      return this.url
+    }
+
+    async open(): Promise<number> {
+      if (this.stopped) return -1
+      const { invoke } = await import('@tauri-apps/api/core')
+      const handle = await invoke<string>('stream_open', {
+        url: this.url,
+        referer: this.referer ?? null,
+        userAgent: this.userAgent ?? null
+      })
+      this.handle = handle
+      return 0
+    }
+
+    async read(buffer: Uint8ArrayInterface): Promise<number> {
+      if (this.stopped || !this.handle) return -1
+      const { invoke } = await import('@tauri-apps/api/core')
+      const reply = await invoke<StreamReadReply>('stream_read', {
+        handle: this.handle,
+        maxLen: Math.max(1, Math.min(1024 * 1024, buffer.length))
+      })
+      if (reply.eof) return 0
+      const bytes = b64ToBytes(reply.dataB64)
+      buffer.set(bytes, 0)
+      return bytes.length
+    }
+
+    async seek(_pos: bigint): Promise<number> {
+      return -1
+    }
+
+    async size(): Promise<bigint> {
+      return 0n
+    }
+
+    async stop(): Promise<void> {
+      this.stopped = true
+      const handle = this.handle
+      this.handle = null
+      if (!handle) return
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('stream_close', { handle })
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
 function getWasmUrl(type: any, codecId: any, _mediaType?: any): string {
@@ -109,6 +207,8 @@ async function importAVPlayer(): Promise<AVPlayerCtor> {
   return (mod?.default ?? mod?.AVPlayer ?? mod) as AVPlayerCtor
 }
 
+let TauriStreamIOLoader: TauriStreamIOLoaderCtor | null = null
+
 export class AvPlayerEngine implements PlayerEngine {
   kind: PlayerEngine['kind'] = 'avplayer'
 
@@ -123,6 +223,10 @@ export class AvPlayerEngine implements PlayerEngine {
     container.innerHTML = ''
 
     const AVPlayer = await importAVPlayer()
+    if (!TauriStreamIOLoader) {
+      const base = (AVPlayer as any)?.IOLoader?.CustomIOLoader
+      if (base) TauriStreamIOLoader = createTauriStreamIOLoaderCtor(base)
+    }
     const opts: AVPlayerOptions = {
       isLive: true,
       // Stability-first defaults for embedded webviews (WebView2):
@@ -177,7 +281,12 @@ export class AvPlayerEngine implements PlayerEngine {
     if (referer) headers.Referer = referer
     const ua = (source.user_agent ?? '').toString().trim()
     if (ua) headers['User-Agent'] = ua
-    await this.player.load(url, {
+
+    const isProd = !!import.meta.env.PROD
+    const loadSource =
+      isProd && TauriStreamIOLoader ? new TauriStreamIOLoader({ url, referer, userAgent: ua }) : url
+
+    await this.player.load(loadSource, {
       isLive: true,
       http: {
         headers

@@ -1,9 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chaos_core::danmaku::client::DanmakuClient;
@@ -13,7 +14,10 @@ use chaos_core::livestream::model::ResolveOptions;
 use chaos_core::now_playing;
 use chaos_core::subtitle;
 use chaos_core::subtitle::models::ThunderSubtitleItem;
+use base64::Engine;
+use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::sync::{Mutex as AsyncMutex, Notify};
 
 mod danmaku_ui;
 mod livestream_ui;
@@ -33,6 +37,47 @@ struct DanmakuState {
     active: Mutex<Option<ActiveDanmaku>>,
     msg_subscribers: Mutex<HashSet<String>>,
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct StreamReadReply {
+    eof: bool,
+    #[serde(rename = "dataB64")]
+    data_b64: String,
+}
+
+struct StreamSession {
+    url: String,
+    notify: Notify,
+    state: AsyncMutex<StreamSessionState>,
+    reader_task: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+struct StreamSessionState {
+    queue: VecDeque<Vec<u8>>,
+    head_off: usize,
+    buffered: usize,
+    done: bool,
+    error: Option<String>,
+}
+
+impl StreamSessionState {
+    fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+            head_off: 0,
+            buffered: 0,
+            done: false,
+            error: None,
+        }
+    }
+}
+
+#[derive(Default)]
+struct StreamProxyState {
+    sessions: AsyncMutex<HashMap<String, Arc<StreamSession>>>,
+}
+
+static STREAM_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, serde::Serialize)]
 struct WindowStatePayload {
@@ -66,6 +111,210 @@ fn parse_site_str(site: &str) -> Result<Site, String> {
         "huya" | "hy" => Ok(Site::Huya),
         _ => Err(format!("unsupported site: {site}")),
     }
+}
+
+#[tauri::command]
+async fn stream_open(
+    state: State<'_, StreamProxyState>,
+    url: String,
+    referer: Option<String>,
+    user_agent: Option<String>,
+) -> Result<String, String> {
+    let u = url::Url::parse(&url).map_err(|e| e.to_string())?;
+    match u.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("unsupported url scheme: {other}")),
+    }
+    if is_local_or_private_host(&u) {
+        return Err("blocked host".to_string());
+    }
+
+    let id = STREAM_ID.fetch_add(1, Ordering::Relaxed);
+    let handle = format!("s{id}");
+
+    let session = Arc::new(StreamSession {
+        url: url.clone(),
+        notify: Notify::new(),
+        state: AsyncMutex::new(StreamSessionState::new()),
+        reader_task: AsyncMutex::new(None),
+    });
+
+    {
+        let mut sessions = state.sessions.lock().await;
+        sessions.insert(handle.clone(), session.clone());
+    }
+
+    // Spawn a reader task that continuously fetches the remote stream and buffers it.
+    // This avoids webview CORS/origin restrictions in packaged apps.
+    let url2 = url.clone();
+    let referer2 = referer.clone();
+    let ua2 = user_agent.clone();
+    let sess = session.clone();
+    let task = tokio::spawn(async move {
+        const MAX_BUFFER_BYTES: usize = 8 * 1024 * 1024;
+        const BACKPRESSURE_SLEEP_MS: u64 = 15;
+
+        let client = reqwest::Client::builder()
+            .tcp_keepalive(Some(Duration::from_secs(15)))
+            .build();
+        let client = match client {
+            Ok(c) => c,
+            Err(e) => {
+                let mut st = sess.state.lock().await;
+                st.error = Some(format!("reqwest client error: {e}"));
+                st.done = true;
+                sess.notify.notify_waiters();
+                return;
+            }
+        };
+
+        let mut req = client.get(url2);
+        if let Some(ua) = ua2.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            req = req.header(reqwest::header::USER_AGENT, ua);
+        }
+        if let Some(r) = referer2.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            req = req.header(reqwest::header::REFERER, r);
+            // Some CDNs check Origin; align it with referer best-effort.
+            if let Ok(ru) = url::Url::parse(r) {
+                let origin = ru.origin().ascii_serialization();
+                if !origin.trim().is_empty() && origin != "null" {
+                    req = req.header(reqwest::header::HeaderName::from_static("origin"), origin);
+                }
+            }
+        }
+
+        let resp = match req.send().await.and_then(|r| r.error_for_status()) {
+            Ok(r) => r,
+            Err(e) => {
+                let mut st = sess.state.lock().await;
+                st.error = Some(format!("http error: {e}"));
+                st.done = true;
+                sess.notify.notify_waiters();
+                return;
+            }
+        };
+
+        let mut stream = resp.bytes_stream();
+        while let Some(item) = stream.next().await {
+            let bytes = match item {
+                Ok(b) => b,
+                Err(e) => {
+                    let mut st = sess.state.lock().await;
+                    st.error = Some(format!("read error: {e}"));
+                    st.done = true;
+                    sess.notify.notify_waiters();
+                    return;
+                }
+            };
+
+            // Backpressure: keep a bounded buffer.
+            loop {
+                let st = sess.state.lock().await;
+                let should_wait = st.buffered >= MAX_BUFFER_BYTES;
+                if !should_wait {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(BACKPRESSURE_SLEEP_MS)).await;
+            }
+
+            let mut st = sess.state.lock().await;
+            let v = bytes.to_vec();
+            st.buffered = st.buffered.saturating_add(v.len());
+            st.queue.push_back(v);
+            sess.notify.notify_waiters();
+        }
+
+        let mut st = sess.state.lock().await;
+        st.done = true;
+        sess.notify.notify_waiters();
+    });
+
+    *session.reader_task.lock().await = Some(task);
+
+    Ok(handle)
+}
+
+#[tauri::command]
+async fn stream_read(
+    state: State<'_, StreamProxyState>,
+    handle: String,
+    max_len: Option<usize>,
+) -> Result<StreamReadReply, String> {
+    let max_len = max_len.unwrap_or(64 * 1024).clamp(1, 1024 * 1024);
+    let sess = {
+        let sessions = state.sessions.lock().await;
+        sessions
+            .get(handle.trim())
+            .cloned()
+            .ok_or_else(|| "stream not found".to_string())?
+    };
+
+    loop {
+        // Fast path: have buffered data or terminal state.
+        {
+            let mut st = sess.state.lock().await;
+            if let Some(e) = st.error.clone() {
+                return Err(e);
+            }
+            if st.queue.is_empty() {
+                if st.done {
+                    return Ok(StreamReadReply {
+                        eof: true,
+                        data_b64: String::new(),
+                    });
+                }
+            } else {
+                let mut out: Vec<u8> = Vec::with_capacity(max_len);
+                while out.len() < max_len {
+                    let Some(front) = st.queue.front() else {
+                        break;
+                    };
+                    let avail = front.len().saturating_sub(st.head_off);
+                    if avail == 0 {
+                        st.queue.pop_front();
+                        st.head_off = 0;
+                        continue;
+                    }
+                    let take = std::cmp::min(avail, max_len - out.len());
+                    out.extend_from_slice(&front[st.head_off..st.head_off + take]);
+                    st.head_off += take;
+                    if st.head_off >= front.len() {
+                        st.queue.pop_front();
+                        st.head_off = 0;
+                    }
+                }
+                st.buffered = st.buffered.saturating_sub(out.len());
+                let data_b64 = base64::engine::general_purpose::STANDARD.encode(out);
+                return Ok(StreamReadReply {
+                    eof: false,
+                    data_b64,
+                });
+            }
+        }
+
+        // Wait for more data or close.
+        sess.notify.notified().await;
+    }
+}
+
+#[tauri::command]
+async fn stream_close(state: State<'_, StreamProxyState>, handle: String) -> Result<(), String> {
+    let sess = {
+        let mut sessions = state.sessions.lock().await;
+        sessions.remove(handle.trim())
+    };
+
+    if let Some(sess) = sess {
+        // Abort reader task so it stops pulling remote data.
+        if let Some(task) = sess.reader_task.lock().await.take() {
+            task.abort();
+            let _ = task.await;
+        }
+        let mut st = sess.state.lock().await;
+        st.done = true;
+        sess.notify.notify_waiters();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -834,7 +1083,11 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .manage(DanmakuState::default())
+        .manage(StreamProxyState::default())
         .invoke_handler(tauri::generate_handler![
+            stream_open,
+            stream_read,
+            stream_close,
             subtitle_search,
             subtitle_download,
             now_playing_snapshot,
