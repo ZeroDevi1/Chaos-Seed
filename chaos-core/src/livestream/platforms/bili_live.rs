@@ -116,10 +116,11 @@ fn parse_room_playinfo_value(
             url: None,
             backup_urls: vec![],
         };
-        // When resolving a specific qn, prefer binding urls to the requested qn (dart_simple_live
-        // style). Otherwise, keep the legacy behavior of attaching urls to current_qn only.
+        // When resolving a specific qn, only bind URLs if the server actually switched to that qn.
+        // Some rooms ignore `qn` in this endpoint and always return a low `current_qn`. Binding
+        // blindly would create a "high label, low url" mismatch.
         let should_bind_url = match requested_qn {
-            Some(r) => r == qn,
+            Some(r) => r == qn && current_qn == r,
             None => qn == current_qn,
         };
         if should_bind_url && !urls.is_empty() {
@@ -245,15 +246,58 @@ async fn fetch_play_url(
             url: None,
             backup_urls: vec![],
         };
-        // This endpoint is called with qn; bind the returned url to the requested qn.
-        let _ = current_qn; // keep for debugging/compat; not used for binding.
-        if desc_qn == requested_qn && !urls.is_empty() {
+        // Bind URLs only if the server actually switched to the requested qn.
+        if requested_qn > 0 {
+            if desc_qn == requested_qn && current_qn == requested_qn && !urls.is_empty() {
+                v.url = Some(urls[0].clone());
+                v.backup_urls = urls[1..].to_vec();
+            }
+        } else if desc_qn == current_qn && !urls.is_empty() {
+            // No specific qn requested: attach to the actual current_qn (legacy behavior).
             v.url = Some(urls[0].clone());
             v.backup_urls = urls[1..].to_vec();
         }
         out.push(v);
     }
     Ok(out)
+}
+
+fn pick_variant_with_url(vars: Vec<StreamVariant>, qn: i32) -> Option<StreamVariant> {
+    vars.into_iter().find(|v| {
+        v.quality == qn && v.url.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+    })
+}
+
+async fn resolve_variant_for_qn(
+    http: &reqwest::Client,
+    cfg: &LivestreamConfig,
+    rid: i64,
+    qn: i32,
+) -> Result<Option<StreamVariant>, LivestreamError> {
+    match fetch_room_play_info(http, cfg, rid, qn).await {
+        Ok(vars) => {
+            if let Some(v) = pick_variant_with_url(vars, qn) {
+                return Ok(Some(v));
+            }
+        }
+        Err(e @ LivestreamError::NeedPassword) => return Err(e),
+        Err(_) => {}
+    }
+
+    match fetch_play_url(http, cfg, rid, qn).await {
+        Ok(vars) => {
+            if let Some(v) = pick_variant_with_url(vars, qn) {
+                return Ok(Some(v));
+            }
+        }
+        Err(_) => {}
+    }
+
+    match fetch_html_fallback(http, cfg, rid, qn).await {
+        Ok(vars) => Ok(pick_variant_with_url(vars, qn)),
+        Err(e @ LivestreamError::NeedPassword) => Err(e),
+        Err(_) => Ok(None),
+    }
 }
 
 async fn fetch_html_fallback(
@@ -286,22 +330,6 @@ async fn fetch_html_fallback(
     // If server didn't switch qn, leave it as-is.
     let _ = qn;
     Ok(vars)
-}
-
-async fn fetch_playinfo(
-    http: &reqwest::Client,
-    cfg: &LivestreamConfig,
-    rid: i64,
-    qn: i32,
-) -> Result<Vec<StreamVariant>, LivestreamError> {
-    match fetch_room_play_info(http, cfg, rid, qn).await {
-        Ok(v) => Ok(v),
-        Err(e @ LivestreamError::NeedPassword) => Err(e),
-        Err(_) => match fetch_play_url(http, cfg, rid, qn).await {
-            Ok(v) => Ok(v),
-            Err(_) => fetch_html_fallback(http, cfg, rid, qn).await,
-        },
-    }
 }
 
 fn apply_drop_inaccessible(
@@ -382,16 +410,12 @@ pub async fn decode_manifest(
                 break;
             }
 
-            if let Ok(resolved_vars) = fetch_playinfo(http, cfg, rid, qn).await {
-                if let Some(rv) = resolved_vars.into_iter().find(|v| {
-                    v.quality == qn && v.url.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
-                }) {
-                    if let Some(dst) = vars.iter_mut().find(|v| v.quality == qn) {
-                        dst.url = rv.url;
-                        dst.backup_urls = rv.backup_urls;
-                        break;
-                    }
+            if let Ok(Some(rv)) = resolve_variant_for_qn(http, cfg, rid, qn).await {
+                if let Some(dst) = vars.iter_mut().find(|v| v.quality == qn) {
+                    dst.url = rv.url;
+                    dst.backup_urls = rv.backup_urls;
                 }
+                break;
             }
         }
     }
@@ -434,11 +458,9 @@ pub async fn resolve_variant(
         .parse()
         .map_err(|_| LivestreamError::InvalidInput("invalid qn".to_string()))?;
 
-    let vars = fetch_playinfo(http, cfg, rid, qn).await?;
-    let mut v = vars
-        .into_iter()
-        .find(|v| v.quality == qn)
-        .ok_or_else(|| LivestreamError::Parse("variant not found".to_string()))?;
+    let mut v = resolve_variant_for_qn(http, cfg, rid, qn)
+        .await?
+        .ok_or_else(|| LivestreamError::Parse("requested quality not accessible".to_string()))?;
     v.id = make_variant_id(qn, &v.label);
     Ok(v)
 }

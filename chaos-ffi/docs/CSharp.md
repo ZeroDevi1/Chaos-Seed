@@ -207,6 +207,8 @@ Console.WriteLine(manifestJson);
 
 // 2) pick a variant_id from manifest.variants[i].id, then resolve (optional, platform-dependent)
 // Prefer resolve_variant2_json with manifest.site + manifest.room_id (canonical rid/long id).
+// Note (BiliLive): some rooms may ignore qn in the first response; resolve_variant* will fallback
+// to another endpoint to fetch the real URL for the requested qn, or fail if that qn is inaccessible.
 var variantId = "bili_live:2000:原画";
 using var manDoc = JsonDocument.Parse(manifestJson);
 var site = manDoc.RootElement.GetProperty("site").GetString() ?? "";

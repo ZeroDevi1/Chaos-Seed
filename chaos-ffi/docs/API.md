@@ -220,6 +220,11 @@ char* chaos_lyrics_search_json(
 
 这样 UI 可以先快速展示清晰度列表，再在用户切换清晰度时按需补全 URL。
 
+补充说明（BiliLive）：
+- 部分直播间的 `getRoomPlayInfo` 接口会**忽略**传入的 `qn`（即使请求“原画/蓝光”，回包 `current_qn` 仍是较低档）。
+- 因此 core 在补齐指定清晰度 URL 时，会在必要时回退到 `room/v1/Room/playUrl`，并且只在“请求的 `qn` 与回包的 `current_qn` 一致”时才绑定 URL，避免“高标签但低清 URL”的错配。
+- 若目标清晰度不可达（例如请求 4K/2K 最终回落到原画），则该清晰度会被视为不可访问：`resolve_variant*` 会返回错误（或该变体 `url` 仍为 `null`，取决于调用路径与参数）。
+
 ### `char* chaos_livestream_decode_manifest_json(const char* input_utf8, uint8_t drop_inaccessible_high_qualities)`
 
 - `input_utf8`：支持完整 URL 或平台前缀（复用 `chaos-core` 的解析规则）
