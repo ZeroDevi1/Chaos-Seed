@@ -57,14 +57,33 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $bundleDir = Join-Path "chaos-tauri/src-tauri/target/release" "bundle"
-          if (Test-Path $bundleDir) {
+
+          # Cargo uses the workspace root `target/` by default (even when building from subdirectories),
+          # so we probe both the workspace and crate-local target paths.
+          $bundleCandidates = @(
+            (Join-Path "target/release" "bundle"),
+            (Join-Path "chaos-tauri/src-tauri/target/release" "bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if ($bundleDir) {
             Compress-Archive -Force -Path $bundleDir -DestinationPath dist/chaos-tauri-windows-x86_64.zip
             exit 0
           }
-          $exe = Get-ChildItem -Path "chaos-tauri/src-tauri/target/release" -Filter "*.exe" | Select-Object -First 1
-          if ($null -eq $exe) { throw "no exe found under chaos-tauri/src-tauri/target/release" }
-          Compress-Archive -Force -Path $exe.FullName -DestinationPath dist/chaos-tauri-windows-x86_64.zip
+
+          $exeCandidates = @(
+            (Join-Path "target/release" "chaos-tauri.exe"),
+            (Join-Path "chaos-tauri/src-tauri/target/release" "chaos-tauri.exe")
+          )
+          $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (!$exePath) {
+            $exe = Get-ChildItem -Recurse -ErrorAction SilentlyContinue -Path "target/release","chaos-tauri/src-tauri/target/release" -Filter "*.exe" | Select-Object -First 1
+            if ($null -ne $exe) { $exePath = $exe.FullName }
+          }
+          if (!$exePath) {
+            throw "no exe found under target/release or chaos-tauri/src-tauri/target/release"
+          }
+
+          Compress-Archive -Force -Path $exePath -DestinationPath dist/chaos-tauri-windows-x86_64.zip
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
@@ -72,4 +91,3 @@ jobs:
           files: |
             dist/chaos-ffi-windows-x86_64.zip
             dist/chaos-tauri-windows-x86_64.zip
-
