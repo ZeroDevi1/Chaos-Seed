@@ -8,6 +8,6 @@ export async function decodeManifest(input: string): Promise<LiveManifest> {
 }
 
 export async function resolveVariant(site: string, room_id: string, variant_id: string): Promise<StreamVariant> {
-  return invoke<StreamVariant>('livestream_resolve_variant', { site, room_id, variant_id })
+  // Tauri uses serde to map JS object keys to Rust parameters; use camelCase here.
+  return invoke<StreamVariant>('livestream_resolve_variant', { site, roomId: room_id, variantId: variant_id })
 }
-

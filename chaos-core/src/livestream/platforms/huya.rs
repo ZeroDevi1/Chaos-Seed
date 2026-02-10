@@ -91,8 +91,8 @@ fn parse_bitrate_info(bit_rate_info: &str) -> Vec<(String, i32)> {
     out
 }
 
-fn parse_stream_infos(v: &Value) -> Vec<(String, String, String, String)> {
-    // (stream_name, flv_url, flv_suffix, anti_code)
+fn parse_stream_infos(v: &Value) -> Vec<(String, u32, String, String, String)> {
+    // (stream_name, presenter_uid, flv_url, flv_suffix, anti_code)
     let mut out = Vec::new();
     if let Some(arr) = v
         .pointer("/data/stream/baseSteamInfoList")
@@ -104,6 +104,12 @@ fn parse_stream_infos(v: &Value) -> Vec<(String, String, String, String)> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let presenter_uid = it
+                .get("lPresenterUid")
+                .and_then(|v| v.as_i64())
+                .or_else(|| it.get("lPresenterUid").and_then(|v| v.as_str()?.parse::<i64>().ok()))
+                .unwrap_or(0)
+                .clamp(0, i64::from(u32::MAX)) as u32;
             let s_flv_url = it
                 .get("sFlvUrl")
                 .and_then(|v| v.as_str())
@@ -123,8 +129,9 @@ fn parse_stream_infos(v: &Value) -> Vec<(String, String, String, String)> {
                 && !s_flv_url.is_empty()
                 && !s_suffix.is_empty()
                 && !s_anti.is_empty()
+                && presenter_uid > 0
             {
-                out.push((s_stream_name, s_flv_url, s_suffix, s_anti));
+                out.push((s_stream_name, presenter_uid, s_flv_url, s_suffix, s_anti));
             }
         }
     }
@@ -187,22 +194,20 @@ pub async fn decode_manifest(
 
         let mut streams = parse_stream_infos(&json);
         // Prefer non-txdirect hosts first (ported from IINA+ `HuyaInfoMP.videos`).
-        streams.sort_by_key(|(_, flv_url, _, _)| flv_url.contains("txdirect.flv.huya.com"));
-
-        let uid = cfg.env.huya_uid();
+        streams.sort_by_key(|(_, _, flv_url, _, _)| flv_url.contains("txdirect.flv.huya.com"));
         let now_ms = (cfg.env.now_ms)();
 
         for (label, bitrate) in brs {
             let mut urls: Vec<String> = streams
                 .iter()
-                .filter_map(|(stream_name, flv_url, suffix, anti)| {
+                .filter_map(|(stream_name, presenter_uid, flv_url, suffix, anti)| {
                     huya_url::format(
-                        uid,
-                        now_ms,
                         stream_name,
                         flv_url,
                         suffix,
                         anti,
+                        *presenter_uid,
+                        now_ms,
                         if bitrate > 0 { Some(bitrate) } else { None },
                     )
                 })

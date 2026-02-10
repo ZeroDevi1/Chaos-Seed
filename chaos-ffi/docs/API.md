@@ -17,14 +17,14 @@
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-返回 API 版本号。当前为 `2`。
+返回 API 版本号。当前为 `3`。
 
 ### `char* chaos_ffi_version_json(void)`
 
 返回：
 
 ```json
-{"version":"0.1.0","git":"unknown","api":2}
+{"version":"0.1.0","git":"unknown","api":3}
 ```
 
 ### `char* chaos_ffi_last_error_json(void)`
@@ -214,6 +214,23 @@ char* chaos_subtitle_download_item_json(
 1) 调用 `chaos_livestream_decode_manifest_json(input, 1)` 获取 `variants`
 2) 选择一个 `variants[i].id`（例如 `bili_live:2000:原画` 或 `douyu:2:原画`）
 3) 调用 `chaos_livestream_resolve_variant_json(input, variant_id)` 获取补齐后的 `StreamVariant`
+
+说明：
+- 该函数会 **内部先 decode manifest** 来拿到 canonical `room_id`（例如斗鱼真实 rid / B 站长号），再进行二段解析；
+  因此性能上比直接传 `(site, room_id, variant_id)` 略慢。
+
+### `char* chaos_livestream_resolve_variant2_json(const char* site_utf8, const char* room_id_utf8, const char* variant_id_utf8)`
+
+推荐使用的“二段解析”接口：当你已经从 `LiveManifest` 中拿到了 `site` + canonical `room_id` 时，直接用它们解析指定清晰度的 URL。
+
+参数说明：
+- `site_utf8`：推荐直接传 `manifest.site`（例如 `BiliLive` / `Douyu` / `Huya`）；同时也兼容 `bili_live` / `douyu` / `huya` 等小写别名。
+- `room_id_utf8`：必须是 canonical room id（推荐直接传 `manifest.room_id`）。
+- `variant_id_utf8`：从 `manifest.variants[i].id` 中取。
+
+典型流程：
+1) `decode_manifest` 得到 `manifest.site` + `manifest.room_id` + `variants[i].id`
+2) 调用 `chaos_livestream_resolve_variant2_json(manifest.site, manifest.room_id, variants[i].id)`
 
 返回 `StreamVariant` JSON（字段形状）：
 

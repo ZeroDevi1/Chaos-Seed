@@ -226,7 +226,8 @@ async fn fetch_h5_play(
     form.insert("auth", auth);
     form.insert("cdn", "".to_string());
     form.insert("rate", rate.to_string());
-    form.insert("hevc", "1".to_string());
+    // Prefer H.264 for maximum decoder compatibility (aligned with dart_simple_live).
+    form.insert("hevc", "0".to_string());
     form.insert("fa", "0".to_string());
     form.insert("ive", "0".to_string());
 
@@ -265,10 +266,12 @@ async fn fetch_h5_play(
         }
     }
 
-    let (flv_url, mut p2p_urls) =
+    let (flv_url, p2p_urls) =
         build_play_urls(cfg, env, &rtmp_url, &rtmp_live, p2p_meta, &cdn_hosts);
-    // Swift appends flvUrl at the end.
-    p2p_urls.push(flv_url.clone());
+    // Prefer direct FLV first; keep P2P/xs URLs as backups (they can be flaky in some players).
+    let mut urls: Vec<String> = Vec::new();
+    urls.push(flv_url.clone());
+    urls.extend(p2p_urls);
 
     let mut variants: Vec<StreamVariant> = Vec::new();
     for mr in multirates {
@@ -290,9 +293,9 @@ async fn fetch_h5_play(
             url: None,
             backup_urls: vec![],
         };
-        if mr_rate == current_rate && !p2p_urls.is_empty() {
-            v.url = Some(p2p_urls[0].clone());
-            v.backup_urls = p2p_urls[1..].to_vec();
+        if mr_rate == current_rate && !urls.is_empty() {
+            v.url = Some(urls[0].clone());
+            v.backup_urls = urls[1..].to_vec();
         }
         variants.push(v);
     }

@@ -135,6 +135,7 @@ impl LivestreamClient {
     }
 
     pub fn with_config(cfg: LivestreamConfig) -> Result<Self, LivestreamError> {
+        crate::tls::ensure_rustls_provider();
         let http = reqwest::Client::builder()
             .user_agent("chaos-seed/0.1")
             .build()?;

@@ -117,6 +117,126 @@ async fn decode_manifest_room_play_info_ok() {
 }
 
 #[tokio::test]
+async fn decode_manifest_resolves_highest_quality_to_avoid_single_variant() {
+    let server = MockServer::start();
+    let base = server.base_url();
+
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/room/v1/Room/get_info")
+            .query_param("room_id", "10");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": { "room_id": 1010, "title": "t10", "live_status": 1, "user_cover": "" }
+        }));
+    });
+
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/live_user/v1/UserInfo/get_anchor_in_room")
+            .query_param("roomid", "1010");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": { "info": { "uname": "u10", "face": "f10" } }
+        }));
+    });
+
+    // First call (qn=0): server reports current_qn=1000 (low), accept_qn has higher options.
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/xlive/web-room/v2/index/getRoomPlayInfo")
+            .query_param("qn", "0");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": {
+                "encrypted": false,
+                "pwd_verified": true,
+                "playurl_info": {
+                    "playurl": {
+                        "g_qn_desc": [
+                            {"qn": 1000, "desc": "高清"},
+                            {"qn": 2000, "desc": "原画"}
+                        ],
+                        "stream": [{
+                            "protocol_name": "http_stream",
+                            "format": [{
+                                "format_name": "flv",
+                                "codec": [{
+                                    "codec_name": "avc",
+                                    "current_qn": 1000,
+                                    "accept_qn": [1000,2000],
+                                    "base_url": "/live-bvc/low.flv",
+                                    "url_info": [
+                                        {"host": "https://up-mirror.bilivideo.com", "extra": "?x=1"}
+                                    ]
+                                }]
+                            }]
+                        }]
+                    }
+                }
+            }
+        }));
+    });
+
+    // Second call (qn=2000): server honors highest qn and returns a URL for it.
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/xlive/web-room/v2/index/getRoomPlayInfo")
+            .query_param("qn", "2000");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": {
+                "encrypted": false,
+                "pwd_verified": true,
+                "playurl_info": {
+                    "playurl": {
+                        "g_qn_desc": [
+                            {"qn": 1000, "desc": "高清"},
+                            {"qn": 2000, "desc": "原画"}
+                        ],
+                        "stream": [{
+                            "protocol_name": "http_stream",
+                            "format": [{
+                                "format_name": "flv",
+                                "codec": [{
+                                    "codec_name": "avc",
+                                    "current_qn": 2000,
+                                    "accept_qn": [1000,2000],
+                                    "base_url": "/live-bvc/high.flv",
+                                    "url_info": [
+                                        {"host": "https://up-mirror.bilivideo.com", "extra": "?y=1"}
+                                    ]
+                                }]
+                            }]
+                        }]
+                    }
+                }
+            }
+        }));
+    });
+
+    let cfg = LivestreamConfig {
+        endpoints: Endpoints {
+            bili_api_base: base.clone(),
+            bili_live_base: base.clone(),
+            ..Endpoints::default()
+        },
+        env: fixed_env(),
+    };
+    let client = LivestreamClient::with_config(cfg).expect("client");
+    let man = client
+        .decode_manifest("https://live.bilibili.com/10", ResolveOptions::default())
+        .await
+        .expect("manifest");
+
+    assert_eq!(man.site, Site::BiliLive);
+    assert_eq!(man.room_id, "1010");
+    assert!(man.variants.len() >= 2);
+    let high = man.variants.iter().find(|v| v.quality == 2000).expect("high");
+    assert!(high.url.as_deref().unwrap_or("").contains("high.flv"));
+}
+
+#[tokio::test]
 async fn decode_manifest_fallback_to_playurl() {
     let server = MockServer::start();
     let base = server.base_url();

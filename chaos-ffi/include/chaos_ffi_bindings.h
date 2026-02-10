@@ -39,6 +39,16 @@ char *chaos_livestream_decode_manifest_json(const char *input_utf8,
 
 char *chaos_livestream_resolve_variant_json(const char *input_utf8, const char *variant_id_utf8);
 
+/**
+ * Resolve a stream variant using explicit `(site, room_id, variant_id)`.
+ *
+ * Prefer this over `chaos_livestream_resolve_variant_json(input, variant_id)` when you already
+ * have the canonical room id from `LiveManifest.room_id`.
+ */
+char *chaos_livestream_resolve_variant2_json(const char *site_utf8,
+                                             const char *room_id_utf8,
+                                             const char *variant_id_utf8);
+
 void *chaos_danmaku_connect(const char *input_utf8);
 
 int32_t chaos_danmaku_set_callback(void *handle, ChaosDanmakuCallback cb, void *user_data);

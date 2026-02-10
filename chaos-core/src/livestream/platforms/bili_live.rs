@@ -34,7 +34,10 @@ async fn get_text(http: &reqwest::Client, url: &str) -> Result<String, Livestrea
     Ok(resp.text().await?)
 }
 
-fn parse_room_playinfo_value(v: &Value) -> Result<Vec<StreamVariant>, LivestreamError> {
+fn parse_room_playinfo_value(
+    v: &Value,
+    requested_qn: Option<i32>,
+) -> Result<Vec<StreamVariant>, LivestreamError> {
     if get_bool(v, "/data/encrypted").unwrap_or(false)
         && !get_bool(v, "/data/pwd_verified").unwrap_or(true)
     {
@@ -113,7 +116,13 @@ fn parse_room_playinfo_value(v: &Value) -> Result<Vec<StreamVariant>, Livestream
             url: None,
             backup_urls: vec![],
         };
-        if qn == current_qn && !urls.is_empty() {
+        // When resolving a specific qn, prefer binding urls to the requested qn (dart_simple_live
+        // style). Otherwise, keep the legacy behavior of attaching urls to current_qn only.
+        let should_bind_url = match requested_qn {
+            Some(r) => r == qn,
+            None => qn == current_qn,
+        };
+        if should_bind_url && !urls.is_empty() {
             v.url = Some(urls[0].clone());
             v.backup_urls = urls[1..].to_vec();
         }
@@ -157,7 +166,23 @@ async fn fetch_room_play_info(
         "{base}/xlive/web-room/v2/index/getRoomPlayInfo?room_id={rid}&protocol=0,1&format=0,1,2&codec=0,1&qn={qn}&platform=web&ptype=8&dolby=5"
     );
     let json = get_json(http, &url).await?;
-    parse_room_playinfo_value(&json)
+    parse_room_playinfo_value(&json, if qn > 0 { Some(qn) } else { None })
+}
+
+async fn fetch_playinfo_list(
+    http: &reqwest::Client,
+    cfg: &LivestreamConfig,
+    rid: i64,
+) -> Result<Vec<StreamVariant>, LivestreamError> {
+    // Use qn=0 to request the full accept_qn list (aligned with dart_simple_live behavior).
+    match fetch_room_play_info(http, cfg, rid, 0).await {
+        Ok(v) => Ok(v),
+        Err(e @ LivestreamError::NeedPassword) => Err(e),
+        Err(_) => match fetch_play_url(http, cfg, rid, 0).await {
+            Ok(v) => Ok(v),
+            Err(_) => fetch_html_fallback(http, cfg, rid, 0).await,
+        },
+    }
 }
 
 async fn fetch_play_url(
@@ -166,6 +191,7 @@ async fn fetch_play_url(
     rid: i64,
     qn: i32,
 ) -> Result<Vec<StreamVariant>, LivestreamError> {
+    let requested_qn = qn;
     let base = cfg.endpoints.bili_api_base.trim_end_matches('/');
     let url = format!("{base}/room/v1/Room/playUrl?cid={rid}&qn={qn}&platform=web");
     let json = get_json(http, &url).await?;
@@ -188,24 +214,26 @@ async fn fetch_play_url(
 
     let mut out: Vec<StreamVariant> = Vec::new();
     for item in qn_desc {
-        let qn = item.get("qn").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
+        let desc_qn = item.get("qn").and_then(|v| v.as_i64()).unwrap_or(-1) as i32;
         let label = item
             .get("desc")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        if qn <= 0 || label.is_empty() {
+        if desc_qn <= 0 || label.is_empty() {
             continue;
         }
         let mut v = StreamVariant {
-            id: make_variant_id(qn, &label),
+            id: make_variant_id(desc_qn, &label),
             label,
-            quality: qn,
+            quality: desc_qn,
             rate: None,
             url: None,
             backup_urls: vec![],
         };
-        if qn == current_qn && !urls.is_empty() {
+        // This endpoint is called with qn; bind the returned url to the requested qn.
+        let _ = current_qn; // keep for debugging/compat; not used for binding.
+        if desc_qn == requested_qn && !urls.is_empty() {
             v.url = Some(urls[0].clone());
             v.backup_urls = urls[1..].to_vec();
         }
@@ -236,7 +264,7 @@ async fn fetch_html_fallback(
         .ok_or_else(|| LivestreamError::Parse("missing roomInitRes".to_string()))?;
 
     // Some pages may not support the requested qn; still parse and return what we can.
-    let mut vars = parse_room_playinfo_value(room_init)?;
+    let mut vars = parse_room_playinfo_value(room_init, if qn > 0 { Some(qn) } else { None })?;
     // Prefer the requested qn variant id format for resolve_variant convenience.
     for v in &mut vars {
         v.id = make_variant_id(v.quality, &v.label);
@@ -318,7 +346,42 @@ pub async fn decode_manifest(
         is_living,
     };
 
-    let vars = fetch_playinfo(http, cfg, rid, 30000).await?;
+    // First: list all available qualities (accept_qn + g_qn_desc).
+    let mut vars = fetch_playinfo_list(http, cfg, rid).await?;
+
+    // Second: resolve the best accessible quality (highest qn that returns a url) so we don't
+    // end up with a single low-quality variant after `drop_inaccessible_high_qualities`.
+    //
+    // This mirrors dart_simple_live behavior: list qualities from accept_qn, then fetch URLs for
+    // the chosen quality.
+    {
+        let mut qns: Vec<i32> = vars.iter().map(|v| v.quality).collect();
+        qns.sort_by(|a, b| b.cmp(a));
+        qns.dedup();
+
+        // Cap attempts to avoid excessive requests on flaky networks.
+        for qn in qns.into_iter().take(8) {
+            let already_has_url = vars.iter().any(|v| {
+                v.quality == qn && v.url.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+            });
+            if already_has_url {
+                break;
+            }
+
+            if let Ok(resolved_vars) = fetch_playinfo(http, cfg, rid, qn).await {
+                if let Some(rv) = resolved_vars.into_iter().find(|v| {
+                    v.quality == qn && v.url.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+                }) {
+                    if let Some(dst) = vars.iter_mut().find(|v| v.quality == qn) {
+                        dst.url = rv.url;
+                        dst.backup_urls = rv.backup_urls;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     let mut vars = apply_drop_inaccessible(vars, opt);
     vars.sort_by(|a, b| b.quality.cmp(&a.quality));
 

@@ -52,8 +52,8 @@
       try {
         const resolved = await invoke<StreamVariant>('livestream_resolve_variant', {
           site: bootReq.site,
-          room_id: bootReq.room_id,
-          variant_id: v.id
+          roomId: bootReq.room_id,
+          variantId: v.id
         })
         url = (resolved.url ?? '').toString().trim()
         backup_urls = resolved.backup_urls ?? []

@@ -1,6 +1,6 @@
 # chaos-seed
 
-一个 Windows GUI（Rust + Slint）应用 + 纯 Rust 核心（`chaos-core`）：提供字幕下载、弹幕接入与直播源解析等能力；并通过 `chaos-ffi` 以 C ABI + JSON 形式对外导出，便于 WinUI3/Qt 等调用。
+一个 Windows GUI（Rust + Tauri）应用 + 纯 Rust 核心（`chaos-core`）：提供字幕下载、弹幕接入与直播源解析等能力；并通过 `chaos-ffi` 以 C ABI + JSON 形式对外导出，便于 WinUI3/Qt 等调用。
 
 ## 功能
 
@@ -56,64 +56,14 @@ Currently Strategy                         Future Strategy
 
 ## 构建
 
-### Windows 原生（MSVC）
-
-默认使用 **software renderer**（最稳，跨环境兼容最好）：
-
-```powershell
-.\scripts\build_win.ps1
-```
-
-如果你想尝试 Skia renderer（性能更好，但对 C++ 工具链更敏感）：
-
-```powershell
-.\scripts\build_win_skia.ps1
-```
-
-产物：`target\release\chaos-seed.exe`
-
-#### Windows 上 Skia 链接失败（LNK2019 / LNK1120）
-
-如果你遇到类似：
-
-> skia.lib(...): unresolved external symbol __std_find_first_of_trivial_pos_1  
-> fatal error LNK1120: 1 unresolved externals
-
-这是典型的 Skia/C++ 标准库符号不匹配问题（不同 MSVC toolset / STL 版本组合可能触发）。
-
-解决方式（推荐从上到下尝试）：
-
-1) 直接使用 software renderer：运行 `.\scripts\build_win.ps1`
-2) 更新/切换到稳定的 VS 2022 toolset（不要混用 Preview 工具链），并确保 C++ build tools 完整安装
-
-### WSL -> Windows（GNU, mingw-w64）
-
-（以下以 Debian/Ubuntu 为例）
+### Tauri
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y mingw-w64 pkg-config libfontconfig1-dev
-rustup target add x86_64-pc-windows-gnu
-./scripts/build_wsl_gnu.sh
+cd chaos-tauri
+pnpm run tauri:build:nobundle
 ```
 
-产物：`target/x86_64-pc-windows-gnu/release/chaos-seed.exe`
-
-说明：WSL 的交叉编译脚本默认使用 **software renderer**，更容易成功。
-
-### WSL -> Windows（MSVC, cargo-xwin）
-
-```bash
-sudo apt-get update
-sudo apt-get install -y pkg-config libfontconfig1-dev clang lld
-rustup target add x86_64-pc-windows-msvc
-cargo install cargo-xwin
-./scripts/build_wsl_msvc_xwin.sh
-```
-
-产物路径以 cargo-xwin 输出为准（通常在 `target/x86_64-pc-windows-msvc/release/chaos-seed.exe`）。
-
-## 渲染器切换（手动）
+### 渲染器切换（手动）
 
 - Skia renderer：
 

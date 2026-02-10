@@ -175,6 +175,8 @@ export class AvPlayerEngine implements PlayerEngine {
     const headers: Record<string, string> = {}
     const referer = (source.referer ?? '').toString().trim()
     if (referer) headers.Referer = referer
+    const ua = (source.user_agent ?? '').toString().trim()
+    if (ua) headers['User-Agent'] = ua
     await this.player.load(url, {
       isLive: true,
       http: {

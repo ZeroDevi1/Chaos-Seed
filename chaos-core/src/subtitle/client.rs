@@ -27,6 +27,7 @@ impl ThunderClient {
     }
 
     pub fn with_base_url(base_url: &str) -> Result<Self, ThunderError> {
+        crate::tls::ensure_rustls_provider();
         let http = reqwest::Client::builder()
             .user_agent("chaos-seed/0.1")
             .build()?;

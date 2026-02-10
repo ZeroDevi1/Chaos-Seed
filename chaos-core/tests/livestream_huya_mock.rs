@@ -34,9 +34,10 @@ async fn decode_manifest_mp_profile_room_ok() {
                 "stream": {
                     "baseSteamInfoList": [{
                         "sStreamName": "s",
+                        "lPresenterUid": 777,
                         "sFlvUrl": "http://tx.flv.huya.com/huyalive",
                         "sFlvUrlSuffix": "flv",
-                        "sFlvAntiCode": "wsTime=67b6c60d&ctype=huya_live&t=100&fm=YWJjJDA%3D"
+                        "sFlvAntiCode": "wsTime=67b6c60d&ctype=tars_mp&t=102&fs=1&fm=RFdxOEJjSjNoNkRKdDZUWV8kMF8kMV8kMl8kMw%3D%3D"
                     }]
                 }
             }
@@ -66,7 +67,7 @@ async fn decode_manifest_mp_profile_room_ok() {
         assert!(url.contains("wsSecret="));
         assert!(url.contains("wsTime=67b6c60d"));
         assert!(url.contains("seqid="));
-        assert!(url.contains("sdk_sid="));
+        assert!(url.contains("ver=1"));
         assert!(url.contains("u="));
         if v.quality == 2000 {
             assert!(url.contains("ratio=2000"));

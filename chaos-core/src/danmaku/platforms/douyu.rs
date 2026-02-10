@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+use tokio_tungstenite::tungstenite::http::header::{HeaderValue, ORIGIN, USER_AGENT};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -41,7 +43,18 @@ pub async fn run(
         }
     };
 
-    let (ws, _resp) = tokio_tungstenite::connect_async(SERVER_URL).await?;
+    let mut req = SERVER_URL.into_client_request()?;
+    // Douyu's danmu gateway can be picky about browser-like headers.
+    req.headers_mut()
+        .insert(ORIGIN, HeaderValue::from_static("https://www.douyu.com"));
+    req.headers_mut().insert(
+        USER_AGENT,
+        HeaderValue::from_static("chaos-seed/0.1 (douyu-danmaku)"),
+    );
+
+    // Use tokio-tungstenite's native-tls backend (vendored OpenSSL) for maximum compatibility
+    // with Douyu's TLS stack.
+    let (ws, _resp) = tokio_tungstenite::connect_async(req).await?;
     let (mut sink, mut stream) = ws.split();
 
     // Join room.
@@ -106,19 +119,20 @@ pub async fn run(
 }
 
 fn encode_packet(msg: &str) -> Vec<u8> {
-    // Douyu payload is a UTF-8 string ending with NUL.
-    let mut payload = msg.as_bytes().to_vec();
-    payload.push(0);
+    // Douyu framing (matches dart_simple_live):
+    // full_len = len2(4) + type(2) + enc(1) + reserved(1) + body(N) + nul(1) = N + 9
+    // Packet bytes = len(4) + full_len.
+    let body = msg.as_bytes();
+    let full_len = (body.len() + 9) as u32;
 
-    // Same as IINA+: packet_len = payload + 8 (len fields) + 1? (proto?), matches prior impl.
-    let packet_len = (payload.len() + 9) as u32;
-    let mut out = Vec::with_capacity(payload.len() + 13);
-    out.extend_from_slice(&packet_len.to_le_bytes());
-    out.extend_from_slice(&packet_len.to_le_bytes());
-    out.extend_from_slice(&(689u16).to_le_bytes());
-    out.push(0);
-    out.push(0);
-    out.extend_from_slice(&payload);
+    let mut out = Vec::with_capacity((full_len + 4) as usize);
+    out.extend_from_slice(&full_len.to_le_bytes());
+    out.extend_from_slice(&full_len.to_le_bytes());
+    out.extend_from_slice(&(689u16).to_le_bytes()); // clientSendToServer
+    out.push(0); // encrypted
+    out.push(0); // reserved
+    out.extend_from_slice(body);
+    out.push(0); // NUL terminator
     out
 }
 
@@ -126,17 +140,20 @@ fn decode_packets(buf: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     let mut off = 0usize;
     while off + 12 <= buf.len() {
-        let packet_len =
+        let full_len =
             u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]) as usize;
-        if packet_len < 13 || off + packet_len > buf.len() {
+        // total bytes = 4 (len field) + full_len
+        let total = full_len.saturating_add(4);
+        if full_len < 9 || off + total > buf.len() {
             break;
         }
-        let text_len = packet_len.saturating_sub(13);
+        // body_len excludes the trailing NUL: body_len = full_len - 9
+        let body_len = full_len.saturating_sub(9);
         let start = off + 12;
-        let end = (start + text_len).min(buf.len());
+        let end = (start + body_len).min(buf.len());
         let text = String::from_utf8_lossy(&buf[start..end]).to_string();
         out.push(text);
-        off += packet_len;
+        off += total;
     }
     out
 }
@@ -201,6 +218,35 @@ fn parse_kv(text: &str) -> std::collections::HashMap<String, String> {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn douyu_packet_len_matches_total_bytes() {
+        let msg = "type@=loginreq/roomid@=1/";
+        let pkt = encode_packet(msg);
+        assert!(pkt.len() >= 16);
+        let full_len = u32::from_le_bytes([pkt[0], pkt[1], pkt[2], pkt[3]]) as usize;
+        assert_eq!(pkt.len(), full_len + 4);
+        // The last byte must be NUL.
+        assert_eq!(pkt[pkt.len() - 1], 0);
+    }
+
+    #[test]
+    fn douyu_packet_roundtrip_decode() {
+        let msg1 = "type@=loginreq/roomid@=1/";
+        let msg2 = "type@=joingroup/rid@=1/gid@=-9999/";
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&encode_packet(msg1));
+        buf.extend_from_slice(&encode_packet(msg2));
+        let out = decode_packets(&buf);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], msg1);
+        assert_eq!(out[1], msg2);
+    }
 }
 
 async fn fetch_room_id(http: &reqwest::Client, room_id: &str) -> Result<String, DanmakuError> {

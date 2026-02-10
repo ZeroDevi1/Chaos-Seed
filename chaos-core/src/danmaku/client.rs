@@ -14,6 +14,7 @@ pub struct DanmakuClient {
 
 impl DanmakuClient {
     pub fn new() -> Result<Self, DanmakuError> {
+        crate::tls::ensure_rustls_provider();
         let http = reqwest::Client::builder()
             .user_agent("chaos-seed/0.1")
             .build()?;
@@ -50,6 +51,11 @@ impl DanmakuClient {
         let task = tokio::spawn(async move {
             let res = platforms::run(target2.clone(), opt, tx2.clone(), cancel2, http).await;
             if res.is_err() {
+                // Best-effort stderr log for debugging (library callers may ignore the "error" event
+                // payload).
+                if let Err(e) = &res {
+                    eprintln!("danmaku connector error for {:?}/{}: {e}", target2.site, target2.room_id);
+                }
                 // Best-effort: match IINA+ semantics: empty means ok, "error" means failure.
                 let _ = tx2.send(DanmakuEvent::new(
                     target2.site,

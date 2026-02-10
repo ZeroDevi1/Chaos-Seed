@@ -62,6 +62,12 @@ internal static partial class ChaosFfi
         string input_utf8,
         string variant_id_utf8);
 
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_livestream_resolve_variant2_json(
+        string site_utf8,
+        string room_id_utf8,
+        string variant_id_utf8);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void chaos_danmaku_callback(IntPtr event_json_utf8, IntPtr user_data);
 
@@ -147,9 +153,12 @@ var manifestJson = TakeOrThrow(ChaosFfi.chaos_livestream_decode_manifest_json(in
 Console.WriteLine(manifestJson);
 
 // 2) pick a variant_id from manifest.variants[i].id, then resolve (optional, platform-dependent)
-// Here we just show how you'd call it:
+// Prefer resolve_variant2_json with manifest.site + manifest.room_id (canonical rid/long id).
 var variantId = "bili_live:2000:原画";
-var variantJson = TakeOrThrow(ChaosFfi.chaos_livestream_resolve_variant_json(input, variantId), "resolve_variant");
+using var manDoc = JsonDocument.Parse(manifestJson);
+var site = manDoc.RootElement.GetProperty("site").GetString() ?? "";
+var roomId = manDoc.RootElement.GetProperty("room_id").GetString() ?? "";
+var variantJson = TakeOrThrow(ChaosFfi.chaos_livestream_resolve_variant2_json(site, roomId, variantId), "resolve_variant2");
 Console.WriteLine(variantJson);
 
 // Player-side hints:

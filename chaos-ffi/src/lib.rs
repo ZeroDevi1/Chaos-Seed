@@ -13,7 +13,16 @@ use libc::{c_char, c_void};
 
 use chaos_core::{danmaku, livestream, now_playing, subtitle};
 
-const API_VERSION: u32 = 2;
+const API_VERSION: u32 = 3;
+
+fn ensure_rustls_provider() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        // In some dependency graphs multiple rustls CryptoProviders can be enabled; picking one
+        // avoids runtime panics. Prefer rustls' default (aws-lc-rs).
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    });
+}
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
@@ -74,6 +83,7 @@ fn optional_cstr<'a>(p: *const c_char, name: &'static str) -> Result<Option<&'a 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
+        ensure_rustls_provider();
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -84,6 +94,7 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 fn livestream_http() -> &'static reqwest::Client {
     static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
     HTTP.get_or_init(|| {
+        ensure_rustls_provider();
         reqwest::Client::builder()
             .user_agent("chaos-seed/0.1")
             .timeout(Duration::from_secs(10))
@@ -355,10 +366,92 @@ pub extern "C" fn chaos_livestream_resolve_variant_json(
             return Err(());
         }
 
-        let (site, room_id) =
+        // Important: resolve_variant expects the *canonical* room_id (e.g. Douyu rid, Bili long id).
+        // So we decode once to obtain (site, canonical room_id), then resolve the requested variant.
+        let (site_hint, room_hint) =
             chaos_core::danmaku::sites::parse_target_hint(&input).map_err(|e| {
                 set_last_error("invalid input_utf8", Some(e.to_string()));
             })?;
+
+        let man = runtime()
+            .block_on(livestream::platforms::decode_manifest(
+                livestream_http(),
+                livestream_cfg(),
+                site_hint,
+                &room_hint,
+                &input,
+                livestream::ResolveOptions::default(),
+            ))
+            .map_err(|e| {
+                set_last_error("livestream decode failed", Some(e.to_string()));
+            })?;
+
+        let v = runtime()
+            .block_on(livestream::platforms::resolve_variant(
+                livestream_http(),
+                livestream_cfg(),
+                man.site,
+                &man.room_id,
+                &variant_id,
+            ))
+            .map_err(|e| {
+                set_last_error("livestream resolve_variant failed", Some(e.to_string()));
+            })?;
+
+        serde_json::to_string(&v).map_err(|e| {
+            set_last_error("failed to serialize variant", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_livestream_resolve_variant_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+fn parse_site_utf8(s: &str) -> Result<danmaku::model::Site, ()> {
+    let v = s.trim().to_ascii_lowercase();
+    match v.as_str() {
+        "bili_live" | "bililive" | "bilibili" | "bili" | "bl" => Ok(danmaku::model::Site::BiliLive),
+        "douyu" | "dy" => Ok(danmaku::model::Site::Douyu),
+        "huya" | "hy" => Ok(danmaku::model::Site::Huya),
+        _ => {
+            set_last_error("invalid site_utf8", Some(format!("unsupported site: {s}")));
+            Err(())
+        }
+    }
+}
+
+/// Resolve a stream variant using explicit `(site, room_id, variant_id)`.
+///
+/// Prefer this over `chaos_livestream_resolve_variant_json(input, variant_id)` when you already
+/// have the canonical room id from `LiveManifest.room_id`.
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_livestream_resolve_variant2_json(
+    site_utf8: *const c_char,
+    room_id_utf8: *const c_char,
+    variant_id_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let site_s = require_cstr(site_utf8, "site_utf8")?;
+        let site = parse_site_utf8(site_s)?;
+
+        let room_id = require_cstr(room_id_utf8, "room_id_utf8")?.trim().to_string();
+        if room_id.is_empty() {
+            set_last_error("room_id_utf8 is empty", None);
+            return Err(());
+        }
+        let variant_id = require_cstr(variant_id_utf8, "variant_id_utf8")?
+            .trim()
+            .to_string();
+        if variant_id.is_empty() {
+            set_last_error("variant_id_utf8 is empty", None);
+            return Err(());
+        }
 
         let v = runtime()
             .block_on(livestream::platforms::resolve_variant(
@@ -381,7 +474,7 @@ pub extern "C" fn chaos_livestream_resolve_variant_json(
         Ok(Ok(s)) => ok_json(s),
         Ok(Err(())) => ptr::null_mut(),
         Err(_) => {
-            set_last_error("panic in chaos_livestream_resolve_variant_json", None);
+            set_last_error("panic in chaos_livestream_resolve_variant2_json", None);
             ptr::null_mut()
         }
     }
@@ -649,6 +742,15 @@ mod tests {
     #[test]
     fn livestream_resolve_rejects_null_args() {
         let p = chaos_livestream_resolve_variant_json(ptr::null(), ptr::null());
+        assert!(p.is_null());
+        let err = chaos_ffi_last_error_json();
+        assert!(!err.is_null());
+        chaos_ffi_string_free(err);
+    }
+
+    #[test]
+    fn livestream_resolve2_rejects_null_args() {
+        let p = chaos_livestream_resolve_variant2_json(ptr::null(), ptr::null(), ptr::null());
         assert!(p.is_null());
         let err = chaos_ffi_last_error_json();
         assert!(!err.is_null());

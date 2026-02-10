@@ -113,7 +113,14 @@ async fn decode_manifest_parses_room_id_and_lists_multirates() {
         .find(|v| v.rate == Some(1))
         .expect("rate=1");
     assert!(current.url.is_some());
-    assert!(current.backup_urls.len() >= 1);
+    // Prefer direct FLV as primary; P2P/xs hosts become backups.
+    assert!(current.url.as_deref().unwrap().contains("http://play/live.flv"));
+    assert!(
+        current
+            .backup_urls
+            .iter()
+            .any(|u| u.contains("http://p2p1") || u.contains("http://p2p2"))
+    );
     let other = man
         .variants
         .iter()
@@ -191,5 +198,5 @@ async fn resolve_variant_fetches_specific_rate() {
         .await
         .expect("variant");
     assert_eq!(v.rate, Some(2));
-    assert!(v.url.unwrap().contains("live2.flv"));
+    assert!(v.url.unwrap().contains("http://play/live2.flv"));
 }
