@@ -10,8 +10,7 @@
   import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
   import { FluidBackgroundEffect } from '@/app/lyrics/effects/fluidBackground'
   import { SnowParticlesEffect } from '@/app/lyrics/effects/snowParticles'
-  import { Fan3DLayoutEffect } from '@/app/lyrics/effects/fan3dLayout'
-  import type { BackgroundEffect, LayoutEffect, ParticleEffect } from '@/app/lyrics/effects/types'
+  import type { BackgroundEffect, ParticleEffect } from '@/app/lyrics/effects/types'
 
   type NowPlayingStatePayload = {
     supported: boolean
@@ -39,12 +38,11 @@
 
   let bgCanvas: HTMLCanvasElement | null = null
   let snowCanvas: HTMLCanvasElement | null = null
-  let lineEls: HTMLElement[] = []
   let bgEffect: BackgroundEffect | null = null
   let particleEffect: ParticleEffect | null = null
-  let layoutEffect: LayoutEffect | null = null
   let lastNowEventAt = 0
   let lastLyricsEventAt = 0
+  let alwaysOnTop = true
 
   function applyLyrics(next: LyricsSearchResult | null) {
     item = next
@@ -83,7 +81,7 @@
     lastNowEventAt = Date.now()
   }
 
-  async function startDragAndSnap() {
+  async function startDrag() {
     if (!win) return
     try {
       // startDragging resolves after the drag ends.
@@ -91,8 +89,12 @@
     } catch {
       return
     }
+  }
+
+  async function snapTo(side: 'left' | 'right') {
+    if (!win) return
     try {
-      const [pos, size, mon] = await Promise.all([win.outerPosition(), win.outerSize(), currentMonitor()])
+      const [size, mon] = await Promise.all([win.outerSize(), currentMonitor()])
       if (!mon) return
       const margin = 6
       const monLeft = mon.position.x
@@ -100,15 +102,22 @@
       const monRight = mon.position.x + mon.size.width
       const monBottom = mon.position.y + mon.size.height
 
-      const centerX = pos.x + Math.floor(size.width / 2)
-      const leftDist = Math.abs(centerX - monLeft)
-      const rightDist = Math.abs(monRight - centerX)
-      const snapLeft = leftDist <= rightDist
-      const x = snapLeft ? monLeft + margin : monRight - size.width - margin
+      const x = side === 'left' ? monLeft + margin : monRight - size.width - margin
       const yMin = monTop + margin
       const yMax = Math.max(yMin, monBottom - size.height - margin)
-      const y = Math.min(yMax, Math.max(yMin, pos.y))
-      await win.setPosition(new PhysicalPosition(x, y))
+      const y = yMin
+      await win.setPosition(new PhysicalPosition(x, Math.min(yMax, Math.max(yMin, y))))
+    } catch {
+      // ignore
+    }
+  }
+
+  async function toggleAlwaysOnTop() {
+    if (!win) return
+    try {
+      const next = !alwaysOnTop
+      await win.setAlwaysOnTop(next)
+      alwaysOnTop = next
     } catch {
       // ignore
     }
@@ -153,6 +162,14 @@
       win = null
     }
 
+    void (async () => {
+      try {
+        if (win) alwaysOnTop = await win.isAlwaysOnTop()
+      } catch {
+        // ignore
+      }
+    })()
+
     const cleanup = () => {
       disposed = true
       unLyrics?.()
@@ -163,7 +180,6 @@
       stopPoll?.()
       bgEffect?.dispose()
       particleEffect?.dispose()
-      layoutEffect?.dispose()
     }
     window.addEventListener('beforeunload', cleanup, { capture: true, once: true })
 
@@ -199,7 +215,6 @@
         const s = (await invoke('lyrics_settings_get')) as any
         const bg = s?.effects?.background_effect || 'none'
         const pt = s?.effects?.particle_effect || 'none'
-        const layout = s?.effects?.layout_effect || 'none'
         const playing = (nowPlaying?.playback_status || '').toLowerCase() === 'playing'
 
         if (bg === 'fluid' && bgCanvas) {
@@ -211,9 +226,6 @@
           particleEffect = new SnowParticlesEffect()
           particleEffect.mount(snowCanvas)
           particleEffect.setActive(playing)
-        }
-        if (layout === 'fan3d') {
-          layoutEffect = new Fan3DLayoutEffect()
         }
         applyCanvasSize()
       } catch {
@@ -329,13 +341,6 @@
       const pos = effectivePositionMs()
       const a = getActiveLine(timeline, pos)
       activeIndex = a.index
-
-      if (layoutEffect) {
-        // Apply to currently rendered lines only.
-        const subset = viewLines()
-        const activeLocal = subset.findIndex((x) => x.active)
-        if (activeLocal >= 0) layoutEffect.apply(lineEls.filter(Boolean), activeLocal)
-      }
     }
     raf = requestAnimationFrame(tick)
     stopAnim = () => cancelAnimationFrame(raf)
@@ -346,19 +351,20 @@
 <div class="root" bind:this={rootEl}>
   <canvas class="bg" bind:this={bgCanvas}></canvas>
   <canvas class="snow" bind:this={snowCanvas}></canvas>
-  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-  <div class="head" data-tauri-drag-region on:mousedown|preventDefault={() => void startDragAndSnap()}>
-    <div class="head-left">
-      <div class="title">{nowPlaying?.title || item?.title || '歌词'}</div>
-      <div class="sub">
-        {nowPlaying?.artist || item?.artist || ''} {nowPlaying?.playback_status ? `· ${nowPlaying.playback_status}` : ''}
+  {#if win}
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div class="titlebar" data-tauri-drag-region on:mousedown|preventDefault={() => void startDrag()}>
+      <div class="titlebar-title">{nowPlaying?.title || item?.title || '歌词'}</div>
+      <div class="titlebar-actions" on:mousedown|stopPropagation>
+        <button class="tb-btn" title="停靠到左侧" on:click={() => void snapTo('left')}>⟸</button>
+        <button class="tb-btn" title="停靠到右侧" on:click={() => void snapTo('right')}>⟹</button>
+        <button class={alwaysOnTop ? 'tb-btn active' : 'tb-btn'} title="置顶" on:click={() => void toggleAlwaysOnTop()}>
+          📌
+        </button>
+        <button class="tb-btn danger" title="关闭" on:click={() => void win?.close()}>×</button>
       </div>
     </div>
-    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-    <div class="head-actions" on:mousedown|stopPropagation>
-      <button class="icon-btn" title="关闭" on:click={() => void win?.close()}>×</button>
-    </div>
-  </div>
+  {/if}
 
   <div class="body">
     {#if !timeline || timeline.lines.length === 0}
@@ -366,7 +372,7 @@
     {:else}
       <div class="lines">
         {#each viewLines() as l, idx (l.gi)}
-          <div class={l.active ? 'line active' : 'line'} bind:this={lineEls[idx]}>
+          <div class={l.active ? 'line active' : 'line'}>
             <div class="orig">{l.text}</div>
             {#if l.trans}
               <div class="trans">{l.trans}</div>
@@ -383,7 +389,7 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: rgba(16, 16, 16, 0.92);
+    background: rgba(16, 16, 16, 0.88);
     color: rgba(255, 255, 255, 0.92);
     position: relative;
     overflow: hidden;
@@ -399,56 +405,62 @@
   }
 
   .bg {
-    opacity: 0.9;
+    opacity: 0.35;
   }
 
-  .head {
+  .titlebar {
     padding: 10px 12px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     user-select: none;
     position: relative;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 10px;
   }
 
-  .head-left {
+  .titlebar-title {
+    font-weight: 700;
+    font-size: 13px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     min-width: 0;
     flex: 1;
   }
 
-  .head-actions {
+  .titlebar-actions {
     flex: 0 0 auto;
+    display: flex;
+    gap: 6px;
+    align-items: center;
   }
 
-  .icon-btn {
-    width: 26px;
+  .tb-btn {
+    width: 28px;
     height: 26px;
-    border-radius: 8px;
+    border-radius: 9px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(0, 0, 0, 0.25);
     color: rgba(255, 255, 255, 0.9);
     cursor: pointer;
     line-height: 1;
-    font-size: 18px;
+    font-size: 14px;
   }
 
-  .icon-btn:hover {
+  .tb-btn:hover {
     background: rgba(255, 255, 255, 0.10);
   }
 
-  .title {
-    font-weight: 700;
-    font-size: 13px;
-    line-height: 1.2;
+  .tb-btn.active {
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.12);
   }
 
-  .sub {
-    margin-top: 4px;
-    font-size: 12px;
-    opacity: 0.75;
-    line-height: 1.2;
+  .tb-btn.danger:hover {
+    background: rgba(255, 80, 80, 0.16);
+    border-color: rgba(255, 80, 80, 0.38);
   }
 
   .body {
@@ -470,18 +482,15 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    perspective: 500px;
-    transform-style: preserve-3d;
   }
 
   .line {
-    opacity: 0.6;
-    transition: opacity 120ms ease, transform 120ms ease;
+    opacity: 0.66;
+    transition: opacity 120ms ease;
   }
 
   .line.active {
     opacity: 1;
-    transform: translateX(2px);
   }
 
   .orig {

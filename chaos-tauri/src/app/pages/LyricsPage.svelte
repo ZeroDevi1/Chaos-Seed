@@ -2,13 +2,12 @@
   import { listen } from '@tauri-apps/api/event'
   import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
   import { lyricsSearch } from '@/shared/lyricsApi'
-  import { openLyricsWindow, setLyricsWindowPayload, type LyricsWindowMode } from '@/shared/lyricsWindowApi'
   import { formatForDisplay, type DisplayRow } from '@/shared/lyricsFormat'
   import type { LyricsSearchResult, NowPlayingSnapshot } from '@/shared/types'
   import { invoke } from '@tauri-apps/api/core'
   import { onMount } from 'svelte'
-
-  let includeThumbnail = false
+  import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+  import { windowPresence } from '@/stores/windowPresence'
 
   let busyNowPlaying = false
   let busyLyrics = false
@@ -18,11 +17,11 @@
   let liveNowPlaying: any | null = null
   let detectionEnabled = false
   let currentItem: LyricsSearchResult | null = null
+  let dockOpen = false
+  let floatOpen = false
 
   let items: LyricsSearchResult[] = []
   let selectedKey = ''
-
-  let windowMode: LyricsWindowMode = 'dock'
 
   function itemKey(it: LyricsSearchResult): string {
     // Avoid collisions across services: tokens are not guaranteed globally unique.
@@ -37,6 +36,7 @@
     let unDet: (() => void) | undefined
     let unNp: (() => void) | undefined
     let unCur: (() => void) | undefined
+    let unPresence: (() => void) | undefined
 
     void (async () => {
       try {
@@ -85,23 +85,26 @@
       }
     })()
 
+    unPresence = windowPresence.subscribe((s) => {
+      dockOpen = !!(s as any)?.lyricsDockOpen
+      floatOpen = !!(s as any)?.lyricsFloatOpen
+    })
+
     return () => {
       unDet?.()
       unNp?.()
       unCur?.()
+      unPresence?.()
     }
   })
 
-  async function fetchNowPlayingAndSearch() {
+  async function fetchNowPlaying() {
     busyNowPlaying = true
     status = '正在获取正在播放信息...'
-    snapshot = null
-    items = []
-    selectedKey = ''
     try {
       const s = await nowPlayingSnapshot({
-        includeThumbnail,
-        maxThumbnailBytes: 262_144,
+        includeThumbnail: true,
+        maxThumbnailBytes: 1_048_576,
         // Avoid returning a huge payload; this page only needs the picked now_playing.
         maxSessions: 1
       })
@@ -115,21 +118,29 @@
         status = '未检测到正在播放的媒体会话。'
         return
       }
-      const title = (np.title ?? '').toString().trim()
-      const artist = (np.artist ?? '').toString().trim()
-      const album = (np.album_title ?? '').toString().trim()
-      const durationMs = typeof np.duration_ms === 'number' ? np.duration_ms : null
-      if (!title) {
-        status = '正在播放信息缺少 title，无法搜索歌词。'
-        return
-      }
-
-      await doLyricsSearch({ title, artist: artist || null, album: album || null, durationMs })
+      status = '已获取正在播放信息。'
     } catch (e) {
       status = `获取失败：${String(e)}`
     } finally {
       busyNowPlaying = false
     }
+  }
+
+  async function searchLyricsFromNowPlaying() {
+    const np = snapshot?.now_playing ?? liveNowPlaying
+    if (!np) {
+      status = '请先点击“获取正在播放”。'
+      return
+    }
+    const title = (np.title ?? '').toString().trim()
+    const artist = (np.artist ?? '').toString().trim()
+    const album = (np.album_title ?? '').toString().trim()
+    const durationMs = typeof np.duration_ms === 'number' ? np.duration_ms : null
+    if (!title) {
+      status = '正在播放信息缺少 title，无法搜索歌词。'
+      return
+    }
+    await doLyricsSearch({ title, artist: artist || null, album: album || null, durationMs })
   }
 
   async function doLyricsSearch(input: {
@@ -164,23 +175,6 @@
     }
   }
 
-  async function showLyricsWindow() {
-    const chosen = selectedItem ?? currentItem
-    if (!chosen) {
-      status = '请先在中间列表选择一条歌词，或先开启检测/自动获取到歌词。'
-      return
-    }
-    try {
-      // Set payload first so already-open windows update; newly-open windows will also read the latest payload on mount.
-      await setLyricsWindowPayload(chosen)
-      if (windowMode === 'dock' || windowMode === 'float' || windowMode === 'chat' || windowMode === 'overlay') {
-        await openLyricsWindow(windowMode)
-      }
-    } catch (e) {
-      status = `打开窗口失败：${String(e)}`
-    }
-  }
-
   async function toggleDetection() {
     try {
       const next = !detectionEnabled
@@ -207,8 +201,46 @@
     }
   }
 
-  function onModeChange(ev: Event) {
-    windowMode = ((ev.target as unknown as { value: string })?.value ?? 'dock').toString() as LyricsWindowMode
+  async function closeDock() {
+    try {
+      const w = await WebviewWindow.getByLabel('lyrics_dock')
+      await w?.close()
+    } catch {
+      // ignore
+    }
+  }
+
+  async function closeFloat() {
+    try {
+      const w = await WebviewWindow.getByLabel('lyrics_float')
+      await w?.close()
+    } catch {
+      // ignore
+    }
+  }
+
+  async function toggleDockWindow() {
+    if (dockOpen) return closeDock()
+    return openDock()
+  }
+
+  async function toggleFloatWindow() {
+    if (floatOpen) return closeFloat()
+    return openFloat()
+  }
+
+  async function applySelectedAsCurrent() {
+    if (!selectedItem) {
+      status = '请先在中间列表选择一条歌词。'
+      return
+    }
+    try {
+      await invoke('lyrics_set_current', { payload: selectedItem })
+      currentItem = selectedItem
+      status = '已设置为当前歌词（Dock/Float 会自动更新）。'
+    } catch (e) {
+      status = `设置失败：${String(e)}`
+    }
   }
 </script>
 
@@ -225,32 +257,29 @@
         <fluent-button class="w-160" appearance={detectionEnabled ? 'accent' : 'outline'} on:click={toggleDetection}>
           {detectionEnabled ? '歌词检测：已开启' : '歌词检测：已关闭'}
         </fluent-button>
-        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-        <fluent-button class="w-120" appearance="outline" on:click={openDock}>停靠模式</fluent-button>
-        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-        <fluent-button class="w-120" appearance="outline" on:click={openFloat}>桌面悬浮</fluent-button>
 
-        <label class="row gap-8 align-center">
-          <input type="checkbox" bind:checked={includeThumbnail} disabled={busyNowPlaying} />
-          <span class="text-secondary">包含封面（base64）</span>
-        </label>
         <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-        <fluent-button class="w-180" appearance="accent" disabled={busyNowPlaying} on:click={fetchNowPlayingAndSearch}>
-          {busyNowPlaying ? '处理中...' : '获取正在播放并搜索歌词'}
+        <fluent-button class="w-140" appearance="outline" disabled={busyNowPlaying} on:click={fetchNowPlaying}>
+          {busyNowPlaying ? '处理中...' : '获取正在播放'}
+        </fluent-button>
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <fluent-button class="w-120" appearance="accent" disabled={busyLyrics} on:click={searchLyricsFromNowPlaying}>
+          {busyLyrics ? '搜索中...' : '搜索歌词'}
         </fluent-button>
 
-        <div class="row gap-8 align-center">
-          <div class="text-secondary">显示到</div>
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <fluent-select class="select" value={windowMode} on:change={onModeChange}>
-            <fluent-option value="dock">停靠模式（侧边栏）</fluent-option>
-            <fluent-option value="float">桌面悬浮（挂件）</fluent-option>
-          </fluent-select>
-          <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-          <fluent-button class="w-120" appearance="outline" disabled={!selectedItem} on:click={showLyricsWindow}>
-            歌词显示
-          </fluent-button>
-        </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <fluent-button class="w-160" appearance="outline" disabled={!selectedItem} on:click={applySelectedAsCurrent}>
+          设为当前歌词
+        </fluent-button>
+
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <fluent-button class="w-160" appearance={dockOpen ? 'accent' : 'outline'} on:click={toggleDockWindow}>
+          {dockOpen ? '停靠窗口：已打开' : '停靠窗口：已关闭'}
+        </fluent-button>
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <fluent-button class="w-160" appearance={floatOpen ? 'accent' : 'outline'} on:click={toggleFloatWindow}>
+          {floatOpen ? '悬浮窗口：已打开' : '悬浮窗口：已关闭'}
+        </fluent-button>
       </div>
     </div>
   </fluent-card>
@@ -260,7 +289,7 @@
   <div class="panel np-panel">
     {#if liveNowPlaying || snapshot?.now_playing}
       <div class="np-row">
-        {#if includeThumbnail && snapshot?.now_playing?.thumbnail?.base64}
+        {#if snapshot?.now_playing?.thumbnail?.base64}
           <img
             class="np-cover"
             alt="cover"
@@ -357,17 +386,6 @@
 </div>
 
 <style>
-  input[type='checkbox'] {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--accent);
-  }
-
-  .select {
-    min-width: 280px;
-    width: 280px;
-  }
-
   .lyrics-head {
     padding: 10px 12px 0;
     font-size: 12px;
