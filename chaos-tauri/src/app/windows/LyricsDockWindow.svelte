@@ -2,10 +2,12 @@
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
+  import { PhysicalPosition, currentMonitor } from '@tauri-apps/api/window'
   import { onMount } from 'svelte'
 
   import type { LyricsSearchResult, NowPlayingSession } from '@/shared/types'
   import { getActiveLine, parseLrc, type Timeline } from '@/shared/lyricsSync'
+  import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
   import { FluidBackgroundEffect } from '@/app/lyrics/effects/fluidBackground'
   import { SnowParticlesEffect } from '@/app/lyrics/effects/snowParticles'
   import { Fan3DLayoutEffect } from '@/app/lyrics/effects/fan3dLayout'
@@ -41,11 +43,14 @@
   let bgEffect: BackgroundEffect | null = null
   let particleEffect: ParticleEffect | null = null
   let layoutEffect: LayoutEffect | null = null
+  let lastNowEventAt = 0
+  let lastLyricsEventAt = 0
 
   function applyLyrics(next: LyricsSearchResult | null) {
     item = next
     timeline = item ? parseLrc(item.lyrics_original, item.lyrics_translation ?? null) : null
     activeIndex = -1
+    lastLyricsEventAt = Date.now()
   }
 
   function applyNowPlaying(p: NowPlayingStatePayload) {
@@ -54,6 +59,7 @@
       nowRetrievedAtMs = 0
       bgEffect?.setActive(false)
       particleEffect?.setActive(false)
+      lastNowEventAt = Date.now()
       return
     }
     nowPlaying = {
@@ -74,6 +80,38 @@
     const playing = (nowPlaying.playback_status || '').toLowerCase() === 'playing'
     bgEffect?.setActive(playing)
     particleEffect?.setActive(playing)
+    lastNowEventAt = Date.now()
+  }
+
+  async function startDragAndSnap() {
+    if (!win) return
+    try {
+      // startDragging resolves after the drag ends.
+      await win.startDragging()
+    } catch {
+      return
+    }
+    try {
+      const [pos, size, mon] = await Promise.all([win.outerPosition(), win.outerSize(), currentMonitor()])
+      if (!mon) return
+      const margin = 6
+      const monLeft = mon.position.x
+      const monTop = mon.position.y
+      const monRight = mon.position.x + mon.size.width
+      const monBottom = mon.position.y + mon.size.height
+
+      const centerX = pos.x + Math.floor(size.width / 2)
+      const leftDist = Math.abs(centerX - monLeft)
+      const rightDist = Math.abs(monRight - centerX)
+      const snapLeft = leftDist <= rightDist
+      const x = snapLeft ? monLeft + margin : monRight - size.width - margin
+      const yMin = monTop + margin
+      const yMax = Math.max(yMin, monBottom - size.height - margin)
+      const y = Math.min(yMax, Math.max(yMin, pos.y))
+      await win.setPosition(new PhysicalPosition(x, y))
+    } catch {
+      // ignore
+    }
   }
 
   function effectivePositionMs(): number {
@@ -107,6 +145,7 @@
     let stopKey: (() => void) | undefined
     let stopAnim: (() => void) | undefined
     let stopResize: (() => void) | undefined
+    let stopPoll: (() => void) | undefined
 
     try {
       win = getCurrentWebviewWindow()
@@ -121,6 +160,7 @@
       stopKey?.()
       stopAnim?.()
       stopResize?.()
+      stopPoll?.()
       bgEffect?.dispose()
       particleEffect?.dispose()
       layoutEffect?.dispose()
@@ -217,11 +257,11 @@
     // Fallback: try to fetch once if the backend doesn't push state yet.
     void (async () => {
       try {
-        const s = (await invoke('now_playing_snapshot', { includeThumbnail: false, maxThumbnailBytes: 0, maxSessions: 1 })) as any
-        const np = s?.now_playing
+        const s = await nowPlayingSnapshot({ includeThumbnail: false, maxThumbnailBytes: 0, maxSessions: 1 })
+        const np = (s as any)?.now_playing
         if (disposed || !np) return
         applyNowPlaying({
-          supported: !!s?.supported,
+          supported: !!(s as any)?.supported,
           app_id: np.app_id ?? null,
           playback_status: np.playback_status ?? null,
           title: np.title ?? null,
@@ -229,7 +269,7 @@
           album_title: np.album_title ?? null,
           position_ms: np.position_ms ?? null,
           duration_ms: np.duration_ms ?? null,
-          retrieved_at_unix_ms: typeof s?.retrieved_at_unix_ms === 'number' ? s.retrieved_at_unix_ms : Date.now(),
+          retrieved_at_unix_ms: typeof (s as any)?.retrieved_at_unix_ms === 'number' ? (s as any).retrieved_at_unix_ms : Date.now(),
           genres: np.genres ?? [],
           song_id: np.song_id ?? null
         })
@@ -237,6 +277,47 @@
         // ignore
       }
     })()
+
+    // Robustness: in case event listeners fail (or miss events), poll lightly.
+    const poll = window.setInterval(() => {
+      if (disposed) return
+      const now = Date.now()
+      if (now - lastNowEventAt > 6500) {
+        void (async () => {
+          try {
+            const s = await nowPlayingSnapshot({ includeThumbnail: false, maxThumbnailBytes: 0, maxSessions: 1 })
+            const np = (s as any)?.now_playing
+            if (!np) return
+            applyNowPlaying({
+              supported: !!(s as any)?.supported,
+              app_id: np.app_id ?? null,
+              playback_status: np.playback_status ?? null,
+              title: np.title ?? null,
+              artist: np.artist ?? null,
+              album_title: np.album_title ?? null,
+              position_ms: np.position_ms ?? null,
+              duration_ms: np.duration_ms ?? null,
+              retrieved_at_unix_ms: typeof (s as any)?.retrieved_at_unix_ms === 'number' ? (s as any).retrieved_at_unix_ms : Date.now(),
+              genres: np.genres ?? [],
+              song_id: np.song_id ?? null
+            })
+          } catch {
+            // ignore
+          }
+        })()
+      }
+      if (now - lastLyricsEventAt > 6500) {
+        void (async () => {
+          try {
+            const cur = (await invoke('lyrics_get_current')) as LyricsSearchResult | null
+            applyLyrics(cur)
+          } catch {
+            // ignore
+          }
+        })()
+      }
+    }, 2500)
+    stopPoll = () => window.clearInterval(poll)
 
     // Animation loop: compute active line from interpolated position.
     let raf = 0
@@ -258,7 +339,6 @@
     }
     raf = requestAnimationFrame(tick)
     stopAnim = () => cancelAnimationFrame(raf)
-
     return cleanup
   })
 </script>
@@ -266,10 +346,17 @@
 <div class="root" bind:this={rootEl}>
   <canvas class="bg" bind:this={bgCanvas}></canvas>
   <canvas class="snow" bind:this={snowCanvas}></canvas>
-  <div class="head" data-tauri-drag-region>
-    <div class="title">{nowPlaying?.title || item?.title || '歌词'}</div>
-    <div class="sub">
-      {nowPlaying?.artist || item?.artist || ''} {nowPlaying?.playback_status ? `· ${nowPlaying.playback_status}` : ''}
+  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+  <div class="head" data-tauri-drag-region on:mousedown|preventDefault={() => void startDragAndSnap()}>
+    <div class="head-left">
+      <div class="title">{nowPlaying?.title || item?.title || '歌词'}</div>
+      <div class="sub">
+        {nowPlaying?.artist || item?.artist || ''} {nowPlaying?.playback_status ? `· ${nowPlaying.playback_status}` : ''}
+      </div>
+    </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div class="head-actions" on:mousedown|stopPropagation>
+      <button class="icon-btn" title="关闭" on:click={() => void win?.close()}>×</button>
     </div>
   </div>
 
@@ -320,6 +407,35 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     user-select: none;
     position: relative;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .head-left {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .head-actions {
+    flex: 0 0 auto;
+  }
+
+  .icon-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.25);
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    line-height: 1;
+    font-size: 18px;
+  }
+
+  .icon-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
   }
 
   .title {

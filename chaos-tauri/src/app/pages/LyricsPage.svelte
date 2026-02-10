@@ -30,8 +30,8 @@
   }
 
   $: selectedItem = items.find((it) => itemKey(it) === selectedKey) ?? null
-  $: displayRows = formatForDisplay(selectedItem)
-  $: currentRows = formatForDisplay(currentItem)
+  $: effectiveLyricsItem = selectedItem ?? currentItem
+  $: effectiveRows = formatForDisplay(effectiveLyricsItem)
 
   onMount(() => {
     let unDet: (() => void) | undefined
@@ -165,13 +165,14 @@
   }
 
   async function showLyricsWindow() {
-    if (!selectedItem) {
-      status = '请先在中间列表选择一条歌词。'
+    const chosen = selectedItem ?? currentItem
+    if (!chosen) {
+      status = '请先在中间列表选择一条歌词，或先开启检测/自动获取到歌词。'
       return
     }
     try {
       // Set payload first so already-open windows update; newly-open windows will also read the latest payload on mount.
-      await setLyricsWindowPayload(selectedItem)
+      await setLyricsWindowPayload(chosen)
       if (windowMode === 'dock' || windowMode === 'float' || windowMode === 'chat' || windowMode === 'overlay') {
         await openLyricsWindow(windowMode)
       }
@@ -241,7 +242,7 @@
         <div class="row gap-8 align-center">
           <div class="text-secondary">显示到</div>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <fluent-select class="select w-220" value={windowMode} on:change={onModeChange}>
+          <fluent-select class="select" value={windowMode} on:change={onModeChange}>
             <fluent-option value="dock">停靠模式（侧边栏）</fluent-option>
             <fluent-option value="float">桌面悬浮（挂件）</fluent-option>
           </fluent-select>
@@ -257,22 +258,9 @@
   <div class="text-secondary">{status}</div>
 
   <div class="panel np-panel">
-    {#if liveNowPlaying}
+    {#if liveNowPlaying || snapshot?.now_playing}
       <div class="np-row">
-        <div class="np-cover placeholder"></div>
-        <div class="np-meta">
-          <div class="np-title">{liveNowPlaying.title || '(unknown title)'}</div>
-          <div class="np-sub text-secondary">
-            {liveNowPlaying.artist || '(unknown artist)'} · {liveNowPlaying.album_title || '(unknown album)'}
-          </div>
-          <div class="np-sub text-muted">
-            {liveNowPlaying.playback_status || 'Unknown'} · duration_ms={liveNowPlaying.duration_ms ?? '-'}
-          </div>
-        </div>
-      </div>
-    {:else if snapshot?.now_playing}
-      <div class="np-row">
-        {#if includeThumbnail && snapshot.now_playing.thumbnail?.base64}
+        {#if includeThumbnail && snapshot?.now_playing?.thumbnail?.base64}
           <img
             class="np-cover"
             alt="cover"
@@ -283,12 +271,14 @@
         {/if}
 
         <div class="np-meta">
-          <div class="np-title">{snapshot.now_playing.title || '(unknown title)'}</div>
+          <div class="np-title">{(liveNowPlaying?.title || snapshot?.now_playing?.title) ?? '(unknown title)'}</div>
           <div class="np-sub text-secondary">
-            {snapshot.now_playing.artist || '(unknown artist)'} · {snapshot.now_playing.album_title || '(unknown album)'}
+            {(liveNowPlaying?.artist || snapshot?.now_playing?.artist) ?? '(unknown artist)'} · {(liveNowPlaying?.album_title ||
+              snapshot?.now_playing?.album_title) ?? '(unknown album)'}
           </div>
           <div class="np-sub text-muted">
-            {snapshot.now_playing.playback_status} · duration_ms={snapshot.now_playing.duration_ms ?? '-'}
+            {(liveNowPlaying?.playback_status || snapshot?.now_playing?.playback_status) ?? 'Unknown'} · duration_ms={(liveNowPlaying?.duration_ms ||
+              snapshot?.now_playing?.duration_ms) ?? '-'}
           </div>
         </div>
       </div>
@@ -340,30 +330,18 @@
   </div>
 
   <div class="panel lyrics-panel">
-    {#if !currentItem}
-      <div class="empty">当前未选中/未自动获取到歌词。</div>
+    {#if !effectiveLyricsItem}
+      <div class="empty">请选择一条歌词来源，或先开启检测/自动获取到歌词。</div>
     {:else}
-      <div class="lyrics-scroll">
-        {#each currentRows as r, idx (idx)}
-          {#if r.isMeta}
-            <div class="ly-line meta">{r.original}</div>
-          {:else}
-            <div class="ly-line orig">{r.original}</div>
-            {#if r.translation}
-              <div class="ly-line trans">{r.translation}</div>
-            {/if}
-          {/if}
-        {/each}
+      <div class="lyrics-head text-secondary">
+        {#if selectedItem}
+          正文预览（已选择）
+        {:else}
+          当前歌词（自动）
+        {/if}
       </div>
-    {/if}
-  </div>
-
-  <div class="panel lyrics-panel">
-    {#if !selectedItem}
-      <div class="empty">请选择一条歌词来源以显示正文。</div>
-    {:else}
       <div class="lyrics-scroll">
-        {#each displayRows as r, idx (idx)}
+        {#each effectiveRows as r, idx (idx)}
           {#if r.isMeta}
             <div class="ly-line meta">{r.original}</div>
           {:else}
@@ -386,7 +364,13 @@
   }
 
   .select {
-    min-width: 200px;
+    min-width: 280px;
+    width: 280px;
+  }
+
+  .lyrics-head {
+    padding: 10px 12px 0;
+    font-size: 12px;
   }
 
   .np-panel {

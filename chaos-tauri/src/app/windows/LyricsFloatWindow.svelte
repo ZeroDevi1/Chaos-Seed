@@ -6,6 +6,7 @@
 
   import type { LyricsSearchResult, NowPlayingSession } from '@/shared/types'
   import { getActiveLine, parseLrc, type Timeline } from '@/shared/lyricsSync'
+  import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
   import { FluidBackgroundEffect } from '@/app/lyrics/effects/fluidBackground'
   import { SnowParticlesEffect } from '@/app/lyrics/effects/snowParticles'
   import type { BackgroundEffect, ParticleEffect } from '@/app/lyrics/effects/types'
@@ -41,11 +42,14 @@
   let snowCanvas: HTMLCanvasElement | null = null
   let bgEffect: BackgroundEffect | null = null
   let particleEffect: ParticleEffect | null = null
+  let lastNowEventAt = 0
+  let lastLyricsEventAt = 0
 
   function applyLyrics(next: LyricsSearchResult | null) {
     item = next
     timeline = item ? parseLrc(item.lyrics_original, item.lyrics_translation ?? null) : null
     activeIndex = -1
+    lastLyricsEventAt = Date.now()
   }
 
   function applyNowPlaying(p: NowPlayingStatePayload) {
@@ -54,6 +58,7 @@
       nowRetrievedAtMs = 0
       bgEffect?.setActive(false)
       particleEffect?.setActive(false)
+      lastNowEventAt = Date.now()
       return
     }
     nowPlaying = {
@@ -75,6 +80,16 @@
     const playing = (nowPlaying.playback_status || '').toLowerCase() === 'playing'
     bgEffect?.setActive(playing)
     particleEffect?.setActive(playing)
+    lastNowEventAt = Date.now()
+  }
+
+  async function startDrag() {
+    if (!win) return
+    try {
+      await win.startDragging()
+    } catch {
+      // ignore
+    }
   }
 
   function effectivePositionMs(): number {
@@ -118,6 +133,7 @@
     let stopKey: (() => void) | undefined
     let stopAnim: (() => void) | undefined
     let stopResize: (() => void) | undefined
+    let stopPoll: (() => void) | undefined
 
     // Transparent window: webview background must be transparent as well.
     document.documentElement.style.background = 'transparent'
@@ -136,6 +152,7 @@
       stopKey?.()
       stopAnim?.()
       stopResize?.()
+      stopPoll?.()
       bgEffect?.dispose()
       particleEffect?.dispose()
     }
@@ -236,11 +253,11 @@
 
     void (async () => {
       try {
-        const s = (await invoke('now_playing_snapshot', { includeThumbnail: false, maxThumbnailBytes: 0, maxSessions: 1 })) as any
-        const np = s?.now_playing
+        const s = await nowPlayingSnapshot({ includeThumbnail: false, maxThumbnailBytes: 0, maxSessions: 1 })
+        const np = (s as any)?.now_playing
         if (disposed || !np) return
         applyNowPlaying({
-          supported: !!s?.supported,
+          supported: !!(s as any)?.supported,
           app_id: np.app_id ?? null,
           playback_status: np.playback_status ?? null,
           title: np.title ?? null,
@@ -248,7 +265,7 @@
           album_title: np.album_title ?? null,
           position_ms: np.position_ms ?? null,
           duration_ms: np.duration_ms ?? null,
-          retrieved_at_unix_ms: typeof s?.retrieved_at_unix_ms === 'number' ? s.retrieved_at_unix_ms : Date.now(),
+          retrieved_at_unix_ms: typeof (s as any)?.retrieved_at_unix_ms === 'number' ? (s as any).retrieved_at_unix_ms : Date.now(),
           genres: np.genres ?? [],
           song_id: np.song_id ?? null
         })
@@ -256,6 +273,47 @@
         // ignore
       }
     })()
+
+    // Robustness: in case event listeners fail (or miss events), poll lightly.
+    const poll = window.setInterval(() => {
+      if (disposed) return
+      const now = Date.now()
+      if (now - lastNowEventAt > 6500) {
+        void (async () => {
+          try {
+            const s = await nowPlayingSnapshot({ includeThumbnail: false, maxThumbnailBytes: 0, maxSessions: 1 })
+            const np = (s as any)?.now_playing
+            if (!np) return
+            applyNowPlaying({
+              supported: !!(s as any)?.supported,
+              app_id: np.app_id ?? null,
+              playback_status: np.playback_status ?? null,
+              title: np.title ?? null,
+              artist: np.artist ?? null,
+              album_title: np.album_title ?? null,
+              position_ms: np.position_ms ?? null,
+              duration_ms: np.duration_ms ?? null,
+              retrieved_at_unix_ms: typeof (s as any)?.retrieved_at_unix_ms === 'number' ? (s as any).retrieved_at_unix_ms : Date.now(),
+              genres: np.genres ?? [],
+              song_id: np.song_id ?? null
+            })
+          } catch {
+            // ignore
+          }
+        })()
+      }
+      if (now - lastLyricsEventAt > 6500) {
+        void (async () => {
+          try {
+            const cur = (await invoke('lyrics_get_current')) as LyricsSearchResult | null
+            applyLyrics(cur)
+          } catch {
+            // ignore
+          }
+        })()
+      }
+    }, 2500)
+    stopPoll = () => window.clearInterval(poll)
 
     let raf = 0
     const tick = () => {
@@ -277,6 +335,20 @@
 <div class={fading ? 'root fading' : 'root'} bind:this={rootEl}>
   <canvas class="bg" bind:this={bgCanvas}></canvas>
   <canvas class="snow" bind:this={snowCanvas}></canvas>
+  {#if !clickThrough}
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div class="titlebar" data-tauri-drag-region on:mousedown|preventDefault={() => void startDrag()}>
+      <div class="titlebar-title">{nowPlaying?.title || item?.title || '歌词'}</div>
+      <button
+        class="titlebar-btn"
+        title="关闭"
+        on:mousedown|stopPropagation
+        on:click={() => void win?.close()}
+      >
+        ×
+      </button>
+    </div>
+  {/if}
   <div class="panel">
     {#if !timeline || timeline.lines.length === 0}
       <div class="line strong">暂无歌词</div>
@@ -293,7 +365,7 @@
   </div>
 
   {#if !clickThrough}
-    <div class="hint">F2: 点击穿透 · Esc: 关闭</div>
+    <div class="hint">拖动上方标题栏移动 · F2: 点击穿透 · Esc: 关闭</div>
   {/if}
 </div>
 
@@ -328,9 +400,52 @@
     opacity: 0.9;
   }
 
+  .titlebar {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    top: 8px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    z-index: 2;
+    user-select: none;
+    pointer-events: auto;
+  }
+
+  .titlebar-title {
+    font-size: 11px;
+    opacity: 0.7;
+    color: rgba(255, 255, 255, 0.92);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .titlebar-btn {
+    width: 26px;
+    height: 24px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.25);
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    line-height: 1;
+    font-size: 18px;
+  }
+
+  .titlebar-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+  }
+
   .panel {
     border-radius: 16px;
     padding: 12px 14px;
+    margin-top: 14px;
     background: rgba(0, 0, 0, 0.38);
     color: rgba(255, 255, 255, 0.94);
     backdrop-filter: blur(10px);
