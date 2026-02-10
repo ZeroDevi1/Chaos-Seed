@@ -3,6 +3,7 @@
 
   import { createEngine } from './engineFactory'
   import type { PlayerBootRequest, PlayerEngine, PlayerEngineKind, PlayerSource } from './types'
+  import { choosePauseStrategy } from './playbackPolicy'
   import { expandHttpToHttps } from './urlNormalize'
   import { inferStreamType } from './utils'
 
@@ -23,6 +24,8 @@
 
   let currentKey = ''
   let lastErr = ''
+  let lastReq: PlayerBootRequest | null = null
+  let pausedByStop = false
 
   function clearHideTimer() {
     if (hideTimer) {
@@ -74,6 +77,7 @@
   }
 
   async function loadInternal(req: PlayerBootRequest) {
+    lastReq = req
     lastErr = ''
     const primary = (req?.url || '').toString().trim()
     const backups = (req?.backup_urls || []).map((u) => (u || '').toString().trim()).filter(Boolean)
@@ -169,26 +173,41 @@
     const nextKey = `${req.site}:${req.room_id}:${req.variant_id}:${req.url}`
     if (nextKey === currentKey) return
     currentKey = nextKey
+    pausedByStop = false
     await destroyInternal()
     await loadInternal(req)
   }
 
   export async function destroy() {
+    pausedByStop = false
     await destroyInternal()
   }
 
   async function togglePlay() {
-    if (!engine) return
     try {
       if (playing) {
-        await engine.pause()
-        playing = false
-        showControls = true
-        clearHideTimer()
+        const strat = choosePauseStrategy({ engineKind, isLive: true })
+        if (strat === 'stop') {
+          pausedByStop = true
+          await destroyInternal()
+          showControls = true
+        } else {
+          if (!engine) return
+          await engine.pause()
+          playing = false
+          showControls = true
+          clearHideTimer()
+        }
       } else {
-        await engine.play()
-        playing = true
-        scheduleHide()
+        if (pausedByStop && lastReq) {
+          pausedByStop = false
+          await loadInternal(lastReq)
+        } else {
+          if (!engine) return
+          await engine.play()
+          playing = true
+          scheduleHide()
+        }
       }
     } catch (e) {
       lastErr = `播放控制失败：${String(e)}`

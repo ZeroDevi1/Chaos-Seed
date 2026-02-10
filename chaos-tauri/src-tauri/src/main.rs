@@ -1,12 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use base64::Engine;
+use bytes::Bytes;
 use chaos_core::danmaku::client::DanmakuClient;
 use chaos_core::danmaku::model::{ConnectOptions, DanmakuSession, Site};
 use chaos_core::livestream::client::LivestreamClient;
@@ -14,8 +15,6 @@ use chaos_core::livestream::model::ResolveOptions;
 use chaos_core::now_playing;
 use chaos_core::subtitle;
 use chaos_core::subtitle::models::ThunderSubtitleItem;
-use base64::Engine;
-use bytes::Bytes;
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex as AsyncMutex, Notify};
@@ -37,6 +36,10 @@ struct ActiveDanmaku {
 struct DanmakuState {
     active: Mutex<Option<ActiveDanmaku>>,
     msg_subscribers: Mutex<HashSet<String>>,
+    // Tracks auxiliary renderer windows that are currently open (Chat/Overlay).
+    // We use this instead of querying `get_webview_window()` on every message to avoid
+    // platform-specific window handle quirks and to keep the suppression logic deterministic.
+    aux_windows: Mutex<HashSet<String>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -173,7 +176,11 @@ async fn stream_open(
         if let Some(ua) = ua2.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
             req = req.header(reqwest::header::USER_AGENT, ua);
         }
-        if let Some(r) = referer2.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Some(r) = referer2
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
             req = req.header(reqwest::header::REFERER, r);
             // Some CDNs check Origin; align it with referer best-effort.
             if let Ok(ru) = url::Url::parse(r) {
@@ -458,22 +465,20 @@ fn image_referer(site: Option<String>, room_id: Option<String>, url: &url::Url) 
 }
 
 fn is_local_or_private_host(u: &url::Url) -> bool {
-    let Some(host) = u.host_str() else {
+    use url::Host;
+
+    let Some(host) = u.host() else {
         return true;
     };
-    let h = host.to_lowercase();
-    if h == "localhost" {
-        return true;
+
+    match host {
+        Host::Domain(d) => {
+            let h = d.to_lowercase();
+            h == "localhost"
+        }
+        Host::Ipv4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+        Host::Ipv6(v6) => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
     }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return match ip {
-            IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
-            IpAddr::V6(v6) => {
-                v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
-            }
-        };
-    }
-    false
 }
 
 #[cfg(test)]
@@ -619,8 +624,11 @@ async fn danmaku_connect(
                     .cloned()
                     .collect()
             };
-            let suppress_main = app2.get_webview_window("chat").is_some()
-                || app2.get_webview_window("overlay").is_some();
+            let suppress_main = {
+                let st = app2.state::<DanmakuState>();
+                let aux = st.aux_windows.lock().expect("danmaku aux windows mutex");
+                !aux.is_empty()
+            };
 
             for msg in danmaku_ui::map_event_to_ui(ev) {
                 for label in &subs {
@@ -655,6 +663,23 @@ async fn danmaku_disconnect(app: AppHandle, state: State<'_, DanmakuState>) -> R
     Ok(())
 }
 
+fn update_msg_subscription(
+    subs: &mut HashSet<String>,
+    label: &str,
+    enabled: bool,
+    suppress_main: bool,
+) {
+    if enabled {
+        if suppress_main && label == "main" {
+            // When Chat/Overlay is open, never allow the main window to be a high-frequency subscriber.
+            return;
+        }
+        subs.insert(label.to_string());
+    } else {
+        subs.remove(label);
+    }
+}
+
 #[tauri::command]
 fn danmaku_set_msg_subscription(
     window: tauri::Window,
@@ -662,15 +687,15 @@ fn danmaku_set_msg_subscription(
     enabled: bool,
 ) -> Result<(), String> {
     let label = window.label().to_string();
+    let suppress_main = {
+        let aux = state.aux_windows.lock().expect("danmaku aux windows mutex");
+        !aux.is_empty()
+    };
     let mut subs = state
         .msg_subscribers
         .lock()
         .expect("danmaku subscribers mutex");
-    if enabled {
-        subs.insert(label);
-    } else {
-        subs.remove(&label);
-    }
+    update_msg_subscription(&mut subs, &label, enabled, suppress_main);
     Ok(())
 }
 
@@ -795,6 +820,19 @@ window.__CHAOS_SEED_BOOT = {boot_json};
 #[tauri::command]
 async fn open_chat_window(app: AppHandle) -> Result<(), String> {
     if ensure_window(&app, "chat").is_some() {
+        // Keep backend state consistent even if the window already exists.
+        let st = app.state::<DanmakuState>();
+        {
+            let mut aux = st.aux_windows.lock().expect("danmaku aux windows mutex");
+            aux.insert("chat".to_string());
+        }
+        {
+            let mut subs = st
+                .msg_subscribers
+                .lock()
+                .expect("danmaku subscribers mutex");
+            subs.remove("main");
+        }
         return Ok(());
     }
     let boot =
@@ -841,12 +879,30 @@ async fn open_chat_window(app: AppHandle) -> Result<(), String> {
             open: true,
         },
     );
+    // Authoritative suppression: when Chat is open, ensure main stops receiving high-frequency messages.
+    {
+        let st = app.state::<DanmakuState>();
+        let mut aux = st.aux_windows.lock().expect("danmaku aux windows mutex");
+        aux.insert("chat".to_string());
+    }
+    {
+        let st = app.state::<DanmakuState>();
+        let mut subs = st
+            .msg_subscribers
+            .lock()
+            .expect("danmaku subscribers mutex");
+        subs.remove("main");
+    }
     {
         let app2 = app.clone();
         let label = "chat".to_string();
         w.on_window_event(move |ev| {
             if matches!(ev, tauri::WindowEvent::Destroyed) {
                 let st = app2.state::<DanmakuState>();
+                {
+                    let mut aux = st.aux_windows.lock().expect("danmaku aux windows mutex");
+                    aux.remove(&label);
+                }
                 let mut subs = st
                     .msg_subscribers
                     .lock()
@@ -878,6 +934,19 @@ async fn open_chat_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(), String> {
     if let Some(_w) = ensure_window(&app, "overlay") {
+        // Keep backend state consistent even if the window already exists.
+        let st = app.state::<DanmakuState>();
+        {
+            let mut aux = st.aux_windows.lock().expect("danmaku aux windows mutex");
+            aux.insert("overlay".to_string());
+        }
+        {
+            let mut subs = st
+                .msg_subscribers
+                .lock()
+                .expect("danmaku subscribers mutex");
+            subs.remove("main");
+        }
         return Ok(());
     }
     let opaque = opaque.unwrap_or(false);
@@ -933,12 +1002,30 @@ async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(),
             open: true,
         },
     );
+    // Authoritative suppression: when Overlay is open, ensure main stops receiving high-frequency messages.
+    {
+        let st = app.state::<DanmakuState>();
+        let mut aux = st.aux_windows.lock().expect("danmaku aux windows mutex");
+        aux.insert("overlay".to_string());
+    }
+    {
+        let st = app.state::<DanmakuState>();
+        let mut subs = st
+            .msg_subscribers
+            .lock()
+            .expect("danmaku subscribers mutex");
+        subs.remove("main");
+    }
     {
         let app2 = app.clone();
         let label = "overlay".to_string();
         w.on_window_event(move |ev| {
             if matches!(ev, tauri::WindowEvent::Destroyed) {
                 let st = app2.state::<DanmakuState>();
+                {
+                    let mut aux = st.aux_windows.lock().expect("danmaku aux windows mutex");
+                    aux.remove(&label);
+                }
                 let mut subs = st
                     .msg_subscribers
                     .lock()
@@ -1051,6 +1138,8 @@ async fn open_player_window(
 
 #[tauri::command]
 fn set_backdrop(app: AppHandle, mode: String) -> Result<(), String> {
+    // Silence unused-variable warnings on non-Windows builds (the implementation is Windows-only).
+    let _ = (&app, &mode);
     // Best-effort: on non-Windows, or if a window is missing/not transparent, just no-op.
     #[cfg(target_os = "windows")]
     {
@@ -1074,6 +1163,10 @@ fn set_backdrop(app: AppHandle, mode: String) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = app;
+            }
             // Enable Mica by default on Windows for a more native Win11 look.
             // The frontend can later call `set_backdrop` to switch to `none` without restarting.
             #[cfg(target_os = "windows")]
@@ -1110,4 +1203,30 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("tauri run");
+}
+
+#[cfg(test)]
+mod danmaku_subscription_tests {
+    use super::*;
+
+    #[test]
+    fn update_msg_subscription_suppresses_main_when_aux_open() {
+        let mut subs: HashSet<String> = HashSet::new();
+
+        update_msg_subscription(&mut subs, "main", true, true);
+        assert!(!subs.contains("main"));
+
+        update_msg_subscription(&mut subs, "chat", true, true);
+        assert!(subs.contains("chat"));
+
+        update_msg_subscription(&mut subs, "chat", false, true);
+        assert!(!subs.contains("chat"));
+    }
+
+    #[test]
+    fn update_msg_subscription_allows_main_when_no_aux_windows() {
+        let mut subs: HashSet<String> = HashSet::new();
+        update_msg_subscription(&mut subs, "main", true, false);
+        assert!(subs.contains("main"));
+    }
 }
