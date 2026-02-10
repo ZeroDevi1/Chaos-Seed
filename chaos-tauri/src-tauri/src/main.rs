@@ -15,6 +15,7 @@ use chaos_core::now_playing;
 use chaos_core::subtitle;
 use chaos_core::subtitle::models::ThunderSubtitleItem;
 use base64::Engine;
+use bytes::Bytes;
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex as AsyncMutex, Notify};
@@ -196,7 +197,7 @@ async fn stream_open(
 
         let mut stream = resp.bytes_stream();
         while let Some(item) = stream.next().await {
-            let chunk: reqwest::bytes::Bytes = match item {
+            let chunk: Bytes = match item {
                 Ok(b) => b,
                 Err(e) => {
                     let mut st = sess.state.lock().await;
