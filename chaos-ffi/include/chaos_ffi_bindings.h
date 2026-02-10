@@ -28,6 +28,15 @@ char *chaos_subtitle_search_json(const char *query_utf8,
                                  const char *lang_utf8_or_null,
                                  uint32_t timeout_ms);
 
+char *chaos_lyrics_search_json(const char *title_utf8,
+                               const char *album_utf8_or_null,
+                               const char *artist_utf8_or_null,
+                               uint32_t duration_ms_or_0,
+                               uint32_t limit,
+                               uint8_t strict_match,
+                               const char *services_csv_utf8_or_null,
+                               uint32_t timeout_ms);
+
 char *chaos_subtitle_download_item_json(const char *item_json_utf8,
                                         const char *out_dir_utf8,
                                         uint32_t timeout_ms,

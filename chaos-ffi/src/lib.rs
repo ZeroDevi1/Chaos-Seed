@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::path::PathBuf;
 use std::ptr;
+use std::str::FromStr;
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, Ordering},
@@ -11,9 +12,9 @@ use std::time::Duration;
 
 use libc::{c_char, c_void};
 
-use chaos_core::{danmaku, livestream, now_playing, subtitle};
+use chaos_core::{danmaku, livestream, lyrics, now_playing, subtitle};
 
-const API_VERSION: u32 = 3;
+const API_VERSION: u32 = 4;
 
 fn ensure_rustls_provider() {
     static ONCE: OnceLock<()> = OnceLock::new();
@@ -237,6 +238,94 @@ pub extern "C" fn chaos_subtitle_search_json(
         Ok(Err(())) => ptr::null_mut(),
         Err(_) => {
             set_last_error("panic in chaos_subtitle_search_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_lyrics_search_json(
+    title_utf8: *const c_char,
+    album_utf8_or_null: *const c_char,
+    artist_utf8_or_null: *const c_char,
+    duration_ms_or_0: u32,
+    limit: u32,
+    strict_match: u8,
+    services_csv_utf8_or_null: *const c_char,
+    timeout_ms: u32,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let title = require_cstr(title_utf8, "title_utf8")?.trim().to_string();
+        if title.is_empty() {
+            set_last_error("title_utf8 is empty", None);
+            return Err(());
+        }
+
+        let artist = optional_cstr(artist_utf8_or_null, "artist_utf8_or_null")?
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        let album = optional_cstr(album_utf8_or_null, "album_utf8_or_null")?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let term = if artist.trim().is_empty() {
+            lyrics::model::LyricsSearchTerm::Keyword { keyword: title }
+        } else {
+            lyrics::model::LyricsSearchTerm::Info {
+                title,
+                artist,
+                album,
+            }
+        };
+
+        let mut req = lyrics::model::LyricsSearchRequest::new(term);
+        req.limit = (limit.max(1) as usize).max(1);
+        req.duration_ms = if duration_ms_or_0 == 0 {
+            None
+        } else {
+            Some(duration_ms_or_0 as u64)
+        };
+
+        let mut opt = lyrics::model::LyricsSearchOptions::default();
+        opt.timeout_ms = timeout_ms.max(1) as u64;
+        opt.strict_match = strict_match != 0;
+
+        if let Some(csv) = optional_cstr(services_csv_utf8_or_null, "services_csv_utf8_or_null")?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            let mut out = Vec::new();
+            for part in csv.split(',') {
+                let p = part.trim();
+                if p.is_empty() {
+                    continue;
+                }
+                let s = lyrics::model::LyricsService::from_str(p).map_err(|e| {
+                    set_last_error("invalid services_csv_utf8_or_null", Some(e.to_string()));
+                })?;
+                out.push(s);
+            }
+            if !out.is_empty() {
+                opt.services = out;
+            }
+        }
+
+        let items = runtime()
+            .block_on(lyrics::core::search(&req, opt))
+            .map_err(|e| {
+                set_last_error("lyrics search failed", Some(e.to_string()));
+            })?;
+
+        serde_json::to_string(&items).map_err(|e| {
+            set_last_error("failed to serialize lyrics search result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_lyrics_search_json", None);
             ptr::null_mut()
         }
     }

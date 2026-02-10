@@ -7,6 +7,7 @@ describe('resolveView', () => {
     expect(resolveView({ boot: { view: 'chat' }, search: '?view=overlay', label: 'overlay' })).toBe('chat')
     expect(resolveView({ boot: { view: 'overlay' }, search: '?view=chat', label: 'chat' })).toBe('overlay')
     expect(resolveView({ boot: { view: 'player' }, search: '?view=chat', label: 'main' })).toBe('player')
+    expect(resolveView({ boot: { view: 'lyrics_chat' }, search: '?view=main', label: 'main' })).toBe('lyrics_chat')
   })
 
   it('falls back to query params when boot is missing/invalid', () => {
@@ -14,6 +15,7 @@ describe('resolveView', () => {
     expect(resolveView({ boot: null, search: '?view=overlay', label: 'chat' })).toBe('overlay')
     expect(resolveView({ boot: { view: 'nope' }, search: '?view=chat', label: 'overlay' })).toBe('chat')
     expect(resolveView({ boot: undefined, search: '?view=player', label: 'main' })).toBe('player')
+    expect(resolveView({ boot: undefined, search: '?view=lyrics_overlay', label: 'main' })).toBe('lyrics_overlay')
   })
 
   it('falls back to window label when boot and query are missing/invalid', () => {
@@ -21,6 +23,7 @@ describe('resolveView', () => {
     expect(resolveView({ boot: undefined, search: '', label: 'overlay' })).toBe('overlay')
     expect(resolveView({ boot: undefined, search: '', label: 'MAIN' })).toBe('main')
     expect(resolveView({ boot: undefined, search: '', label: 'player' })).toBe('player')
+    expect(resolveView({ boot: undefined, search: '', label: 'lyrics_chat' })).toBe('lyrics_chat')
   })
 
   it('defaults to main when boot, query, and label do not indicate a supported view', () => {

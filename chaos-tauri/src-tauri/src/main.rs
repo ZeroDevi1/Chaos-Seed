@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,6 +13,7 @@ use chaos_core::danmaku::client::DanmakuClient;
 use chaos_core::danmaku::model::{ConnectOptions, DanmakuSession, Site};
 use chaos_core::livestream::client::LivestreamClient;
 use chaos_core::livestream::model::ResolveOptions;
+use chaos_core::lyrics;
 use chaos_core::now_playing;
 use chaos_core::subtitle;
 use chaos_core::subtitle::models::ThunderSubtitleItem;
@@ -40,6 +42,11 @@ struct DanmakuState {
     // We use this instead of querying `get_webview_window()` on every message to avoid
     // platform-specific window handle quirks and to keep the suppression logic deterministic.
     aux_windows: Mutex<HashSet<String>>,
+}
+
+#[derive(Default)]
+struct LyricsWindowState {
+    current: Mutex<Option<lyrics::model::LyricsSearchResult>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -422,18 +429,74 @@ fn open_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn now_playing_snapshot(
+async fn now_playing_snapshot(
     include_thumbnail: Option<bool>,
     max_thumbnail_bytes: Option<u32>,
     max_sessions: Option<u32>,
-) -> Result<String, String> {
+) -> Result<now_playing::NowPlayingSnapshot, String> {
     let opt = now_playing::NowPlayingOptions {
         include_thumbnail: include_thumbnail.unwrap_or(false),
         max_thumbnail_bytes: max_thumbnail_bytes.unwrap_or(262_144) as usize,
         max_sessions: max_sessions.unwrap_or(32) as usize,
     };
-    let snap = now_playing::snapshot(opt).map_err(|e| e.to_string())?;
-    serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || now_playing::snapshot(opt))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn lyrics_search(
+    title: String,
+    album: Option<String>,
+    artist: Option<String>,
+    duration_ms: Option<u64>,
+    limit: Option<usize>,
+    strict_match: Option<bool>,
+    services_csv: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<Vec<lyrics::model::LyricsSearchResult>, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let artist = artist.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let album = album.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+
+    let term = match artist {
+        Some(artist) => lyrics::model::LyricsSearchTerm::Info { title, artist, album },
+        None => lyrics::model::LyricsSearchTerm::Keyword { keyword: title },
+    };
+
+    let mut req = lyrics::model::LyricsSearchRequest::new(term);
+    req.duration_ms = duration_ms.filter(|v| *v > 0);
+    req.limit = limit.unwrap_or(10).clamp(1, 50);
+
+    let mut opt = lyrics::model::LyricsSearchOptions::default();
+    opt.timeout_ms = timeout_ms.unwrap_or(8000).max(1);
+    opt.strict_match = strict_match.unwrap_or(false);
+
+    // Default to a stable, fast subset for UI responsiveness.
+    let csv = services_csv
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "netease,qq,kugou".to_string());
+    let mut services = Vec::new();
+    for part in csv.split(',') {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        services.push(lyrics::model::LyricsService::from_str(p).map_err(|e| e.to_string())?);
+    }
+    if !services.is_empty() {
+        opt.services = services;
+    }
+
+    lyrics::core::search(&req, opt)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1051,6 +1114,153 @@ async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(),
 }
 
 #[tauri::command]
+fn lyrics_get_current(state: State<'_, LyricsWindowState>) -> Option<lyrics::model::LyricsSearchResult> {
+    state
+        .current
+        .lock()
+        .expect("lyrics window state mutex")
+        .clone()
+}
+
+#[tauri::command]
+fn lyrics_set_current(
+    app: AppHandle,
+    state: State<'_, LyricsWindowState>,
+    payload: lyrics::model::LyricsSearchResult,
+) -> Result<(), String> {
+    *state
+        .current
+        .lock()
+        .expect("lyrics window state mutex") = Some(payload.clone());
+    app.emit("lyrics_current_changed", payload)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn open_lyrics_chat_window(app: AppHandle) -> Result<(), String> {
+    if ensure_window(&app, "lyrics_chat").is_some() {
+        return Ok(());
+    }
+
+    let boot = serde_json::json!({
+        "view": "lyrics_chat",
+        "label": "lyrics_chat",
+        "build": env!("CARGO_PKG_VERSION")
+    });
+    let init_script = child_init_script(boot);
+    let url = child_url_from_main(&app, "lyrics_chat", None);
+    if debug_enabled() {
+        println!("[tauri] open_lyrics_chat_window url={url}");
+    }
+
+    let w = tauri::WebviewWindowBuilder::new(&app, "lyrics_chat", url)
+        .title("歌词 - Chat")
+        .inner_size(520.0, 720.0)
+        .resizable(true)
+        .transparent(false)
+        .initialization_script(init_script)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let _ = w.show();
+    let _ = w.set_focus();
+    let _ = app.emit(
+        "chaos_window_state",
+        WindowStatePayload {
+            label: "lyrics_chat".to_string(),
+            open: true,
+        },
+    );
+    {
+        let app2 = app.clone();
+        let label = "lyrics_chat".to_string();
+        w.on_window_event(move |ev| {
+            if matches!(ev, tauri::WindowEvent::Destroyed) {
+                let _ = app2.emit(
+                    "chaos_window_state",
+                    WindowStatePayload {
+                        label: label.clone(),
+                        open: false,
+                    },
+                );
+            }
+        });
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
+            w.open_devtools();
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_lyrics_overlay_window(app: AppHandle) -> Result<(), String> {
+    if ensure_window(&app, "lyrics_overlay").is_some() {
+        return Ok(());
+    }
+
+    let boot = serde_json::json!({
+        "view": "lyrics_overlay",
+        "label": "lyrics_overlay",
+        "build": env!("CARGO_PKG_VERSION")
+    });
+    let init_script = child_init_script(boot);
+    let url = child_url_from_main(&app, "lyrics_overlay", None);
+    if debug_enabled() {
+        println!("[tauri] open_lyrics_overlay_window url={url}");
+    }
+
+    let w = tauri::WebviewWindowBuilder::new(&app, "lyrics_overlay", url)
+        .title("歌词 - Overlay")
+        .inner_size(960.0, 200.0)
+        .resizable(true)
+        .decorations(true)
+        .transparent(true)
+        .always_on_top(true)
+        .initialization_script(init_script)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let _ = w.show();
+    let _ = w.set_focus();
+    let _ = app.emit(
+        "chaos_window_state",
+        WindowStatePayload {
+            label: "lyrics_overlay".to_string(),
+            open: true,
+        },
+    );
+    {
+        let app2 = app.clone();
+        let label = "lyrics_overlay".to_string();
+        w.on_window_event(move |ev| {
+            if matches!(ev, tauri::WindowEvent::Destroyed) {
+                let _ = app2.emit(
+                    "chaos_window_state",
+                    WindowStatePayload {
+                        label: label.clone(),
+                        open: false,
+                    },
+                );
+            }
+        });
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
+            w.open_devtools();
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn open_player_window(
     app: AppHandle,
     req: livestream_ui::PlayerBootRequest,
@@ -1181,6 +1391,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(DanmakuState::default())
         .manage(StreamProxyState::default())
+        .manage(LyricsWindowState::default())
         .invoke_handler(tauri::generate_handler![
             stream_open,
             stream_read,
@@ -1188,6 +1399,7 @@ fn main() {
             subtitle_search,
             subtitle_download,
             now_playing_snapshot,
+            lyrics_search,
             get_app_info,
             open_url,
             livestream_decode_manifest,
@@ -1198,6 +1410,10 @@ fn main() {
             danmaku_set_msg_subscription,
             open_chat_window,
             open_overlay_window,
+            lyrics_get_current,
+            lyrics_set_current,
+            open_lyrics_chat_window,
+            open_lyrics_overlay_window,
             open_player_window,
             set_backdrop
         ])

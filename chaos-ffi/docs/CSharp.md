@@ -44,13 +44,24 @@ internal static partial class ChaosFfi
         string? lang_utf8_or_null,
         uint timeout_ms);
 
-    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial IntPtr chaos_subtitle_download_item_json(
-        string item_json_utf8,
-        string out_dir_utf8,
-        uint timeout_ms,
-        uint retries,
-        byte overwrite);
+	    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+	    internal static partial IntPtr chaos_subtitle_download_item_json(
+	        string item_json_utf8,
+	        string out_dir_utf8,
+	        uint timeout_ms,
+	        uint retries,
+	        byte overwrite);
+
+	    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+	    internal static partial IntPtr chaos_lyrics_search_json(
+	        string title_utf8,
+	        string? album_utf8_or_null,
+	        string? artist_utf8_or_null,
+	        uint duration_ms_or_0,
+	        uint limit,
+	        byte strict_match,
+	        string? services_csv_utf8_or_null,
+	        uint timeout_ms);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_livestream_decode_manifest_json(
@@ -133,6 +144,48 @@ var json = ChaosFfi.TakeString(p) ?? throw new Exception("search failed: " + Cha
 
 var items = JsonDocument.Parse(json).RootElement;
 Console.WriteLine("items=" + items.GetArrayLength());
+```
+
+## 歌词搜索
+
+```csharp
+static string TakeOrThrow(IntPtr p, string what)
+{
+    var s = ChaosFfi.TakeString(p);
+    if (!string.IsNullOrEmpty(s)) return s;
+    var err = ChaosFfi.TakeString(ChaosFfi.chaos_ffi_last_error_json());
+    throw new Exception($"{what} failed: {err}");
+}
+
+var json = TakeOrThrow(
+    ChaosFfi.chaos_lyrics_search_json(
+        "Hello",
+        "Hello",
+        "Adele",
+        296_000,
+        5,
+        1, // strict_match
+        "netease,qq,kugou",
+        10_000),
+    "lyrics_search");
+
+using var doc = JsonDocument.Parse(json);
+var arr = doc.RootElement;
+Console.WriteLine("results=" + arr.GetArrayLength());
+
+for (int i = 0; i < Math.Min(3, arr.GetArrayLength()); i++)
+{
+    var it = arr[i];
+    Console.WriteLine($"#{i} service={it.GetProperty(\"service\").GetString()} quality={it.GetProperty(\"quality\").GetDouble():0.0000}");
+    Console.WriteLine($"    title={it.GetProperty(\"title\").GetString()} artist={it.GetProperty(\"artist\").GetString()}");
+}
+
+if (arr.GetArrayLength() > 0)
+{
+    var best = arr[0];
+    var lyrics = best.GetProperty("lyrics_original").GetString() ?? "";
+    Console.WriteLine("best_lyrics_prefix=" + lyrics.Substring(0, Math.Min(200, lyrics.Length)));
+}
 ```
 
 ## 直播源解析（manifest + 二段解析）

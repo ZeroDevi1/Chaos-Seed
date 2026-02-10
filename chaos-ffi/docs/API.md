@@ -17,14 +17,14 @@
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-返回 API 版本号。当前为 `3`。
+返回 API 版本号。当前为 `4`。
 
 ### `char* chaos_ffi_version_json(void)`
 
 返回：
 
 ```json
-{"version":"0.1.0","git":"unknown","api":3}
+{"version":"0.1.0","git":"unknown","api":4}
 ```
 
 ### `char* chaos_ffi_last_error_json(void)`
@@ -126,6 +126,61 @@ char* chaos_subtitle_download_item_json(
 ```json
 {"path":"C:\\\\out\\\\file.srt","bytes":12345}
 ```
+
+## 歌词（Lyrics Search）
+
+从多个歌词源搜索并拉取歌词文本，输出按 `quality` 排序的候选列表（可选 strict match 过滤）。对外仍然保持 **JSON in/out** 的 ABI 稳定设计。
+
+### `char* chaos_lyrics_search_json(...)`
+
+签名：
+
+```c
+char* chaos_lyrics_search_json(
+  const char* title_utf8,
+  const char* album_utf8_or_null,
+  const char* artist_utf8_or_null,
+  uint32_t duration_ms_or_0,
+  uint32_t limit,
+  uint8_t strict_match,
+  const char* services_csv_utf8_or_null,
+  uint32_t timeout_ms);
+```
+
+参数：
+- `title_utf8`：歌名（必填，UTF-8）。
+- `album_utf8_or_null`：专辑名（可选，UTF-8）。
+- `artist_utf8_or_null`：歌手名（可选，UTF-8）。为空时会降级为 keyword 搜索。
+- `duration_ms_or_0`：期望时长（ms）；传 `0` 表示未知。
+- `limit`：最多返回多少条结果（最小为 1）。
+- `strict_match`：`1` 表示启用严格匹配过滤（等价 LyricsX 的 strictSearchEnabled：过滤 `matched=false`）。
+- `services_csv_utf8_or_null`：指定歌词源（逗号分隔），例如 `"netease,qq,kugou"`；`NULL/空串` 表示默认全部源。
+- `timeout_ms`：每个源/请求的超时（ms，最小为 1）。
+
+返回：`LyricsSearchResult` 的 JSON 数组（按 `quality` 降序），元素字段形状示例：
+
+```json
+[
+  {
+    "service": "qq",
+    "service_token": "003rJQ7o3S0YdK",
+    "title": "Hello",
+    "artist": "Adele",
+    "album": "Hello",
+    "duration_ms": 296000,
+    "quality": 1.23,
+    "matched": true,
+    "has_translation": true,
+    "has_inline_timetags": false,
+    "lyrics_original": "[00:01.00] ...",
+    "lyrics_translation": "[00:01.00] ..."
+  }
+]
+```
+
+说明：
+- 任一歌词源失败/超时不会导致整体失败；返回结果可能为空数组。
+- `quality`/`matched` 由 core 侧根据请求与返回内容计算并排序。
 
 ## 直播源解析（Livestream）
 

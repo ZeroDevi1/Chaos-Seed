@@ -80,3 +80,19 @@
   - 弹幕低延迟 + 主窗停推兜底：`bfadcd4`
   - 主题：Mica 下浅色不透底 + 深色融合：`4d05c31`
   - livestream UI + player：`ee0ef1d`
+
+## 2026-02-10
+
+### 变更（当前版本迭代）
+- 歌词（core，clean-room 重写）：
+  - 新增 `chaos-core::lyrics`：对齐 LyricsX/LyricsKit 的“多源搜索 → 拉取 → strict match → quality 排序 → 超时降级”行为。
+  - Provider 支持：NetEase / QQMusic / Kugou（并提供离线 httpmock 测试覆盖 JSONP/base64/KRC 解密等关键链路）。
+  - 新增 CLI 测试入口：`cd chaos-core && cargo run -- test ...`（支持位置参数与 `--title/--artist/...` 模式）。
+- 歌词（FFI）：
+  - `chaos-ffi` 新增导出：`chaos_lyrics_search_json`（JSON in/out 风格），并更新 `API.md` / `CSharp.md`；API_VERSION bump 到 4。
+- Tauri UI（歌词页/多窗口）：
+  - 修复：勾选“包含封面(base64)”后点击获取 Now Playing 卡死（不再渲染超大 JSON；限制 maxSessions=1，仅预览封面）。
+  - 新增 `lyrics_search` command（默认仅使用 netease/qq/kugou 以保证响应速度），并改造 LyricsPage 为三段布局：操作区 / 来源列表（无正文）/ 正文区（原文-译文对应）。
+  - 新增两个歌词显示窗口：Chat（不透明）/ Overlay（透明置顶），通过事件 `lyrics_current_changed` 实时刷新内容。
+- Now Playing（Tauri backend 加固）：
+  - `now_playing_snapshot` 改为 async 返回结构体（spawn_blocking），避免主线程阻塞并减少传输/渲染风险。

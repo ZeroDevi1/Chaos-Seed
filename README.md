@@ -7,6 +7,7 @@
 - 字幕（已完成）：Thunder 搜索 / 列表展示 / 单条下载（每次下载选择目录，支持超时与重试）
 - 弹幕（已完成）：BiliLive / Douyu / Huya 连接与解析；UI 已接入（Chat / Overlay）
 - 直播源解析（已完成 core/ffi）：BiliLive / Douyu / Huya 的 `manifest/variants` 解析 + `resolve_variant` 二段补全
+- 歌词（已完成基础）：读取系统 Now Playing 信息，在线搜索歌词（netease/qq/kugou），来源列表单选切换正文；支持 Chat/Overlay 文本窗口展示（暂不做时间轴对齐/高亮）
 - UI（已完成初版）：直播源解析 UI（manifest/variants）+ 新窗口播放器（Master 风格；Hls.js + Libmedia AvPlayer），支持清晰度/线路切换、直连 URL 调试显示、关闭窗口自动停止播放
 - UI（后续增强）：反盗链/本地代理（Referer/UA/Cookie 注入）、播放诊断与更完善的自动重试策略、播放器观感与快捷键
 
@@ -104,6 +105,21 @@ cargo run -p chaos-core --example danmaku_dump -- 'huya:<RID>'
 事件语义（对齐 IINA+）：
 - `LiveDMServer`：`text == ""` 表示连接 OK；`text == "error"` 表示失败/断线
 - `SendDM`：`dms` 中包含弹幕内容；表情弹幕会带 `image_url` 与（可选）`image_width`
+
+## 歌词（调试 / CLI 验证）
+
+在 `chaos-core/` 目录下运行（注意 `cargo run` 需要 `--` 才会把参数传给程序）：
+
+```bash
+cd chaos-core
+cargo run -- test "Hello" "Hello" "Adele"
+```
+
+输出 JSON（便于复制到 UI/调试）：
+
+```bash
+cargo run -- test --title "Hello" --artist "Adele" --album "Hello" --limit 5 --strict --services netease,qq,kugou --timeout-ms 10000 --dump-json
+```
 
 ## Tauri（当前 UI）
 
