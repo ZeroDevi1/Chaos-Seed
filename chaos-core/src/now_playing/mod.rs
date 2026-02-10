@@ -180,12 +180,16 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
         .map(|s| s.to_string());
 
     let mut out_sessions: Vec<NowPlayingSession> = Vec::new();
+    // For performance and stability, only fetch the thumbnail bytes for the picked session.
+    // (Fetching thumbnails for every session can produce huge base64 payloads and freeze callers.)
+    let mut thumb_refs: Vec<Option<IRandomAccessStreamReference>> = Vec::new();
     let sessions = mgr.GetSessions()?;
     for (idx, s) in sessions.into_iter().enumerate() {
         if idx >= max_sessions {
             break;
         }
 
+        let mut thumb_ref: Option<IRandomAccessStreamReference> = None;
         let app_id = s
             .SourceAppUserModelId()
             .map(|v| v.to_string())
@@ -279,27 +283,9 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
                         item.genres = genres;
                     }
 
+                    // Store the stream reference and fetch bytes later for the picked session only.
                     if opt.include_thumbnail {
-                        if let Ok(thumb) = props.Thumbnail() {
-                            match read_thumbnail_bytes(&thumb, max_thumb) {
-                                Ok(bytes) => {
-                                    if !bytes.is_empty() {
-                                        let mime = sniff_mime(&bytes).to_string();
-                                        let b64 =
-                                            base64::engine::general_purpose::STANDARD.encode(bytes);
-                                        item.thumbnail =
-                                            Some(NowPlayingThumbnail { mime, base64: b64 });
-                                    }
-                                }
-                                Err(e) => {
-                                    let msg = format!("thumbnail: {e}");
-                                    item.error = Some(match item.error.take() {
-                                        Some(prev) => format!("{prev}; {msg}"),
-                                        None => msg,
-                                    });
-                                }
-                            }
-                        }
+                        thumb_ref = props.Thumbnail().ok();
                     }
                 }
                 Err(e) => {
@@ -320,9 +306,38 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
         }
 
         out_sessions.push(item);
+        thumb_refs.push(thumb_ref);
     }
 
     let pick_idx = pick_now_playing_index(&out_sessions);
+
+    if opt.include_thumbnail {
+        if let Some(i) = pick_idx {
+            if let Some(Some(thumb)) = thumb_refs.get(i) {
+                match read_thumbnail_bytes(thumb, max_thumb) {
+                    Ok(bytes) => {
+                        if !bytes.is_empty() {
+                            let mime = sniff_mime(&bytes).to_string();
+                            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+                            if let Some(item) = out_sessions.get_mut(i) {
+                                item.thumbnail = Some(NowPlayingThumbnail { mime, base64: b64 });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(item) = out_sessions.get_mut(i) {
+                            let msg = format!("thumbnail: {e}");
+                            item.error = Some(match item.error.take() {
+                                Some(prev) => format!("{prev}; {msg}"),
+                                None => msg,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let now_playing = pick_idx.and_then(|i| out_sessions.get(i).cloned());
     let picked_app_id = now_playing.as_ref().map(|s| s.app_id.clone());
 

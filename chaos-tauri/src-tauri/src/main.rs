@@ -911,11 +911,11 @@ fn init_lyrics_tray(app: &AppHandle) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
 
         let item_dock =
-            MenuItem::with_id(app, "tray_open_dock", "打开停靠模式", true, None::<&str>)
+            MenuItem::with_id(app, "tray_open_dock", "打开窄屏歌词窗", true, None::<&str>)
                 .map_err(|e| e.to_string())?;
 
         let item_float =
-            MenuItem::with_id(app, "tray_open_float", "打开桌面悬浮", true, None::<&str>)
+            MenuItem::with_id(app, "tray_open_float", "打开顶栏歌词", true, None::<&str>)
                 .map_err(|e| e.to_string())?;
 
         let item_quit = MenuItem::with_id(app, "tray_quit", "退出", true, None::<&str>)
@@ -1418,6 +1418,13 @@ async fn open_lyrics_dock_window(app: AppHandle) -> Result<(), String> {
     if ensure_window(&app, "lyrics_dock").is_some() {
         let st = app.state::<LyricsAppState>();
         st.dock_open.store(true, Ordering::Relaxed);
+        let _ = app.emit(
+            "chaos_window_state",
+            WindowStatePayload {
+                label: "lyrics_dock".to_string(),
+                open: true,
+            },
+        );
         return Ok(());
     }
 
@@ -1442,12 +1449,12 @@ async fn open_lyrics_dock_window(app: AppHandle) -> Result<(), String> {
 
     let _ = w.show();
     let _ = w.set_focus();
-    // Best-effort: snap to the right edge of the current monitor.
+    // Place it near the top-center of the current monitor (free-movable "narrow screen" lyrics window).
     if let Ok(Some(m)) = w.current_monitor() {
         let size = m.size();
-        // Keep a small margin so it doesn't overlap with rounded screen edges / auto-hide taskbars.
-        let x = (size.width as i32).saturating_sub(420 + 6);
-        let y = 6;
+        let pos = m.position();
+        let x = pos.x + ((size.width as i32 - 420) / 2);
+        let y = pos.y + 60;
         let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
     let _ = app.emit(
@@ -1485,6 +1492,13 @@ async fn open_lyrics_float_window(app: AppHandle) -> Result<(), String> {
     if ensure_window(&app, "lyrics_float").is_some() {
         let st = app.state::<LyricsAppState>();
         st.float_open.store(true, Ordering::Relaxed);
+        let _ = app.emit(
+            "chaos_window_state",
+            WindowStatePayload {
+                label: "lyrics_float".to_string(),
+                open: true,
+            },
+        );
         return Ok(());
     }
 
@@ -1497,9 +1511,9 @@ async fn open_lyrics_float_window(app: AppHandle) -> Result<(), String> {
     let url = child_url_from_main(&app, "lyrics_float", None);
 
     let w = tauri::WebviewWindowBuilder::new(&app, "lyrics_float", url)
-        .title("歌词 - Float")
-        .inner_size(960.0, 220.0)
-        .resizable(true)
+        .title("歌词 - TopBar")
+        .inner_size(1200.0, 72.0)
+        .resizable(false)
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
@@ -1509,6 +1523,19 @@ async fn open_lyrics_float_window(app: AppHandle) -> Result<(), String> {
 
     let _ = w.show();
     let _ = w.set_focus();
+    // Snap to the top edge and span the current monitor width.
+    if let Ok(Some(m)) = w.current_monitor() {
+        let size = m.size();
+        let pos = m.position();
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: pos.x,
+            y: pos.y,
+        }));
+        let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: size.width,
+            height: 72,
+        }));
+    }
     let _ = app.emit(
         "chaos_window_state",
         WindowStatePayload {

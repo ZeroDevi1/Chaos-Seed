@@ -90,6 +90,20 @@
       floatOpen = !!(s as any)?.lyricsFloatOpen
     })
 
+    // Best-effort: initial sync in case the "window opened" event was emitted before we started listening.
+    void (async () => {
+      try {
+        dockOpen = !!(await WebviewWindow.getByLabel('lyrics_dock'))
+      } catch {
+        // ignore
+      }
+      try {
+        floatOpen = !!(await WebviewWindow.getByLabel('lyrics_float'))
+      } catch {
+        // ignore
+      }
+    })()
+
     return () => {
       unDet?.()
       unNp?.()
@@ -104,9 +118,10 @@
     try {
       const s = await nowPlayingSnapshot({
         includeThumbnail: true,
-        maxThumbnailBytes: 1_048_576,
-        // Avoid returning a huge payload; this page only needs the picked now_playing.
-        maxSessions: 1
+        // (core caps to 2.5MB) keep it large enough so cover art doesn't get truncated.
+        maxThumbnailBytes: 2_500_000,
+        // With core-side "picked session thumbnail only", this is safe and avoids missing the real playing session.
+        maxSessions: 32
       })
       snapshot = s
       const np = s?.now_playing
@@ -189,7 +204,7 @@
     try {
       await invoke('open_lyrics_dock_window')
     } catch (e) {
-      status = `打开停靠失败：${String(e)}`
+      status = `打开窄屏歌词窗失败：${String(e)}`
     }
   }
 
@@ -197,7 +212,7 @@
     try {
       await invoke('open_lyrics_float_window')
     } catch (e) {
-      status = `打开悬浮失败：${String(e)}`
+      status = `打开顶栏歌词失败：${String(e)}`
     }
   }
 
@@ -220,13 +235,33 @@
   }
 
   async function toggleDockWindow() {
-    if (dockOpen) return closeDock()
-    return openDock()
+    try {
+      const w = await WebviewWindow.getByLabel('lyrics_dock')
+      if (w) {
+        await w.close()
+        dockOpen = false
+        return
+      }
+    } catch {
+      // ignore
+    }
+    await openDock()
+    dockOpen = true
   }
 
   async function toggleFloatWindow() {
-    if (floatOpen) return closeFloat()
-    return openFloat()
+    try {
+      const w = await WebviewWindow.getByLabel('lyrics_float')
+      if (w) {
+        await w.close()
+        floatOpen = false
+        return
+      }
+    } catch {
+      // ignore
+    }
+    await openFloat()
+    floatOpen = true
   }
 
   async function applySelectedAsCurrent() {
@@ -274,11 +309,11 @@
 
         <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
         <fluent-button class="w-160" appearance={dockOpen ? 'accent' : 'outline'} on:click={toggleDockWindow}>
-          {dockOpen ? '停靠窗口：已打开' : '停靠窗口：已关闭'}
+          {dockOpen ? '窄屏歌词窗：已打开' : '窄屏歌词窗：已关闭'}
         </fluent-button>
         <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
         <fluent-button class="w-160" appearance={floatOpen ? 'accent' : 'outline'} on:click={toggleFloatWindow}>
-          {floatOpen ? '悬浮窗口：已打开' : '悬浮窗口：已关闭'}
+          {floatOpen ? '顶栏歌词：已打开' : '顶栏歌词：已关闭'}
         </fluent-button>
       </div>
     </div>
