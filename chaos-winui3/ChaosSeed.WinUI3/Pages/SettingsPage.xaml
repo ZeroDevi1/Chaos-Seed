@@ -1,0 +1,63 @@
+<Page
+    x:Class="ChaosSeed.WinUI3.Pages.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
+
+    <ScrollViewer>
+        <Grid Padding="24">
+            <StackPanel Spacing="12">
+                <TextBlock Text="设置" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="提示：主题 / Backdrop / 播放器内核 会自动持久化。" Opacity="0.8" />
+
+                <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="主题" VerticalAlignment="Center" />
+                            <ComboBox x:Name="ThemeCombo" Grid.Column="1" SelectionChanged="OnThemeChanged">
+                                <ComboBoxItem Content="跟随系统" Tag="FollowSystem" />
+                                <ComboBoxItem Content="深色模式" Tag="Dark" />
+                                <ComboBoxItem Content="浅色模式" Tag="Light" />
+                            </ComboBox>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Backdrop（Win11）" VerticalAlignment="Center" />
+                            <ComboBox x:Name="BackdropCombo" Grid.Column="1" SelectionChanged="OnBackdropChanged">
+                                <ComboBoxItem Content="Mica（更像原生）" Tag="Mica" />
+                                <ComboBoxItem Content="无" Tag="None" />
+                            </ComboBox>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="播放器内核" VerticalAlignment="Center" />
+                            <ComboBox x:Name="PlayerCombo" Grid.Column="1" SelectionChanged="OnPlayerChanged">
+                                <ComboBoxItem Content="VLC（推荐，支持 FLV）" Tag="Vlc" />
+                                <ComboBoxItem Content="系统（为 FFmpegInteropX 预留）" Tag="System" />
+                            </ComboBox>
+                        </Grid>
+
+                        <muxc:InfoBar
+                            x:Name="BackdropHint"
+                            IsOpen="False"
+                            Severity="Informational"
+                            Title="提示"
+                            Message="Backdrop 仅 Windows 11 生效；Windows 10 将自动降级为“无”。" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>

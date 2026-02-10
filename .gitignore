@@ -9,3 +9,9 @@ sync_to_win.sh
 /chaos-tauri/dist-types
 /chaos-tauri/.vite
 /chaos-tauri/.vue-global-types
+
+# WinUI3 / Visual Studio
+/chaos-winui3/.vs
+/chaos-winui3/**/bin
+/chaos-winui3/**/obj
+*.user

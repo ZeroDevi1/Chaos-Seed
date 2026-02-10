@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["chaos-core", "chaos-slint", "chaos-tauri/src-tauri", "chaos-ffi"]
+members = [
+    "chaos-core",
+    "chaos-slint",
+    "chaos-tauri/src-tauri",
+    "chaos-ffi",
+    "chaos-proto",
+    "chaos-app",
+    "chaos-daemon",
+    "xtask",
+]
 
 # Keep `cargo build` friction low on dev machines that don't have Tauri system deps.
 default-members = ["chaos-core", "chaos-slint", "chaos-ffi"]

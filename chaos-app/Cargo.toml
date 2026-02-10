@@ -1,0 +1,22 @@
+[package]
+name = "chaos-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "UI-agnostic application orchestration layer for chaos-seed."
+
+[dependencies]
+base64 = "0.22"
+chaos-core = { path = "../chaos-core" }
+chaos-proto = { path = "../chaos-proto" }
+fastrand = "2"
+hashlink = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

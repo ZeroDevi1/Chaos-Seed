@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>ChaosSeed.WinUI3</RootNamespace>
+    <AssemblyName>ChaosSeed.WinUI3</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Platforms>x64</Platforms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Provide our own Program.Main to call XamlCheckProcessRequirements early. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250602001" />
+    <PackageReference Include="StreamJsonRpc" Version="2.24.84" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="LibVLCSharp" Version="3.9.5" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <RustTargetDir>$(SolutionDir)..\target</RustTargetDir>
+    <RustProfile Condition="'$(Configuration)'=='Release'">release</RustProfile>
+    <RustProfile Condition="'$(Configuration)'!='Release'">debug</RustProfile>
+    <ChaosDaemonExe>$(RustTargetDir)\$(RustProfile)\chaos-daemon.exe</ChaosDaemonExe>
+  </PropertyGroup>
+
+  <Target Name="CopyChaosDaemon" AfterTargets="Build">
+    <Message Importance="high" Text="Copying chaos-daemon from $(ChaosDaemonExe) to $(OutDir)" />
+    <Copy SourceFiles="$(ChaosDaemonExe)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

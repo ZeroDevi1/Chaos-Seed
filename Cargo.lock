@@ -1046,6 +1046,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "chaos-app"
+version = "0.1.1"
+dependencies = [
+ "base64 0.22.1",
+ "chaos-core",
+ "chaos-proto",
+ "fastrand",
+ "hashlink",
+ "reqwest 0.12.28",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "chaos-core"
 version = "0.1.1"
 dependencies = [
@@ -1074,6 +1090,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "chaos-daemon"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "chaos-app",
+ "chaos-proto",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "chaos-ffi"
 version = "0.1.1"
 dependencies = [
@@ -1085,6 +1114,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "chaos-proto"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2821,6 +2858,15 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.5",
 ]
 
 [[package]]
@@ -9538,6 +9584,10 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
+
+[[package]]
+name = "xtask"
+version = "0.1.1"
 
 [[package]]
 name = "y4m"

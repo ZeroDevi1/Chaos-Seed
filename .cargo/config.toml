@@ -2,3 +2,7 @@
 # WSL cross-compilation helper (mingw-w64).
 linker = "x86_64-w64-mingw32-gcc"
 
+[alias]
+# Project-local task runner (xtask pattern).
+# Usage: cargo xtask <cmd> [args...]
+xtask = "run -p xtask --"

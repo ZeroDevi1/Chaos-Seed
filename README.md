@@ -1,6 +1,6 @@
 # chaos-seed
 
-一个 Windows GUI（Rust + Tauri）应用 + 纯 Rust 核心（`chaos-core`）：提供字幕下载、弹幕接入与直播源解析等能力；并通过 `chaos-ffi` 以 C ABI + JSON 形式对外导出，便于 WinUI3/Qt 等调用。
+一个“多 UI 壳 + 纯 Rust 核心”的项目：核心能力集中在 `chaos-core`（字幕 / 弹幕 / 直播源 / 歌词等），Windows 可选 **WinUI 3 原生 UI（`chaos-winui3`）** 通过 **NamedPipe + JSON-RPC（LSP Content-Length framing）** 与 `chaos-daemon` 通讯；同时保留 **Tauri（`chaos-tauri`）** 作为跨平台备选 UI。`chaos-ffi` 作为独立导出路线保留，但不参与本次 IPC 主链路。
 
 ## 功能
 
@@ -10,6 +10,7 @@
 - 歌词（已完成增强）：对齐 BetterLyrics 三源（QQ 音乐 / 网易云 / LRCLIB），按“顺序 + 匹配阈值”自动搜索；读取系统 Now Playing（Windows SMTC snapshot 自适应轮询）并推送时间轴事件；支持主界面 + 停靠（Dock）+ 桌面悬浮（Float），暂停自动隐藏；支持轻量特效背景（fluid / fan3d / snow）；提供 Tauri 托盘开关“歌词检测”（旧 Chat/Overlay 窗口保留作调试/兼容）
 - UI（已完成初版）：直播源解析 UI（manifest/variants）+ 新窗口播放器（Master 风格；Hls.js + Libmedia AvPlayer），支持清晰度/线路切换、直连 URL 调试显示、关闭窗口自动停止播放
 - UI（后续增强）：反盗链/本地代理（Referer/UA/Cookie 注入）、播放诊断与更完善的自动重试策略、播放器观感与快捷键
+- WinUI 3（PoC 已实现）：主页/直播页输入直播间地址 → 解析 → 进入直播页播放（默认 **VLC/LibVLCSharp**；设置里可切换系统播放器）→ 右侧弹幕滚动（支持表情图片）
 
 ## 构建前提（重要）
 
@@ -27,32 +28,63 @@ rustup override set 1.93.0
 rustc -V
 ```
 
-## Workspace（双 UI）
+## Workspace（多 UI）
 
 本仓库已拆成 Cargo workspace：
 
 - `chaos-core`：纯 Rust 核心（字幕 + 弹幕 + 直播源解析）
+- `chaos-proto`：IPC 协议与 DTO（JSON-RPC 方法/参数/返回/事件）
+- `chaos-app`：应用编排层（会话/任务/缓存/事件，**无 UI 依赖**；当前主要供 daemon 使用）
+- `chaos-daemon`：Windows 后端进程（NamedPipe + JSON-RPC），供 WinUI3 连接
 - `chaos-slint`：Slint UI（产物仍为 `chaos-seed` 可执行文件）
-- `chaos-tauri`：Tauri v2 + Vite(TS) UI（当前主 UI 方案）
-- `chaos-ffi`：C ABI 适配层（导出 `chaos-core` 为 dll/so，供 WinUI3/Qt 等调用）
+- `chaos-tauri`：Tauri v2 + Vite(TS) UI（跨平台备选 UI；Rust 后端目前仍直接调用 `chaos-core`）
+- `chaos-ffi`：C ABI 适配层（导出 `chaos-core` 为 dll/so，供 Qt/其他语言调用；与 IPC 主链路解耦）
+- `xtask`：一键构建编排（Windows 上可一条命令构建 daemon + WinUI3）
 
-## 架构（当前 / 未来）
+另外：
+- `chaos-winui3`：WinUI 3（C# / XAML）工程目录（不由 cargo 编译，由 `xtask` 调用 MSBuild/dotnet 构建）
+
+## 架构（当前）
+
+关键点：
+- **永远不改** `chaos-core` / `chaos-ffi`（如需适配，只在 `chaos-app`/daemon/UI 层加过渡）
+- WinUI3 与 Rust **零 FFI**：仅 IPC（NamedPipe + JSON-RPC 2.0 + LSP framing）
 
 ```
-Currently Strategy                         Future Strategy
-------------------                         ---------------
+                    (独立导出路线，不参与 IPC 主链路)
+        ┌───────────────────────────────────────────────┐
+        │                   chaos-ffi                    │
+        │           C ABI + JSON 导出（dll/so）            │
+        └────────────────────────▲──────────────────────┘
+                                 │
 
-[ chaos-core ]  <-- 纯 Rust 业务逻辑，无 UI 依赖 (通用)
-      ^
-      |__________________________________________
-      |                    |                    |
-[ chaos-slint ]      [ chaos-tauri ]      [ chaos-ffi ]  <-- 新增的适配层
-   (Rust UI)           (Web UI)          (DLL 导出层)
-                                                |
-                                          (编译为 .dll/.so)
-                                                |
-                                          [ WinUI 3 App ]
-                                          (C# / XAML)
+┌────────────────────────────────┴────────────────────────────────┐
+│                           chaos-core                              │
+│        纯 Rust 业务核心（字幕/弹幕/直播源/歌词/NowPlaying…）         │
+└────────────────────────────────▲────────────────────────────────┘
+                                 │
+┌────────────────────────────────┴────────────────────────────────┐
+│                           chaos-app                               │
+│      应用编排层（会话/订阅/后台任务/缓存/事件建议；无 UI 依赖）       │
+└────────────────────────────────▲────────────────────────────────┘
+                                 │
+                    out-of-process（Windows IPC）
+                                 │
+┌────────────────────────────────┴────────────────────────────────┐
+│                          chaos-daemon                             │
+│     Windows 后端进程：NamedPipe + JSON-RPC（LSP Content-Length）    │
+└────────────────────────────────▲────────────────────────────────┘
+                                 │
+┌────────────────────────────────┴────────────────────────────────┐
+│                         chaos-winui3                              │
+│                        WinUI 3（C# / XAML）                        │
+└─────────────────────────────────────────────────────────────────┘
+
+in-process（现状不改，跨平台备选 UI）
+┌─────────────────────────────────────────────────────────────────┐
+│                         chaos-tauri                               │
+│         Tauri v2 + Web UI（目前 Rust 侧仍直接调用 chaos-core）       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## 构建
@@ -62,6 +94,16 @@ Currently Strategy                         Future Strategy
 ```bash
 cd chaos-tauri
 pnpm run tauri:build:nobundle
+```
+
+### WinUI 3（新增 PoC）
+
+文档：`docs/BUILD_WINUI3.md`
+
+Windows 上一键构建：
+
+```bash
+cargo xtask build-winui3 --release
 ```
 
 ### 渲染器切换（手动）
