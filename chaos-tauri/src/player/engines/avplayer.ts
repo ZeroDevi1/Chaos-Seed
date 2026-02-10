@@ -282,11 +282,7 @@ export class AvPlayerEngine implements PlayerEngine {
     const ua = (source.user_agent ?? '').toString().trim()
     if (ua) headers['User-Agent'] = ua
 
-    const isProd = !!import.meta.env.PROD
-    const loadSource =
-      isProd && TauriStreamIOLoader ? new TauriStreamIOLoader({ url, referer, userAgent: ua }) : url
-
-    await this.player.load(loadSource, {
+    await this.player.load(url, {
       isLive: true,
       http: {
         headers

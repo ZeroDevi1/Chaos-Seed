@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
-    "build": "pnpm typecheck && vite build",
+    "build": "pnpm typecheck && vite build && node scripts/copy-libmedia-chunks.mjs",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
