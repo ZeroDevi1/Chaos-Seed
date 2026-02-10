@@ -7,7 +7,7 @@
 - 字幕（已完成）：Thunder 搜索 / 列表展示 / 单条下载（每次下载选择目录，支持超时与重试）
 - 弹幕（已完成）：BiliLive / Douyu / Huya 连接与解析；UI 已接入（Chat / Overlay）
 - 直播源解析（已完成 core/ffi）：BiliLive / Douyu / Huya 的 `manifest/variants` 解析 + `resolve_variant` 二段补全
-- 歌词（已完成基础）：读取系统 Now Playing 信息，在线搜索歌词（netease/qq/kugou），来源列表单选切换正文；支持 Chat/Overlay 文本窗口展示（暂不做时间轴对齐/高亮）
+- 歌词（已完成增强）：对齐 BetterLyrics 三源（QQ 音乐 / 网易云 / LRCLIB），按“顺序 + 匹配阈值”自动搜索；读取系统 Now Playing（Windows SMTC snapshot 自适应轮询）并推送时间轴事件；支持主界面 + 停靠（Dock）+ 桌面悬浮（Float），暂停自动隐藏；支持轻量特效背景（fluid / fan3d / snow）；提供 Tauri 托盘开关“歌词检测”（旧 Chat/Overlay 窗口保留作调试/兼容）
 - UI（已完成初版）：直播源解析 UI（manifest/variants）+ 新窗口播放器（Master 风格；Hls.js + Libmedia AvPlayer），支持清晰度/线路切换、直连 URL 调试显示、关闭窗口自动停止播放
 - UI（后续增强）：反盗链/本地代理（Referer/UA/Cookie 注入）、播放诊断与更完善的自动重试策略、播放器观感与快捷键
 
@@ -118,8 +118,23 @@ cargo run -- test "Hello" "Hello" "Adele"
 输出 JSON（便于复制到 UI/调试）：
 
 ```bash
-cargo run -- test --title "Hello" --artist "Adele" --album "Hello" --limit 5 --strict --services netease,qq,kugou --timeout-ms 10000 --dump-json
+cargo run -- test --title "Hello" --artist "Adele" --album "Hello" --limit 5 --strict --services qq,netease,lrclib --timeout-ms 10000 --dump-json
 ```
+
+## 歌词系统（BetterLyrics 对齐）
+
+- 默认在线源：QQ 音乐 / 网易云 / LRCLIB（按 providers_order 顺序逐个尝试，命中 `matching_threshold` 直接停止）
+- 匹配分数：`match_percentage (0~100)`，用于自动阈值判断与 UI 展示
+- 播放事件：后端推送 `now_playing_state_changed`（含 position/duration/retrieved_at），前端插值推进；Dock/Float 打开且 playing 时才进行低频 resync
+- 显示模式：
+  - Dock：贴边侧边栏歌词
+  - Float：桌面悬浮歌词挂件（默认可交互，`F2` 切换点击穿透，`Esc` 关闭）
+- 智能行为：暂停后按延迟自动隐藏；继续播放自动恢复（仅恢复“自动隐藏”导致的隐藏，不强行打开用户主动关闭的窗口）
+- 托盘：一键开关“歌词检测”，并可打开主界面 / Dock / Float
+
+## Windows Tag Release（GitHub Actions）
+
+仓库包含 tag 触发的 Windows Release 构建工作流：push `v*` tag 后自动构建并将 `chaos-ffi` 与 `chaos-tauri` 产物打包上传到对应 Release。
 
 ## Tauri（当前 UI）
 

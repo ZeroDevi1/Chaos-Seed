@@ -96,3 +96,21 @@
   - 新增两个歌词显示窗口：Chat（不透明）/ Overlay（透明置顶），通过事件 `lyrics_current_changed` 实时刷新内容。
 - Now Playing（Tauri backend 加固）：
   - `now_playing_snapshot` 改为 async 返回结构体（spawn_blocking），避免主线程阻塞并减少传输/渲染风险。
+
+### 变更（歌词系统对齐 BetterLyrics）
+- 在线歌词源策略对齐 BetterLyrics：
+  - 默认仅启用并优先使用 QQ 音乐 / 网易云 / LRCLIB（旧源保留但默认不参与自动流程）
+  - 新增 BetterLyrics 风格 match score（Jaro-Winkler + duration curve + 权重），在结果中暴露 `match_percentage (0~100)`
+  - 新增 LRCLIB provider（直接消费 `syncedLyrics`）
+- Now Playing 元数据补强：
+  - session 增加 `genres` 与 `song_id`（从 `NCM-xxxx` / `QQ-xxxx` 解析，便于后续更精确匹配）
+- 播放监控与自动搜词（Tauri backend）：
+  - 增加“歌词检测”开关与持久化设置；开启后收到歌曲变更即按 providers 顺序逐个搜索，命中阈值直接停止
+  - 广播事件：`now_playing_state_changed` / `lyrics_detection_state_changed`（前端用 `retrieved_at` 插值推进时间轴）
+  - 低功耗策略：当前以自适应轮询为主（Dock/Float 打开且 playing 时才会更积极 resync）；后续可升级为 WinRT 事件订阅
+- 显示模式重做（Tauri frontend）：
+  - 新增 Dock（贴边侧边栏）与 Float（桌面悬浮挂件）两种歌词窗口
+  - 暂停自动隐藏、恢复播放自动恢复显示（仅恢复因自动隐藏导致的隐藏）
+  - 轻量特效系统：fluid 背景 / fan3d 布局 / snow 粒子（可在设置切换）
+- 工程化：
+  - 新增 tag 触发 Windows Release 工作流：构建 `chaos-ffi` + `chaos-tauri` 并上传到对应 GitHub Release

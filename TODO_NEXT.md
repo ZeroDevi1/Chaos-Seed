@@ -26,8 +26,23 @@
 - P0-18 Now Playing：勾选“包含封面(base64)”后获取正在播放信息卡死：Done @ 2026-02-10（commit: `78d35c1`）
 - P1-19 歌词（core/ffi）：移植 LyricsX/LyricsKit 行为到 chaos-core（多源并发/strict/quality/超时）+ chaos-ffi 导出 + 文档：Done @ 2026-02-10（commit: `78d35c1`）
 - P1-20 歌词（Tauri UI）：三段布局（操作区/来源列表/正文区）+ 单选切换 + Chat/Overlay 新窗口显示 + 原文-译文对应：Done @ 2026-02-10（commit: `78d35c1`）
+- P0-21 歌词系统对齐 BetterLyrics：QQ/网易云/LRCLIB + match_percentage + 顺序阈值自动搜索 + Dock/Float + 暂停自动隐藏 + 托盘开关 + Windows tag release CI：Done @ 2026-02-10（commit: `e72ab32`）
 
 ## Next（近期要交付）
+
+### P1：SMTC 真事件订阅（降低空闲功耗）
+
+**交付目标**
+- 将 Now Playing 的“自适应轮询”升级为 WinRT 事件订阅（SMTC/GSMTC）：
+  - `SessionsChanged` / `CurrentSessionChanged`
+  - `MediaPropertiesChanged` / `PlaybackInfoChanged` / `TimelinePropertiesChanged`
+- 以事件为主驱动 UI 刷新，轮询仅作为兜底（resync 低频）
+
+**验收标准**
+- 非 playing 或无 Dock/Float 窗口打开时：后台 CPU 占用明显下降（接近空闲）
+- 切歌/暂停/恢复播放：歌词与高亮刷新及时且不丢事件
+
+---
 
 ### P0：播放器诊断与兼容模式开关
 
