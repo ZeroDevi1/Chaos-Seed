@@ -6,7 +6,7 @@ members = ["chaos-core", "chaos-slint", "chaos-tauri/src-tauri", "chaos-ffi"]
 default-members = ["chaos-core", "chaos-slint", "chaos-ffi"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.93.0"
 license = "MIT"

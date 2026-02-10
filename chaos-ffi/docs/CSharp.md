@@ -243,7 +243,9 @@ for (int i = 0; i < 20; i++)
     await Task.Delay(500);
 }
 
-ChaosFfi.chaos_danmaku_disconnect(handle);
+var rc = ChaosFfi.chaos_danmaku_disconnect(handle);
+if (rc != 0)
+    throw new Exception("disconnect failed: " + ChaosFfi.TakeString(ChaosFfi.chaos_ffi_last_error_json()));
 ```
 
 在 WinUI 3 应用中，请把 `Console.WriteLine` 这类 UI/日志更新逻辑 marshal 到 `DispatcherQueue`/UI 线程。

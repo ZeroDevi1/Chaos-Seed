@@ -22,15 +22,93 @@
 
   let items: LyricsSearchResult[] = []
   let selectedKey = ''
+  let selectedByUser = false
+  let lastSnapshotTrackKey = ''
+  let coverLoadError: string | null = null
 
   function itemKey(it: LyricsSearchResult): string {
     // Avoid collisions across services: tokens are not guaranteed globally unique.
     return `${it.service}|${it.service_token}`
   }
 
+  function trackKeyFromNowPlaying(np: any): string {
+    if (!np) return ''
+    const appId = (np.app_id ?? '').toString()
+    const title = (np.title ?? '').toString()
+    const artist = (np.artist ?? '').toString()
+    const album = (np.album_title ?? '').toString()
+    const durationMs = typeof np.duration_ms === 'number' ? np.duration_ms : 0
+    return `${appId}|${title}|${artist}|${album}|${durationMs}`
+  }
+
+  function sanitizeBase64(b64: unknown): string {
+    if (typeof b64 !== 'string') return ''
+    return b64.replace(/\s+/g, '')
+  }
+
+  function guessMimeFromBase64(b64: string): string | null {
+    if (!b64) return null
+    // JPEG
+    if (b64.startsWith('/9j/')) return 'image/jpeg'
+    // PNG
+    if (b64.startsWith('iVBORw0KGgo')) return 'image/png'
+    // GIF
+    if (b64.startsWith('R0lGODdh') || b64.startsWith('R0lGODlh')) return 'image/gif'
+    // WEBP ("RIFF....WEBP")
+    if (b64.startsWith('UklGR')) return 'image/webp'
+    // BMP ("BM")
+    if (b64.startsWith('Qk')) return 'image/bmp'
+    return null
+  }
+
+  function coverSrcFromThumbnail(thumb: any): string | null {
+    const b64 = sanitizeBase64(thumb?.base64)
+    if (!b64) return null
+    const mimeRaw = typeof thumb?.mime === 'string' ? thumb.mime : ''
+    const mime = mimeRaw.startsWith('image/') ? mimeRaw : (guessMimeFromBase64(b64) ?? mimeRaw)
+    if (!mime || !mime.startsWith('image/')) return null
+    return `data:${mime};base64,${b64}`
+  }
+
+  type TrackSearchInput = {
+    trackKey: string
+    title: string
+    artist: string | null
+    album: string | null
+    durationMs: number | null
+  }
+
+  function toTrackSearchInput(np: any): TrackSearchInput | null {
+    if (!np) return null
+    const title = (np.title ?? '').toString().trim()
+    if (!title) return null
+    const artist = (np.artist ?? '').toString().trim()
+    const album = (np.album_title ?? '').toString().trim()
+    const durationMs = typeof np.duration_ms === 'number' ? np.duration_ms : null
+    return {
+      trackKey: trackKeyFromNowPlaying(np),
+      title,
+      artist: artist || null,
+      album: album || null,
+      durationMs
+    }
+  }
+
   $: selectedItem = items.find((it) => itemKey(it) === selectedKey) ?? null
   $: effectiveLyricsItem = selectedItem ?? currentItem
   $: effectiveRows = formatForDisplay(effectiveLyricsItem)
+  $: coverSrc = coverSrcFromThumbnail(snapshot?.now_playing?.thumbnail)
+
+  $: {
+    // If the backend auto-picked a "current lyrics", align selection when we don't have an explicit user choice.
+    if (currentItem && items.length > 0) {
+      const curKey = itemKey(currentItem)
+      const exists = items.some((it) => itemKey(it) === curKey)
+      if (exists) {
+        if (!selectedByUser) selectedKey = curKey
+      }
+    }
+  }
 
   onMount(() => {
     let unDet: (() => void) | undefined
@@ -38,10 +116,74 @@
     let unCur: (() => void) | undefined
     let unPresence: (() => void) | undefined
 
+    let lastAutoTrackKey = ''
+    let autoTimer: number | null = null
+    let autoPending: TrackSearchInput | null = null
+    let autoBusy = false
+
+    function scheduleAutoRefresh(next: TrackSearchInput) {
+      autoPending = next
+      if (autoTimer != null) window.clearTimeout(autoTimer)
+      autoTimer = window.setTimeout(() => {
+        autoTimer = null
+        void runAutoRefresh()
+      }, 900)
+    }
+
+    async function runAutoRefresh() {
+      if (!detectionEnabled) return
+      if (!autoPending) return
+      if (busyNowPlaying || busyLyrics || autoBusy) {
+        // User-triggered actions take priority; retry later.
+        scheduleAutoRefresh(autoPending)
+        return
+      }
+
+      const next = autoPending
+      autoPending = null
+      autoBusy = true
+      try {
+        // 1) Pull snapshot with thumbnail so the Lyrics page can show cover art.
+        const hasCover = !!coverSrc && lastSnapshotTrackKey === next.trackKey
+        if (!hasCover) {
+          const snap = await syncNowPlaying({ silent: true })
+          if (snap) snapshot = snap
+        }
+
+        // 2) Refresh candidate list (the backend will also update `currentItem` by its own logic).
+        await doLyricsSearch(
+          { title: next.title, artist: next.artist, album: next.album, durationMs: next.durationMs },
+          { mode: 'auto' }
+        )
+
+        // Default selection: pick best result (or align to current if already known).
+        if (items.length > 0) {
+          const curKey = currentItem ? itemKey(currentItem) : ''
+          const curInList = !!curKey && items.some((it) => itemKey(it) === curKey)
+          selectedByUser = false
+          selectedKey = curInList ? curKey : itemKey(items[0])
+        }
+      } finally {
+        autoBusy = false
+      }
+    }
+
     void (async () => {
       try {
         const s = (await invoke('lyrics_settings_get')) as any
         detectionEnabled = !!s?.lyrics_detection_enabled
+        if (detectionEnabled) {
+          // Entering the page with detection enabled should immediately show a cover-enabled Now Playing card.
+          const snap = await syncNowPlaying({ silent: true })
+          if (snap) snapshot = snap
+
+          const np = snap?.now_playing ?? null
+          const input = toTrackSearchInput(np)
+          if (input?.trackKey) {
+            lastAutoTrackKey = input.trackKey
+            scheduleAutoRefresh(input)
+          }
+        }
       } catch {
         // ignore
       }
@@ -58,7 +200,17 @@
     void (async () => {
       try {
         unDet = await listen<{ enabled: boolean }>('lyrics_detection_state_changed', (e) => {
-          detectionEnabled = !!e.payload?.enabled
+          const enabled = !!e.payload?.enabled
+          detectionEnabled = enabled
+          if (!enabled) return
+          void (async () => {
+            const snap = await syncNowPlaying({ silent: true })
+            const np = snap?.now_playing ?? snapshot?.now_playing ?? liveNowPlaying
+            const input = toTrackSearchInput(np)
+            if (!input?.trackKey) return
+            lastAutoTrackKey = input.trackKey
+            scheduleAutoRefresh(input)
+          })()
         })
       } catch {
         // ignore
@@ -69,6 +221,12 @@
       try {
         unNp = await listen<any>('now_playing_state_changed', (e) => {
           liveNowPlaying = e.payload
+          if (!detectionEnabled) return
+          const input = toTrackSearchInput(e.payload)
+          if (!input?.trackKey) return
+          if (input.trackKey === lastAutoTrackKey) return
+          lastAutoTrackKey = input.trackKey
+          scheduleAutoRefresh(input)
         })
       } catch {
         // ignore
@@ -109,12 +267,15 @@
       unNp?.()
       unCur?.()
       unPresence?.()
+      if (autoTimer != null) window.clearTimeout(autoTimer)
     }
   })
 
-  async function fetchNowPlaying() {
+  async function syncNowPlaying(opts?: { silent?: boolean }): Promise<NowPlayingSnapshot | null> {
+    const silent = !!opts?.silent
     busyNowPlaying = true
-    status = '正在获取正在播放信息...'
+    if (!silent) status = '正在获取正在播放信息...'
+    coverLoadError = null
     try {
       const s = await nowPlayingSnapshot({
         includeThumbnail: true,
@@ -124,21 +285,28 @@
         maxSessions: 32
       })
       snapshot = s
+      lastSnapshotTrackKey = trackKeyFromNowPlaying(s?.now_playing)
       const np = s?.now_playing
       if (!s?.supported) {
-        status = '当前平台不支持 Now Playing。'
-        return
+        if (!silent) status = '当前平台不支持 Now Playing。'
+        return s
       }
       if (!np) {
-        status = '未检测到正在播放的媒体会话。'
-        return
+        if (!silent) status = '未检测到正在播放的媒体会话。'
+        return s
       }
-      status = '已获取正在播放信息。'
+      if (!silent) status = '已获取正在播放信息。'
+      return s
     } catch (e) {
-      status = `获取失败：${String(e)}`
+      if (!silent) status = `获取失败：${String(e)}`
+      return null
     } finally {
       busyNowPlaying = false
     }
+  }
+
+  async function fetchNowPlaying() {
+    await syncNowPlaying()
   }
 
   async function searchLyricsFromNowPlaying() {
@@ -155,7 +323,7 @@
       status = '正在播放信息缺少 title，无法搜索歌词。'
       return
     }
-    await doLyricsSearch({ title, artist: artist || null, album: album || null, durationMs })
+    await doLyricsSearch({ title, artist: artist || null, album: album || null, durationMs }, { mode: 'manual' })
   }
 
   async function doLyricsSearch(input: {
@@ -163,11 +331,13 @@
     artist: string | null
     album: string | null
     durationMs: number | null
-  }) {
+  }, opts?: { mode?: 'auto' | 'manual' }) {
     busyLyrics = true
-    status = '正在搜索歌词...'
+    const mode = opts?.mode ?? 'manual'
+    status = mode === 'auto' ? '检测到切歌：正在自动搜索歌词...' : '正在搜索歌词...'
     items = []
     selectedKey = ''
+    selectedByUser = false
     try {
       const out = await lyricsSearch({
         title: input.title,
@@ -180,11 +350,14 @@
         timeoutMs: 8000
       })
       items = out || []
-      status = `搜索完成：${items.length} 条结果`
-      if (items.length > 0) selectedKey = itemKey(items[0])
+      status = mode === 'auto' ? `自动搜索完成：${items.length} 条结果` : `搜索完成：${items.length} 条结果`
+      if (items.length > 0) {
+        selectedKey = itemKey(items[0])
+        selectedByUser = false
+      }
     } catch (e) {
       items = []
-      status = `搜索失败：${String(e)}`
+      status = mode === 'auto' ? `自动搜索失败：${String(e)}` : `搜索失败：${String(e)}`
     } finally {
       busyLyrics = false
     }
@@ -323,12 +496,13 @@
 
   <div class="panel np-panel">
     {#if liveNowPlaying || snapshot?.now_playing}
-      <div class="np-row">
-        {#if snapshot?.now_playing?.thumbnail?.base64}
+        <div class="np-row">
+        {#if coverSrc}
           <img
             class="np-cover"
             alt="cover"
-            src={`data:${snapshot.now_playing.thumbnail.mime};base64,${snapshot.now_playing.thumbnail.base64}`}
+            src={coverSrc}
+            on:error={() => (coverLoadError = '封面图片解码失败（data url 不可用或内容损坏）')}
           />
         {:else}
           <div class="np-cover placeholder"></div>
@@ -344,6 +518,17 @@
             {(liveNowPlaying?.playback_status || snapshot?.now_playing?.playback_status) ?? 'Unknown'} · duration_ms={(liveNowPlaying?.duration_ms ||
               snapshot?.now_playing?.duration_ms) ?? '-'}
           </div>
+          {#if snapshot?.now_playing?.error}
+            <div class="np-sub text-muted">now_playing.error: {snapshot.now_playing.error}</div>
+          {/if}
+          {#if coverLoadError}
+            <div class="np-sub text-muted">cover.error: {coverLoadError}</div>
+          {/if}
+          {#if snapshot?.now_playing?.thumbnail?.base64}
+            <div class="np-sub text-muted">
+              thumb.mime={(snapshot.now_playing.thumbnail?.mime ?? '-') as any} · b64_len={(snapshot.now_playing.thumbnail?.base64?.length ?? 0) as any}
+            </div>
+          {/if}
         </div>
       </div>
     {:else}
@@ -370,7 +555,13 @@
         <div class="results-list">
           {#each items as it (itemKey(it))}
             <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-            <div class="result-row" on:click={() => (selectedKey = itemKey(it))}>
+            <div
+              class="result-row"
+              on:click={() => {
+                selectedByUser = true
+                selectedKey = itemKey(it)
+              }}
+            >
               <div class="col-pick">
                 <input type="radio" name="lyricPick" value={itemKey(it)} bind:group={selectedKey} />
               </div>

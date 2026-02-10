@@ -7,6 +7,7 @@
   import type { LyricsSearchResult, NowPlayingSession } from '@/shared/types'
   import { getActiveLine, parseLrc, type Timeline } from '@/shared/lyricsSync'
   import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
+  import { resolveWebviewWindow } from '@/shared/resolveWebviewWindow'
 
   type NowPlayingStatePayload = {
     supported: boolean
@@ -117,11 +118,11 @@
     document.documentElement.style.background = 'transparent'
     document.body.style.background = 'transparent'
 
-    try {
-      win = getCurrentWebviewWindow()
-    } catch {
-      win = null
-    }
+    void (async () => {
+      win = await resolveWebviewWindow('lyrics_float')
+      // Ensure the window starts interactive even if previous state enabled click-through.
+      void applyClickThrough(false)
+    })()
 
     const cleanup = () => {
       disposed = true
@@ -132,9 +133,6 @@
       stopPoll?.()
     }
     window.addEventListener('beforeunload', cleanup, { capture: true, once: true })
-
-    // Default: interactive; user can toggle click-through with F2.
-    void applyClickThrough(false)
 
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') {
@@ -295,7 +293,7 @@
   }
 
   .root.fading {
-    opacity: 0.35;
+    opacity: 0.72;
   }
 
   .bar {

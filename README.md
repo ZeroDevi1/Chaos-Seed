@@ -106,19 +106,36 @@ cargo run -p chaos-core --example danmaku_dump -- 'huya:<RID>'
 - `LiveDMServer`：`text == ""` 表示连接 OK；`text == "error"` 表示失败/断线
 - `SendDM`：`dms` 中包含弹幕内容；表情弹幕会带 `image_url` 与（可选）`image_width`
 
-## 歌词（调试 / CLI 验证）
-
-在 `chaos-core/` 目录下运行（注意 `cargo run` 需要 `--` 才会把参数传给程序）：
+## 直播源解析（调试 / CLI 验证）
 
 ```bash
-cd chaos-core
-cargo run -- test "Hello" "Hello" "Adele"
+cargo run -p chaos-core --example livestream_dump -- --input 'https://live.bilibili.com/<RID>'
+cargo run -p chaos-core --example livestream_dump -- --input 'douyu:<RID>' --dump-json
+```
+
+二段解析（补齐特定清晰度的 URL）：
+
+```bash
+cargo run -p chaos-core --example livestream_dump -- --input 'huya:<RID>' --resolve '<variant_id>'
+```
+
+## 字幕搜索（调试 / CLI 验证）
+
+```bash
+cargo run -p chaos-core --example subtitle_search -- --query 'Dune' --limit 10
+cargo run -p chaos-core --example subtitle_search -- --query 'Dune' --lang zh --min-score 8.0 --dump-json
+```
+
+## 歌词（调试 / CLI 验证）
+
+```bash
+cargo run -p chaos-core --example lyrics_search -- --title "Hello" --artist "Adele"
 ```
 
 输出 JSON（便于复制到 UI/调试）：
 
 ```bash
-cargo run -- test --title "Hello" --artist "Adele" --album "Hello" --limit 5 --strict --services qq,netease,lrclib --timeout-ms 10000 --dump-json
+cargo run -p chaos-core --example lyrics_search -- --title "Hello" --artist "Adele" --album "Hello" --limit 5 --strict --services qq,netease,lrclib --timeout-ms 10000 --dump-json
 ```
 
 ## 歌词系统（BetterLyrics 对齐）

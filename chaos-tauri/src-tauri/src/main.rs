@@ -437,9 +437,14 @@ async fn now_playing_snapshot(
     max_thumbnail_bytes: Option<u32>,
     max_sessions: Option<u32>,
 ) -> Result<now_playing::NowPlayingSnapshot, String> {
+    let include_thumbnail = include_thumbnail.unwrap_or(true);
     let opt = now_playing::NowPlayingOptions {
-        include_thumbnail: include_thumbnail.unwrap_or(false),
-        max_thumbnail_bytes: max_thumbnail_bytes.unwrap_or(262_144) as usize,
+        include_thumbnail,
+        max_thumbnail_bytes: max_thumbnail_bytes.unwrap_or(if include_thumbnail {
+            2_500_000
+        } else {
+            262_144
+        }) as usize,
         max_sessions: max_sessions.unwrap_or(32) as usize,
     };
     tokio::task::spawn_blocking(move || now_playing::snapshot(opt))
@@ -464,11 +469,19 @@ async fn lyrics_search(
         return Ok(Vec::new());
     }
 
-    let artist = artist.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let album = album.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let artist = artist
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let album = album
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let term = match artist {
-        Some(artist) => lyrics::model::LyricsSearchTerm::Info { title, artist, album },
+        Some(artist) => lyrics::model::LyricsSearchTerm::Info {
+            title,
+            artist,
+            album,
+        },
         None => lyrics::model::LyricsSearchTerm::Keyword { keyword: title },
     };
 
@@ -900,9 +913,8 @@ fn init_lyrics_tray(app: &AppHandle) -> Result<(), String> {
             .detection_enabled
             .load(Ordering::Relaxed);
 
-        let item_open =
-            MenuItem::with_id(app, "tray_open_main", "打开主界面", true, None::<&str>)
-                .map_err(|e| e.to_string())?;
+        let item_open = MenuItem::with_id(app, "tray_open_main", "打开主界面", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
 
         let item_detect =
             CheckMenuItemBuilder::with_id("tray_toggle_detection", "歌词检测（开/关）")
@@ -1220,7 +1232,9 @@ async fn open_overlay_window(app: AppHandle, opaque: Option<bool>) -> Result<(),
 }
 
 #[tauri::command]
-fn lyrics_get_current(state: State<'_, LyricsWindowState>) -> Option<lyrics::model::LyricsSearchResult> {
+fn lyrics_get_current(
+    state: State<'_, LyricsWindowState>,
+) -> Option<lyrics::model::LyricsSearchResult> {
     state
         .current
         .lock()
@@ -1229,7 +1243,10 @@ fn lyrics_get_current(state: State<'_, LyricsWindowState>) -> Option<lyrics::mod
 }
 
 #[tauri::command]
-fn lyrics_settings_get(app: AppHandle, state: State<'_, LyricsAppState>) -> Result<LyricsAppSettings, String> {
+fn lyrics_settings_get(
+    app: AppHandle,
+    state: State<'_, LyricsAppState>,
+) -> Result<LyricsAppSettings, String> {
     let loaded = lyrics_app::load_settings(&app).unwrap_or_default();
     {
         let mut s = state.settings.lock().expect("lyrics settings mutex");
@@ -1281,10 +1298,7 @@ fn lyrics_set_current(
     state: State<'_, LyricsWindowState>,
     payload: lyrics::model::LyricsSearchResult,
 ) -> Result<(), String> {
-    *state
-        .current
-        .lock()
-        .expect("lyrics window state mutex") = Some(payload.clone());
+    *state.current.lock().expect("lyrics window state mutex") = Some(payload.clone());
     app.emit("lyrics_current_changed", payload)
         .map_err(|e| e.to_string())
 }
@@ -1447,16 +1461,21 @@ async fn open_lyrics_dock_window(app: AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let _ = w.show();
-    let _ = w.set_focus();
-    // Place it near the top-center of the current monitor (free-movable "narrow screen" lyrics window).
-    if let Ok(Some(m)) = w.current_monitor() {
+    // Place it near the top-center of the main window's monitor (avoid "lost window" on multi-monitor setups).
+    let mon = app
+        .get_webview_window("main")
+        .and_then(|mw| mw.current_monitor().ok().flatten())
+        .or_else(|| w.current_monitor().ok().flatten());
+    if let Some(m) = mon {
         let size = m.size();
         let pos = m.position();
         let x = pos.x + ((size.width as i32 - 420) / 2);
         let y = pos.y + 60;
         let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
+
+    let _ = w.show();
+    let _ = w.set_focus();
     let _ = app.emit(
         "chaos_window_state",
         WindowStatePayload {
@@ -1521,10 +1540,12 @@ async fn open_lyrics_float_window(app: AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let _ = w.show();
-    let _ = w.set_focus();
     // Snap to the top edge and span the current monitor width.
-    if let Ok(Some(m)) = w.current_monitor() {
+    let mon = app
+        .get_webview_window("main")
+        .and_then(|mw| mw.current_monitor().ok().flatten())
+        .or_else(|| w.current_monitor().ok().flatten());
+    if let Some(m) = mon {
         let size = m.size();
         let pos = m.position();
         let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
@@ -1536,6 +1557,9 @@ async fn open_lyrics_float_window(app: AppHandle) -> Result<(), String> {
             height: 72,
         }));
     }
+
+    let _ = w.show();
+    let _ = w.set_focus();
     let _ = app.emit(
         "chaos_window_state",
         WindowStatePayload {

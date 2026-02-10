@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cbindgen",
  "chaos-core",
@@ -1089,7 +1089,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-slint"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chaos-core",
  "embed-resource",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-tauri"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",

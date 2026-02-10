@@ -8,6 +8,7 @@
   import type { LyricsSearchResult, NowPlayingSession } from '@/shared/types'
   import { getActiveLine, parseLrc, type Timeline } from '@/shared/lyricsSync'
   import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
+  import { resolveWebviewWindow } from '@/shared/resolveWebviewWindow'
 
   type NowPlayingStatePayload = {
     supported: boolean
@@ -41,9 +42,16 @@
 
   let linesEl: HTMLDivElement | null = null
   let lineEls: Array<HTMLDivElement | null> = []
+  let centerPadPx = 120
 
   let lastNowEventAt = 0
   let lastLyricsEventAt = 0
+
+  async function ensureWin(): Promise<ReturnType<typeof getCurrentWebviewWindow> | null> {
+    if (win) return win
+    win = await resolveWebviewWindow('lyrics_dock')
+    return win
+  }
 
   function payloadKey(p: NowPlayingStatePayload): string {
     return `${p.app_id || ''}|${p.title || ''}|${p.artist || ''}|${p.album_title || ''}|${p.duration_ms || 0}`
@@ -110,18 +118,20 @@
   }
 
   async function startDrag() {
-    if (!win) return
+    const w = await ensureWin()
+    if (!w) return
     try {
-      await win.startDragging()
+      await w.startDragging()
     } catch {
       // ignore
     }
   }
 
   async function snapTo(side: 'left' | 'right') {
-    if (!win) return
+    const w = await ensureWin()
+    if (!w) return
     try {
-      const [size, mon] = await Promise.all([win.outerSize(), currentMonitor()])
+      const [size, mon] = await Promise.all([w.outerSize(), currentMonitor()])
       if (!mon) return
       const margin = 6
       const monLeft = mon.position.x
@@ -133,18 +143,29 @@
       const yMin = monTop + margin
       const yMax = Math.max(yMin, monBottom - size.height - margin)
       const y = Math.min(yMax, Math.max(yMin, monTop + margin))
-      await win.setPosition(new PhysicalPosition(x, y))
+      await w.setPosition(new PhysicalPosition(x, y))
     } catch {
       // ignore
     }
   }
 
   async function toggleAlwaysOnTop() {
-    if (!win) return
+    const w = await ensureWin()
+    if (!w) return
     try {
       const next = !alwaysOnTop
-      await win.setAlwaysOnTop(next)
+      await w.setAlwaysOnTop(next)
       alwaysOnTop = next
+    } catch {
+      // ignore
+    }
+  }
+
+  async function closeSelf() {
+    const w = await ensureWin()
+    if (!w) return
+    try {
+      await w.close()
     } catch {
       // ignore
     }
@@ -184,6 +205,15 @@
     }
   }
 
+	  function updateCenterPad() {
+	    if (!linesEl) return
+	    const minPad = 80
+	    const maxPad = 420
+	    const next = Math.floor(linesEl.clientHeight / 2) - 40
+	    centerPadPx = Math.max(minPad, Math.min(maxPad, next))
+	    requestAnimationFrame(() => scrollToActive(false))
+	  }
+
   onMount(() => {
     let disposed = false
     let unLyrics: (() => void) | undefined
@@ -192,14 +222,10 @@
     let stopAnim: (() => void) | undefined
     let stopPoll: (() => void) | undefined
     let stopDoc: (() => void) | undefined
-
-    try {
-      win = getCurrentWebviewWindow()
-    } catch {
-      win = null
-    }
+    let stopResize: (() => void) | undefined
 
     void (async () => {
+      win = await ensureWin()
       try {
         if (win) alwaysOnTop = await win.isAlwaysOnTop()
       } catch {
@@ -215,6 +241,7 @@
       stopAnim?.()
       stopPoll?.()
       stopDoc?.()
+      stopResize?.()
     }
     window.addEventListener('beforeunload', cleanup, { capture: true, once: true })
 
@@ -225,7 +252,7 @@
     stopDoc = () => document.removeEventListener('mousedown', onDocMouse, false)
 
     const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') void win?.close()
+      if (ev.key === 'Escape') void closeSelf()
       if (ev.key === 'F1') {
         ev.preventDefault()
         menuOpen = !menuOpen
@@ -332,22 +359,25 @@
     }, 2500)
     stopPoll = () => window.clearInterval(poll)
 
+    const onResize = () => updateCenterPad()
+    window.addEventListener('resize', onResize, true)
+    stopResize = () => window.removeEventListener('resize', onResize, true)
+    requestAnimationFrame(() => updateCenterPad())
+
     // Animation loop: compute active line from interpolated position.
     let raf = 0
     let prevIdx = -2
-    const tick = () => {
-      raf = requestAnimationFrame(tick)
-      if (!timeline || timeline.lines.length === 0) return
-      const playing = (nowPlaying?.playback_status || '').toLowerCase() === 'playing'
-      if (!playing) return
-      const pos = effectivePositionMs()
-      const a = getActiveLine(timeline, pos)
-      if (a.index !== activeIndex) activeIndex = a.index
-      if (a.index !== prevIdx) {
-        prevIdx = a.index
-        requestAnimationFrame(() => scrollToActive(true))
-      }
-    }
+	    const tick = () => {
+	      raf = requestAnimationFrame(tick)
+	      if (!timeline || timeline.lines.length === 0) return
+	      const pos = effectivePositionMs()
+	      const a = getActiveLine(timeline, pos)
+	      if (a.index !== activeIndex) activeIndex = a.index
+	      if (a.index !== prevIdx) {
+	        prevIdx = a.index
+	        requestAnimationFrame(() => scrollToActive(true))
+	      }
+	    }
     raf = requestAnimationFrame(tick)
     stopAnim = () => cancelAnimationFrame(raf)
 
@@ -358,7 +388,7 @@
 <div class="root">
   <div class="titlebar">
     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-    <div class="drag" on:mousedown|preventDefault={() => void startDrag()}>
+    <div class="drag" data-tauri-drag-region on:mousedown={() => void startDrag()}>
       {#if coverUrl}
         <img class="cover" alt="cover" src={coverUrl} />
       {:else}
@@ -375,7 +405,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
     <div class="actions" on:mousedown|stopPropagation>
       <button class="icon" title="菜单 (F1)" on:click={() => (menuOpen = !menuOpen)}>⋯</button>
-      <button class="icon danger" title="关闭" on:click={() => void win?.close()}>×</button>
+      <button class="icon danger" title="关闭" on:click={() => void closeSelf()}>×</button>
     </div>
 
     {#if menuOpen}
@@ -408,16 +438,6 @@
         >
           贴右
         </button>
-        <div class="sep"></div>
-        <button
-          class="menu-item danger"
-          on:click={() => {
-            menuOpen = false
-            void win?.close()
-          }}
-        >
-          关闭窗口
-        </button>
       </div>
     {/if}
   </div>
@@ -426,7 +446,7 @@
     {#if !timeline || timeline.lines.length === 0}
       <div class="empty">暂无带时间轴的歌词</div>
     {:else}
-      <div class="lines" bind:this={linesEl}>
+      <div class="lines" bind:this={linesEl} style:--center-pad={`${centerPadPx}px`}>
         {#each timeline.lines as l, idx (idx)}
           <div class={lineClass(idx)} bind:this={lineEls[idx]}>
             <div class="orig">{l.text}</div>
@@ -445,8 +465,8 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    color: rgba(255, 255, 255, 0.95);
-    background: radial-gradient(circle at 20% 15%, rgba(255, 85, 170, 0.95), rgba(0, 120, 255, 0.92));
+    color: var(--text-primary);
+    background: var(--panel-bg);
     position: relative;
     overflow: hidden;
   }
@@ -459,10 +479,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(0, 0, 0, 0.12);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--card-bg);
   }
 
   .drag {
@@ -479,13 +497,13 @@
     height: 40px;
     border-radius: 10px;
     object-fit: cover;
-    border: 1px solid rgba(255, 255, 255, 0.20);
-    background: rgba(0, 0, 0, 0.16);
+    border: 1px solid var(--border-color);
+    background: var(--hover-bg);
     flex: 0 0 auto;
   }
 
   .cover.placeholder {
-    background: rgba(0, 0, 0, 0.18);
+    background: var(--hover-bg);
   }
 
   .meta {
@@ -505,7 +523,7 @@
   .sub {
     margin-top: 4px;
     font-size: 12px;
-    opacity: 0.86;
+    color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -521,21 +539,20 @@
     width: 30px;
     height: 28px;
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background: rgba(0, 0, 0, 0.18);
-    color: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border-color);
+    background: var(--button-secondary-bg);
+    color: var(--button-secondary-fg);
     cursor: pointer;
     line-height: 1;
     font-size: 18px;
   }
 
   .icon:hover {
-    background: rgba(255, 255, 255, 0.14);
+    background: var(--button-secondary-bg-hover);
   }
 
   .icon.danger:hover {
-    background: rgba(255, 80, 80, 0.16);
-    border-color: rgba(255, 80, 80, 0.45);
+    background: color-mix(in srgb, #ff5050 18%, var(--button-secondary-bg-hover));
   }
 
   .menu {
@@ -545,11 +562,9 @@
     width: 160px;
     padding: 6px;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(20, 20, 20, 0.72);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border-color);
+    background: var(--panel-bg);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
     z-index: 5;
   }
 
@@ -560,27 +575,27 @@
     border-radius: 10px;
     border: 1px solid transparent;
     background: transparent;
-    color: rgba(255, 255, 255, 0.92);
+    color: var(--text-primary);
     cursor: pointer;
     font-size: 13px;
   }
 
   .menu-item:hover {
-    background: rgba(255, 255, 255, 0.10);
+    background: var(--hover-bg);
   }
 
   .menu-item.active {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.18);
+    background: var(--selected-bg);
+    border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   }
 
   .menu-item.danger:hover {
-    background: rgba(255, 80, 80, 0.16);
+    background: color-mix(in srgb, #ff5050 18%, transparent);
   }
 
   .sep {
     height: 1px;
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--border-color);
     margin: 6px 0;
   }
 
@@ -592,7 +607,7 @@
   }
 
   .empty {
-    opacity: 0.85;
+    color: var(--text-secondary);
     font-size: 12px;
   }
 
@@ -602,52 +617,49 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 6px 2px 40px;
+    padding: var(--center-pad, 120px) 2px var(--center-pad, 120px);
     scroll-behavior: smooth;
   }
 
   .row {
-    opacity: 0.55;
-    filter: blur(0px);
-    transition: opacity 140ms ease, filter 140ms ease, transform 140ms ease;
+    opacity: 0.68;
+    transition: opacity 140ms ease, transform 140ms ease, background 140ms ease;
+    padding: 6px 8px;
+    border-radius: 10px;
   }
 
   .row.near {
-    opacity: 0.72;
+    opacity: 0.78;
   }
 
   .row.mid {
-    opacity: 0.46;
-    filter: blur(0.5px);
+    opacity: 0.70;
   }
 
   .row.far {
-    opacity: 0.22;
-    filter: blur(1.5px);
+    opacity: 0.66;
   }
 
   .row.active {
     opacity: 1;
-    filter: blur(0px);
     transform: translateX(2px);
+    background: var(--selected-bg);
   }
 
   .orig {
-    font-size: 22px;
+    font-size: 20px;
     line-height: 1.25;
     font-weight: 900;
-    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
   }
 
   .row:not(.active) .orig {
     font-size: 16px;
-    font-weight: 700;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    font-weight: 800;
   }
 
   .trans {
     margin-top: 6px;
-    font-size: 13px;
-    opacity: 0.92;
+    font-size: 12px;
+    color: var(--text-secondary);
   }
 </style>

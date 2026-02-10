@@ -104,6 +104,27 @@ fn sniff_mime(bytes: &[u8]) -> &'static str {
     if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
         return "image/jpeg";
     }
+    // GIF signature: GIF87a / GIF89a
+    if bytes.len() >= 6 && (&bytes[..6] == b"GIF87a" || &bytes[..6] == b"GIF89a") {
+        return "image/gif";
+    }
+    // WEBP signature: RIFF....WEBP
+    if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return "image/webp";
+    }
+    // BMP signature: 42 4D
+    if bytes.len() >= 2 && bytes[0] == 0x42 && bytes[1] == 0x4D {
+        return "image/bmp";
+    }
+    // ICO signature: 00 00 01 00
+    if bytes.len() >= 4
+        && bytes[0] == 0x00
+        && bytes[1] == 0x00
+        && bytes[2] == 0x01
+        && bytes[3] == 0x00
+    {
+        return "image/x-icon";
+    }
     "application/octet-stream"
 }
 
@@ -156,17 +177,32 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
         // Blocking `.join()` keeps the call stack synchronous, which tends to be more robust for WinRT usage
         // across different host environments.
         let stream = thumb.OpenReadAsync()?.join()?;
-        let size_u64 = stream.Size().unwrap_or(0);
-        let want = (size_u64 as usize).min(max_bytes);
-        if want == 0 {
-            return Ok(Vec::new());
-        }
         let input: IInputStream = stream.GetInputStreamAt(0)?;
         let reader = DataReader::CreateDataReader(&input)?;
-        let loaded = reader.LoadAsync(want as u32)?.join()?;
-        let mut buf = vec![0u8; loaded as usize];
-        reader.ReadBytes(&mut buf)?;
-        Ok(buf)
+
+        // Do not rely on `stream.Size()`:
+        // - in practice, some GSMTC thumbnail streams report `Size=0` even though data is readable.
+        // - using `Size` would cause us to incorrectly return an empty thumbnail.
+        const CHUNK: usize = 128 * 1024;
+        let mut out: Vec<u8> = Vec::new();
+        let size_u64 = stream.Size().unwrap_or(0);
+        if size_u64 > 0 {
+            out.reserve((size_u64 as usize).min(max_bytes));
+        }
+        let mut total: usize = 0;
+        while total < max_bytes {
+            let want = (max_bytes - total).min(CHUNK);
+            let loaded = reader.LoadAsync(want as u32)?.join()?;
+            if loaded == 0 {
+                break;
+            }
+
+            let mut buf = vec![0u8; loaded as usize];
+            reader.ReadBytes(&mut buf)?;
+            out.extend_from_slice(&buf);
+            total = out.len();
+        }
+        Ok(out)
     }
 
     let max_sessions = opt.max_sessions.max(1).min(128);
@@ -285,7 +321,21 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
 
                     // Store the stream reference and fetch bytes later for the picked session only.
                     if opt.include_thumbnail {
-                        thumb_ref = props.Thumbnail().ok();
+                        match props.Thumbnail() {
+                            Ok(v) => {
+                                thumb_ref = Some(v);
+                            }
+                            Err(e) => {
+                                let msg = format!("thumbnail_ref: {e}");
+                                item.error = Some(match item.error.take() {
+                                    Some(prev) => format!("{prev}; {msg}"),
+                                    None => msg,
+                                });
+                            }
+                        }
+                        if thumb_ref.is_none() && item.error.is_none() {
+                            item.error = Some("thumbnail_ref: none".to_string());
+                        }
                     }
                 }
                 Err(e) => {
@@ -312,26 +362,82 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
     let pick_idx = pick_now_playing_index(&out_sessions);
 
     if opt.include_thumbnail {
+        fn same_track(a: &NowPlayingSession, b: &NowPlayingSession) -> bool {
+            a.title == b.title
+                && a.artist == b.artist
+                && a.album_title == b.album_title
+                && a.duration_ms == b.duration_ms
+        }
+
+        let cur_idx = out_sessions.iter().position(|s| s.is_current);
+        let mut try_indices: Vec<usize> = Vec::new();
         if let Some(i) = pick_idx {
-            if let Some(Some(thumb)) = thumb_refs.get(i) {
-                match read_thumbnail_bytes(thumb, max_thumb) {
-                    Ok(bytes) => {
-                        if !bytes.is_empty() {
-                            let mime = sniff_mime(&bytes).to_string();
-                            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-                            if let Some(item) = out_sessions.get_mut(i) {
-                                item.thumbnail = Some(NowPlayingThumbnail { mime, base64: b64 });
+            try_indices.push(i);
+        }
+        if let Some(c) = cur_idx {
+            if Some(c) != pick_idx {
+                try_indices.push(c);
+            }
+        }
+
+        for idx in try_indices {
+            let Some(Some(thumb)) = thumb_refs.get(idx) else {
+                continue;
+            };
+            match read_thumbnail_bytes(thumb, max_thumb) {
+                Ok(bytes) => {
+                    if bytes.is_empty() {
+                        // No bytes even though a thumbnail reference exists: record a hint for debugging.
+                        if let Some(item) = out_sessions.get_mut(idx) {
+                            if item.error.is_none() {
+                                item.error = Some("thumbnail: empty".to_string());
+                            }
+                        }
+                        continue;
+                    }
+
+                    let mime = sniff_mime(&bytes).to_string();
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+                    if let Some(item) = out_sessions.get_mut(idx) {
+                        item.thumbnail = Some(NowPlayingThumbnail { mime, base64: b64 });
+                    }
+
+                    // If the picked session didn't get a thumbnail, but the current session did,
+                    // and they look like the same track, copy the thumbnail to the picked one
+                    // so callers can still show cover art.
+                    if let (Some(p), Some(c)) = (pick_idx, cur_idx) {
+                        if out_sessions
+                            .get(p)
+                            .and_then(|s| s.thumbnail.as_ref())
+                            .is_none()
+                            && idx == c
+                        {
+                            let same = out_sessions
+                                .get(p)
+                                .zip(out_sessions.get(c))
+                                .map(|(a, b)| same_track(a, b))
+                                .unwrap_or(false);
+                            if same {
+                                let t = out_sessions[c].thumbnail.clone();
+                                if let Some(item) = out_sessions.get_mut(p) {
+                                    item.thumbnail = t;
+                                }
                             }
                         }
                     }
-                    Err(e) => {
-                        if let Some(item) = out_sessions.get_mut(i) {
-                            let msg = format!("thumbnail: {e}");
-                            item.error = Some(match item.error.take() {
-                                Some(prev) => format!("{prev}; {msg}"),
-                                None => msg,
-                            });
-                        }
+
+                    // Once the picked session has a thumbnail, stop.
+                    if Some(idx) == pick_idx {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    if let Some(item) = out_sessions.get_mut(idx) {
+                        let msg = format!("thumbnail: {e}");
+                        item.error = Some(match item.error.take() {
+                            Some(prev) => format!("{prev}; {msg}"),
+                            None => msg,
+                        });
                     }
                 }
             }
@@ -393,6 +499,10 @@ mod tests {
     fn mime_sniff_png_jpeg_unknown() {
         assert_eq!(sniff_mime(b"\x89PNG\r\n\x1a\nxxxx"), "image/png");
         assert_eq!(sniff_mime(b"\xff\xd8\xff\xe0xxxx"), "image/jpeg");
+        assert_eq!(sniff_mime(b"GIF89a...."), "image/gif");
+        assert_eq!(sniff_mime(b"RIFF\x00\x00\x00\x00WEBP"), "image/webp");
+        assert_eq!(sniff_mime(b"BM...."), "image/bmp");
+        assert_eq!(sniff_mime(b"\x00\x00\x01\x00...."), "image/x-icon");
         assert_eq!(sniff_mime(b"nope"), "application/octet-stream");
         assert_eq!(sniff_mime(b""), "application/octet-stream");
     }

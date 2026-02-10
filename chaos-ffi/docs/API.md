@@ -364,9 +364,24 @@ int32_t chaos_danmaku_set_callback(void* handle, chaos_danmaku_callback cb, void
 ```
 
 - 传入 `cb = NULL` 可关闭回调。
+- 关闭回调示例：
+
+```c
+chaos_danmaku_set_callback(handle, NULL, NULL);
+```
 - `event_json_utf8` 指针仅在**回调执行期间**有效（回调返回后 Rust 会释放）。
 - 回调在后台线程触发（不是 UI 线程）。
 
 ### `int32_t chaos_danmaku_disconnect(void* handle)`
 
 停止 session、释放 handle，并保证函数返回后不再触发回调。
+
+参数：
+- `handle`：必须是 `chaos_danmaku_connect` 返回的非空指针；调用成功后 handle 失效，不可复用。
+
+返回值：
+- `0`：成功。
+- `-1`：失败；请调用 `chaos_ffi_last_error_json()` 获取错误 JSON（读取后会清空），并使用 `chaos_ffi_string_free` 释放。
+
+补充说明：
+- `disconnect` 内部会先停止 core session，再 join 后台转发线程，因此 **保证返回后不再触发回调**。

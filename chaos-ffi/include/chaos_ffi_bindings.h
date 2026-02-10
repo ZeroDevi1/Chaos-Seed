@@ -60,10 +60,28 @@ char *chaos_livestream_resolve_variant2_json(const char *site_utf8,
 
 void *chaos_danmaku_connect(const char *input_utf8);
 
+/**
+ * Set or clear the danmaku callback.
+ *
+ * - Pass `cb = NULL` to disable callbacks.
+ * - Callback runs on a background thread (not the UI thread).
+ * - `event_json_utf8` is only valid during the callback invocation.
+ *
+ * Returns 0 on success, -1 on failure. On failure, call `chaos_ffi_last_error_json()`.
+ */
 int32_t chaos_danmaku_set_callback(void *handle, ChaosDanmakuCallback cb, void *user_data);
 
 char *chaos_danmaku_poll_json(void *handle, uint32_t max_events);
 
+/**
+ * Disconnect and dispose the danmaku session.
+ *
+ * - `handle` must be non-NULL and previously returned by `chaos_danmaku_connect`.
+ * - After a successful call, the handle becomes invalid and must not be reused.
+ * - Guarantees no further callbacks after the function returns.
+ *
+ * Returns 0 on success, -1 on failure. On failure, call `chaos_ffi_last_error_json()`.
+ */
 int32_t chaos_danmaku_disconnect(void *handle);
 
 #endif  /* CHAOS_FFI_H */
