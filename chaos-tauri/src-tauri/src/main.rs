@@ -196,7 +196,7 @@ async fn stream_open(
 
         let mut stream = resp.bytes_stream();
         while let Some(item) = stream.next().await {
-            let bytes = match item {
+            let chunk: reqwest::bytes::Bytes = match item {
                 Ok(b) => b,
                 Err(e) => {
                     let mut st = sess.state.lock().await;
@@ -218,7 +218,7 @@ async fn stream_open(
             }
 
             let mut st = sess.state.lock().await;
-            let v = bytes.to_vec();
+            let v = chunk.to_vec();
             st.buffered = st.buffered.saturating_add(v.len());
             st.queue.push_back(v);
             sess.notify.notify_waiters();
@@ -266,20 +266,23 @@ async fn stream_read(
             } else {
                 let mut out: Vec<u8> = Vec::with_capacity(max_len);
                 while out.len() < max_len {
-                    let Some(front) = st.queue.front() else {
+                    let Some(front) = st.queue.pop_front() else {
                         break;
                     };
-                    let avail = front.len().saturating_sub(st.head_off);
+                    let start = st.head_off;
+                    let avail = front.len().saturating_sub(start);
                     if avail == 0 {
-                        st.queue.pop_front();
                         st.head_off = 0;
                         continue;
                     }
                     let take = std::cmp::min(avail, max_len - out.len());
-                    out.extend_from_slice(&front[st.head_off..st.head_off + take]);
-                    st.head_off += take;
-                    if st.head_off >= front.len() {
-                        st.queue.pop_front();
+                    out.extend_from_slice(&front[start..start + take]);
+                    let next_off = start + take;
+                    if next_off < front.len() {
+                        // Put the remaining back as the new head.
+                        st.head_off = next_off;
+                        st.queue.push_front(front);
+                    } else {
                         st.head_off = 0;
                     }
                 }
