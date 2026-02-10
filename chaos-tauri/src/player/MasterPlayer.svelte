@@ -3,6 +3,7 @@
 
   import { createEngine } from './engineFactory'
   import type { PlayerBootRequest, PlayerEngine, PlayerEngineKind, PlayerSource } from './types'
+  import { expandHttpToHttps } from './urlNormalize'
   import { inferStreamType } from './utils'
 
   export let boot: PlayerBootRequest | null = null
@@ -82,6 +83,7 @@
     // Field feedback suggests some BiliLive primary hosts can fail in embedded webviews.
     // Prefer backups first for BiliLive; still keep a fallback chain for other sites too.
     const candidates = (req.site === 'bili_live' ? [...backups, primary] : urlsRaw)
+      .flatMap((u) => expandHttpToHttps(u))
       .map((u) => u.trim())
       .filter(Boolean)
       .filter((u, idx, arr) => arr.indexOf(u) === idx) // de-dupe while preserving order

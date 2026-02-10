@@ -1,11 +1,6 @@
-import { invoke } from '@tauri-apps/api/core'
+import { fetchDanmakuImage } from '../shared/danmakuApi'
 
 import type { DanmakuUiMessage } from '../shared/types'
-
-type DanmakuImageReply = {
-  mime: string
-  bytes: number[]
-}
 
 const TRANSPARENT_PIXEL =
   'data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA='
@@ -52,11 +47,7 @@ async function fetchImageObjectUrl(msg: DanmakuUiMessage, url: string): Promise<
   if (existing) return existing
 
   const p = (async () => {
-    const reply = await invoke<DanmakuImageReply>('danmaku_fetch_image', {
-      url,
-      site: msg.site,
-      room_id: msg.room_id
-    })
+    const reply = await fetchDanmakuImage({ url, site: msg.site, roomId: msg.room_id })
     const mime = reply.mime?.trim() || 'image/png'
     const buf = new Uint8Array(reply.bytes)
     const blob = new Blob([buf], { type: mime })

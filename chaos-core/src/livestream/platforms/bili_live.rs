@@ -169,13 +169,27 @@ async fn fetch_room_play_info(
     parse_room_playinfo_value(&json, if qn > 0 { Some(qn) } else { None })
 }
 
+async fn fetch_room_play_info_list(
+    http: &reqwest::Client,
+    cfg: &LivestreamConfig,
+    rid: i64,
+) -> Result<Vec<StreamVariant>, LivestreamError> {
+    // IMPORTANT: for quality enumeration, align with dart_simple_live and do NOT pass `qn`.
+    // Some rooms appear to return a "collapsed" accept_qn list when `qn=0` is provided.
+    let base = cfg.endpoints.bili_api_base.trim_end_matches('/');
+    let url = format!(
+        "{base}/xlive/web-room/v2/index/getRoomPlayInfo?room_id={rid}&protocol=0,1&format=0,1,2&codec=0,1&platform=web&ptype=8&dolby=5"
+    );
+    let json = get_json(http, &url).await?;
+    parse_room_playinfo_value(&json, None)
+}
+
 async fn fetch_playinfo_list(
     http: &reqwest::Client,
     cfg: &LivestreamConfig,
     rid: i64,
 ) -> Result<Vec<StreamVariant>, LivestreamError> {
-    // Use qn=0 to request the full accept_qn list (aligned with dart_simple_live behavior).
-    match fetch_room_play_info(http, cfg, rid, 0).await {
+    match fetch_room_play_info_list(http, cfg, rid).await {
         Ok(v) => Ok(v),
         Err(e @ LivestreamError::NeedPassword) => Err(e),
         Err(_) => match fetch_play_url(http, cfg, rid, 0).await {

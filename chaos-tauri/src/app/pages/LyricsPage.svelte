@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core'
+  import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
 
   let busy = false
   let includeThumbnail = false
@@ -9,10 +9,10 @@
     busy = true
     outText = '正在获取...'
     try {
-      const s = await invoke<string>('now_playing_snapshot', {
-        include_thumbnail: includeThumbnail,
-        max_thumbnail_bytes: 262_144,
-        max_sessions: 32
+      const s = await nowPlayingSnapshot({
+        includeThumbnail,
+        maxThumbnailBytes: 262_144,
+        maxSessions: 32
       })
       outText = s || '(empty)'
     } catch (e) {
@@ -72,4 +72,3 @@
     accent-color: var(--accent);
   }
 </style>
-

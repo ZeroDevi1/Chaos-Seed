@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core'
   import { open } from '@tauri-apps/plugin-dialog'
 
+  import { subtitleDownload, subtitleSearch } from '@/shared/subtitleApi'
   import type { ThunderSubtitleItem } from '@/shared/types'
 
   let query = ''
@@ -64,9 +64,9 @@
     busy = true
     status = '正在搜索...'
     try {
-      const out = await invoke<ThunderSubtitleItem[]>('subtitle_search', {
+      const out = await subtitleSearch({
         query: q,
-        min_score: minScore,
+        minScore,
         lang: lang.trim() ? lang.trim() : null,
         limit: normalizeLimit(limit)
       })
@@ -85,11 +85,7 @@
     if (!picked || Array.isArray(picked)) return
     status = `下载中 -> ${picked} ...`
     try {
-      const out = await invoke<string>('subtitle_download', {
-        item: it,
-        out_dir: picked,
-        overwrite: false
-      })
+      const out = await subtitleDownload({ item: it, outDir: picked, overwrite: false })
       status = `完成：${out}`
     } catch (e) {
       status = `下载失败：${String(e)}`

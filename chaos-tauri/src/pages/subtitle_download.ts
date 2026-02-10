@@ -1,7 +1,7 @@
-import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
 import { clear, el, type Cleanup } from '../shared/dom'
+import { subtitleDownload, subtitleSearch } from '../shared/subtitleApi'
 import type { ThunderSubtitleItem } from '../shared/types'
 
 function parseOptNum(s: string): number | null {
@@ -127,11 +127,7 @@ export async function buildSubtitleDownloadPage(root: HTMLElement): Promise<Clea
         if (!picked || Array.isArray(picked)) return
         status.textContent = `下载中 -> ${picked} ...`
         try {
-          const out = await invoke<string>('subtitle_download', {
-            item: it,
-            out_dir: picked,
-            overwrite: false
-          })
+          const out = await subtitleDownload({ item: it, outDir: picked, overwrite: false })
           status.textContent = `完成：${out}`
         } catch (e) {
           status.textContent = `下载失败：${String(e)}`
@@ -156,9 +152,9 @@ export async function buildSubtitleDownloadPage(root: HTMLElement): Promise<Clea
     setBusy(true)
     status.textContent = '正在搜索...'
     try {
-      const items = await invoke<ThunderSubtitleItem[]>('subtitle_search', {
+      const items = await subtitleSearch({
         query,
-        min_score: parseOptNum(minScore.value),
+        minScore: parseOptNum(minScore.value),
         lang: lang.value.trim() ? lang.value.trim() : null,
         limit: parseLimit(limit.value)
       })
@@ -179,4 +175,3 @@ export async function buildSubtitleDownloadPage(root: HTMLElement): Promise<Clea
 
   return undefined
 }
-

@@ -4,12 +4,8 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
   import { onMount } from 'svelte'
 
+  import { fetchDanmakuImage } from '@/shared/danmakuApi'
   import type { DanmakuUiMessage } from '@/shared/types'
-
-  type DanmakuImageReply = {
-    mime: string
-    bytes: number[]
-  }
 
   type Sprite = {
     text: string
@@ -212,11 +208,7 @@
         // Prefer proxy-loading via Rust to avoid hotlink/referrer issues.
         let objectUrl: string | undefined
         try {
-          const reply = await invoke<DanmakuImageReply>('danmaku_fetch_image', {
-            url,
-            site: msg.site,
-            room_id: msg.room_id
-          })
+          const reply = await fetchDanmakuImage({ url, site: msg.site, roomId: msg.room_id })
           const mime = reply.mime?.trim() || 'image/png'
           const buf = new Uint8Array(reply.bytes)
           const blob = new Blob([buf], { type: mime })

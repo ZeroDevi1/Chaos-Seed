@@ -43,6 +43,14 @@ async fn decode_manifest_room_play_info_ok() {
         }));
     });
 
+    let bad_qn0 = server.mock(|when, then| {
+        // Guard: quality enumeration should NOT send qn=0 (align with dart_simple_live).
+        when.method(GET)
+            .path("/xlive/web-room/v2/index/getRoomPlayInfo")
+            .query_param("qn", "0");
+        then.status(500).body("unexpected qn=0");
+    });
+
     server.mock(|when, then| {
         when.method(GET)
             .path("/xlive/web-room/v2/index/getRoomPlayInfo");
@@ -93,6 +101,7 @@ async fn decode_manifest_room_play_info_ok() {
         .await
         .expect("manifest");
 
+    assert_eq!(bad_qn0.hits(), 0, "should not request getRoomPlayInfo with qn=0");
     assert_eq!(man.site, Site::BiliLive);
     assert_eq!(man.room_id, "999");
     assert_eq!(man.info.title, "t");
@@ -141,41 +150,12 @@ async fn decode_manifest_resolves_highest_quality_to_avoid_single_variant() {
         }));
     });
 
-    // First call (qn=0): server reports current_qn=1000 (low), accept_qn has higher options.
-    server.mock(|when, then| {
+    let bad_qn0 = server.mock(|when, then| {
+        // Guard: quality enumeration should NOT send qn=0 (align with dart_simple_live).
         when.method(GET)
             .path("/xlive/web-room/v2/index/getRoomPlayInfo")
             .query_param("qn", "0");
-        then.status(200).json_body(serde_json::json!({
-            "code": 0,
-            "data": {
-                "encrypted": false,
-                "pwd_verified": true,
-                "playurl_info": {
-                    "playurl": {
-                        "g_qn_desc": [
-                            {"qn": 1000, "desc": "高清"},
-                            {"qn": 2000, "desc": "原画"}
-                        ],
-                        "stream": [{
-                            "protocol_name": "http_stream",
-                            "format": [{
-                                "format_name": "flv",
-                                "codec": [{
-                                    "codec_name": "avc",
-                                    "current_qn": 1000,
-                                    "accept_qn": [1000,2000],
-                                    "base_url": "/live-bvc/low.flv",
-                                    "url_info": [
-                                        {"host": "https://up-mirror.bilivideo.com", "extra": "?x=1"}
-                                    ]
-                                }]
-                            }]
-                        }]
-                    }
-                }
-            }
-        }));
+        then.status(500).body("unexpected qn=0");
     });
 
     // Second call (qn=2000): server honors highest qn and returns a URL for it.
@@ -215,6 +195,41 @@ async fn decode_manifest_resolves_highest_quality_to_avoid_single_variant() {
         }));
     });
 
+    // First call (no qn): server reports current_qn=1000 (low), accept_qn has higher options.
+    server.mock(|when, then| {
+        when.method(GET).path("/xlive/web-room/v2/index/getRoomPlayInfo");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": {
+                "encrypted": false,
+                "pwd_verified": true,
+                "playurl_info": {
+                    "playurl": {
+                        "g_qn_desc": [
+                            {"qn": 1000, "desc": "高清"},
+                            {"qn": 2000, "desc": "原画"}
+                        ],
+                        "stream": [{
+                            "protocol_name": "http_stream",
+                            "format": [{
+                                "format_name": "flv",
+                                "codec": [{
+                                    "codec_name": "avc",
+                                    "current_qn": 1000,
+                                    "accept_qn": [1000,2000],
+                                    "base_url": "/live-bvc/low.flv",
+                                    "url_info": [
+                                        {"host": "https://up-mirror.bilivideo.com", "extra": "?x=1"}
+                                    ]
+                                }]
+                            }]
+                        }]
+                    }
+                }
+            }
+        }));
+    });
+
     let cfg = LivestreamConfig {
         endpoints: Endpoints {
             bili_api_base: base.clone(),
@@ -229,6 +244,7 @@ async fn decode_manifest_resolves_highest_quality_to_avoid_single_variant() {
         .await
         .expect("manifest");
 
+    assert_eq!(bad_qn0.hits(), 0, "should not request getRoomPlayInfo with qn=0");
     assert_eq!(man.site, Site::BiliLive);
     assert_eq!(man.room_id, "1010");
     assert!(man.variants.len() >= 2);
