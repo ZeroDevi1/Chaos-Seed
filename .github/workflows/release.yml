@@ -1,0 +1,75 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (1.93.0)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.0"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack (pnpm)
+        shell: pwsh
+        run: corepack enable
+
+      - name: Build chaos-ffi (release)
+        shell: pwsh
+        run: cargo build -p chaos-ffi --release
+
+      - name: Package chaos-ffi
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $dll = Join-Path "target/release" "chaos_ffi.dll"
+          if (!(Test-Path $dll)) { throw "missing $dll" }
+          $hdr = Join-Path "chaos-ffi/include" "chaos_ffi_bindings.h"
+          if (!(Test-Path $hdr)) { throw "missing $hdr" }
+          Compress-Archive -Force -Path $dll, $hdr -DestinationPath dist/chaos-ffi-windows-x86_64.zip
+
+      - name: Install frontend deps
+        shell: pwsh
+        run: pnpm -C chaos-tauri install --frozen-lockfile
+
+      - name: Build chaos-tauri (no-bundle)
+        shell: pwsh
+        run: pnpm -C chaos-tauri run tauri:build:nobundle
+
+      - name: Package chaos-tauri
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $bundleDir = Join-Path "chaos-tauri/src-tauri/target/release" "bundle"
+          if (Test-Path $bundleDir) {
+            Compress-Archive -Force -Path $bundleDir -DestinationPath dist/chaos-tauri-windows-x86_64.zip
+            exit 0
+          }
+          $exe = Get-ChildItem -Path "chaos-tauri/src-tauri/target/release" -Filter "*.exe" | Select-Object -First 1
+          if ($null -eq $exe) { throw "no exe found under chaos-tauri/src-tauri/target/release" }
+          Compress-Archive -Force -Path $exe.FullName -DestinationPath dist/chaos-tauri-windows-x86_64.zip
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/chaos-ffi-windows-x86_64.zip
+            dist/chaos-tauri-windows-x86_64.zip
+

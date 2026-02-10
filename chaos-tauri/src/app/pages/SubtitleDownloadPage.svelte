@@ -107,7 +107,7 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <fluent-text-field
             class="input field-query"
-            placeholder="例如：泽塔奥特曼 / 电影名 / 剧名（回车搜索）"
+            placeholder=""
             value={query}
             disabled={busy}
             on:input={onQueryInput}

@@ -33,6 +33,10 @@ pub struct NowPlayingSession {
     pub album_title: Option<String>,
     pub position_ms: Option<u64>,
     pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub song_id: Option<String>,
     pub thumbnail: Option<NowPlayingThumbnail>,
     pub error: Option<String>,
 }
@@ -200,6 +204,8 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
             album_title: None,
             position_ms: None,
             duration_ms: None,
+            genres: Vec::new(),
+            song_id: None,
             thumbnail: None,
             error: None,
         };
@@ -252,6 +258,26 @@ pub fn snapshot(opt: NowPlayingOptions) -> Result<NowPlayingSnapshot, NowPlaying
                     item.title = (!title.trim().is_empty()).then_some(title);
                     item.artist = (!artist.trim().is_empty()).then_some(artist);
                     item.album_title = (!album.trim().is_empty()).then_some(album);
+
+                    if let Ok(gs) = props.Genres() {
+                        let mut genres: Vec<String> = Vec::new();
+                        for g in gs {
+                            let s = g.to_string();
+                            if !s.trim().is_empty() {
+                                genres.push(s);
+                            }
+                        }
+                        item.song_id = genres.iter().find_map(|g| {
+                            if let Some(x) = g.strip_prefix("NCM-") {
+                                return Some(x.to_string());
+                            }
+                            if let Some(x) = g.strip_prefix("QQ-") {
+                                return Some(x.to_string());
+                            }
+                            None
+                        });
+                        item.genres = genres;
+                    }
 
                     if opt.include_thumbnail {
                         if let Ok(thumb) = props.Thumbnail() {
@@ -325,6 +351,8 @@ mod tests {
                 album_title: None,
                 position_ms: None,
                 duration_ms: None,
+                genres: Vec::new(),
+                song_id: None,
                 thumbnail: None,
                 error: None,
             },
@@ -337,6 +365,8 @@ mod tests {
                 album_title: None,
                 position_ms: None,
                 duration_ms: None,
+                genres: Vec::new(),
+                song_id: None,
                 thumbnail: None,
                 error: None,
             },

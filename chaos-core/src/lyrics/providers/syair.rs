@@ -119,6 +119,7 @@ impl SyairProvider {
             artist: None,
             album: None,
             duration_ms: None,
+            match_percentage: 0,
             quality: 0.0,
             matched: false,
             has_translation: false,
@@ -134,4 +135,3 @@ impl SyairProvider {
 pub struct SyairToken {
     pub(crate) link: String,
 }
-

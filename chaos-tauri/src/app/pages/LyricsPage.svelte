@@ -1,9 +1,12 @@
 <script lang="ts">
+  import { listen } from '@tauri-apps/api/event'
   import { nowPlayingSnapshot } from '@/shared/nowPlayingApi'
   import { lyricsSearch } from '@/shared/lyricsApi'
   import { openLyricsWindow, setLyricsWindowPayload, type LyricsWindowMode } from '@/shared/lyricsWindowApi'
   import { formatForDisplay, type DisplayRow } from '@/shared/lyricsFormat'
   import type { LyricsSearchResult, NowPlayingSnapshot } from '@/shared/types'
+  import { invoke } from '@tauri-apps/api/core'
+  import { onMount } from 'svelte'
 
   let includeThumbnail = false
 
@@ -12,11 +15,14 @@
   let status = ''
 
   let snapshot: NowPlayingSnapshot | null = null
+  let liveNowPlaying: any | null = null
+  let detectionEnabled = false
+  let currentItem: LyricsSearchResult | null = null
 
   let items: LyricsSearchResult[] = []
   let selectedKey = ''
 
-  let windowMode: LyricsWindowMode = 'chat'
+  let windowMode: LyricsWindowMode = 'dock'
 
   function itemKey(it: LyricsSearchResult): string {
     // Avoid collisions across services: tokens are not guaranteed globally unique.
@@ -25,6 +31,66 @@
 
   $: selectedItem = items.find((it) => itemKey(it) === selectedKey) ?? null
   $: displayRows = formatForDisplay(selectedItem)
+  $: currentRows = formatForDisplay(currentItem)
+
+  onMount(() => {
+    let unDet: (() => void) | undefined
+    let unNp: (() => void) | undefined
+    let unCur: (() => void) | undefined
+
+    void (async () => {
+      try {
+        const s = (await invoke('lyrics_settings_get')) as any
+        detectionEnabled = !!s?.lyrics_detection_enabled
+      } catch {
+        // ignore
+      }
+    })()
+
+    void (async () => {
+      try {
+        currentItem = ((await invoke('lyrics_get_current')) as LyricsSearchResult | null) ?? null
+      } catch {
+        currentItem = null
+      }
+    })()
+
+    void (async () => {
+      try {
+        unDet = await listen<{ enabled: boolean }>('lyrics_detection_state_changed', (e) => {
+          detectionEnabled = !!e.payload?.enabled
+        })
+      } catch {
+        // ignore
+      }
+    })()
+
+    void (async () => {
+      try {
+        unNp = await listen<any>('now_playing_state_changed', (e) => {
+          liveNowPlaying = e.payload
+        })
+      } catch {
+        // ignore
+      }
+    })()
+
+    void (async () => {
+      try {
+        unCur = await listen<LyricsSearchResult | null>('lyrics_current_changed', (e) => {
+          currentItem = (e as unknown as { payload: LyricsSearchResult | null }).payload ?? null
+        })
+      } catch {
+        // ignore
+      }
+    })()
+
+    return () => {
+      unDet?.()
+      unNp?.()
+      unCur?.()
+    }
+  })
 
   async function fetchNowPlayingAndSearch() {
     busyNowPlaying = true
@@ -84,7 +150,7 @@
         durationMs: input.durationMs,
         limit: 10,
         strictMatch: false,
-        servicesCsv: 'netease,qq,kugou',
+        servicesCsv: 'qq,netease,lrclib',
         timeoutMs: 8000
       })
       items = out || []
@@ -106,14 +172,42 @@
     try {
       // Set payload first so already-open windows update; newly-open windows will also read the latest payload on mount.
       await setLyricsWindowPayload(selectedItem)
-      await openLyricsWindow(windowMode)
+      if (windowMode === 'dock' || windowMode === 'float' || windowMode === 'chat' || windowMode === 'overlay') {
+        await openLyricsWindow(windowMode)
+      }
     } catch (e) {
       status = `打开窗口失败：${String(e)}`
     }
   }
 
+  async function toggleDetection() {
+    try {
+      const next = !detectionEnabled
+      await invoke('lyrics_detection_set_enabled', { enabled: next })
+      detectionEnabled = next
+    } catch (e) {
+      status = `切换失败：${String(e)}`
+    }
+  }
+
+  async function openDock() {
+    try {
+      await invoke('open_lyrics_dock_window')
+    } catch (e) {
+      status = `打开停靠失败：${String(e)}`
+    }
+  }
+
+  async function openFloat() {
+    try {
+      await invoke('open_lyrics_float_window')
+    } catch (e) {
+      status = `打开悬浮失败：${String(e)}`
+    }
+  }
+
   function onModeChange(ev: Event) {
-    windowMode = ((ev.target as unknown as { value: string })?.value ?? 'chat').toString() as LyricsWindowMode
+    windowMode = ((ev.target as unknown as { value: string })?.value ?? 'dock').toString() as LyricsWindowMode
   }
 </script>
 
@@ -126,6 +220,15 @@
   <fluent-card class="app-card">
     <div class="card-pad stack gap-12">
       <div class="row gap-12 wrap align-center">
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <fluent-button class="w-160" appearance={detectionEnabled ? 'accent' : 'outline'} on:click={toggleDetection}>
+          {detectionEnabled ? '歌词检测：已开启' : '歌词检测：已关闭'}
+        </fluent-button>
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <fluent-button class="w-120" appearance="outline" on:click={openDock}>停靠模式</fluent-button>
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <fluent-button class="w-120" appearance="outline" on:click={openFloat}>桌面悬浮</fluent-button>
+
         <label class="row gap-8 align-center">
           <input type="checkbox" bind:checked={includeThumbnail} disabled={busyNowPlaying} />
           <span class="text-secondary">包含封面（base64）</span>
@@ -139,8 +242,8 @@
           <div class="text-secondary">显示到</div>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <fluent-select class="select w-220" value={windowMode} on:change={onModeChange}>
-            <fluent-option value="chat">Chat 窗口（不透明）</fluent-option>
-            <fluent-option value="overlay">桌面歌词 Overlay（透明）</fluent-option>
+            <fluent-option value="dock">停靠模式（侧边栏）</fluent-option>
+            <fluent-option value="float">桌面悬浮（挂件）</fluent-option>
           </fluent-select>
           <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
           <fluent-button class="w-120" appearance="outline" disabled={!selectedItem} on:click={showLyricsWindow}>
@@ -154,7 +257,20 @@
   <div class="text-secondary">{status}</div>
 
   <div class="panel np-panel">
-    {#if snapshot?.now_playing}
+    {#if liveNowPlaying}
+      <div class="np-row">
+        <div class="np-cover placeholder"></div>
+        <div class="np-meta">
+          <div class="np-title">{liveNowPlaying.title || '(unknown title)'}</div>
+          <div class="np-sub text-secondary">
+            {liveNowPlaying.artist || '(unknown artist)'} · {liveNowPlaying.album_title || '(unknown album)'}
+          </div>
+          <div class="np-sub text-muted">
+            {liveNowPlaying.playback_status || 'Unknown'} · duration_ms={liveNowPlaying.duration_ms ?? '-'}
+          </div>
+        </div>
+      </div>
+    {:else if snapshot?.now_playing}
       <div class="np-row">
         {#if includeThumbnail && snapshot.now_playing.thumbnail?.base64}
           <img
@@ -189,6 +305,7 @@
         <div class="result-head">
           <div class="col-pick"></div>
           <div class="col-service">来源</div>
+          <div class="col-match">匹配</div>
           <div class="col-quality">质量</div>
           <div class="col-title">标题</div>
           <div class="col-artist">歌手</div>
@@ -204,6 +321,7 @@
                 <input type="radio" name="lyricPick" value={itemKey(it)} bind:group={selectedKey} />
               </div>
               <div class="col-service">{it.service}</div>
+              <div class="col-match">{Math.round(it.match_percentage)}</div>
               <div class="col-quality">{it.quality.toFixed(4)}</div>
               <div class="col-title" title={it.title || ''}>{it.title || '-'}</div>
               <div class="col-artist" title={it.artist || ''}>{it.artist || '-'}</div>
@@ -217,6 +335,25 @@
             </div>
           {/each}
         </div>
+      </div>
+    {/if}
+  </div>
+
+  <div class="panel lyrics-panel">
+    {#if !currentItem}
+      <div class="empty">当前未选中/未自动获取到歌词。</div>
+    {:else}
+      <div class="lyrics-scroll">
+        {#each currentRows as r, idx (idx)}
+          {#if r.isMeta}
+            <div class="ly-line meta">{r.original}</div>
+          {:else}
+            <div class="ly-line orig">{r.original}</div>
+            {#if r.translation}
+              <div class="ly-line trans">{r.translation}</div>
+            {/if}
+          {/if}
+        {/each}
       </div>
     {/if}
   </div>
@@ -290,7 +427,7 @@
   .result-head,
   .result-row {
     display: grid;
-    grid-template-columns: 44px 80px 86px 1.2fr 1fr 1fr 140px;
+    grid-template-columns: 44px 80px 60px 86px 1.2fr 1fr 1fr 140px;
     gap: 8px;
     align-items: center;
   }

@@ -11,6 +11,8 @@ pub enum LyricsService {
     QQMusic,
     #[serde(rename = "kugou")]
     Kugou,
+    #[serde(rename = "lrclib")]
+    LrcLib,
     #[serde(rename = "gecimi")]
     Gecimi,
     #[serde(rename = "syair")]
@@ -23,6 +25,7 @@ impl LyricsService {
             Self::Netease => "netease",
             Self::QQMusic => "qq",
             Self::Kugou => "kugou",
+            Self::LrcLib => "lrclib",
             Self::Gecimi => "gecimi",
             Self::Syair => "syair",
         }
@@ -44,6 +47,7 @@ impl FromStr for LyricsService {
             "netease" | "163" | "ne" => Ok(Self::Netease),
             "qq" | "qqmusic" | "qq_music" => Ok(Self::QQMusic),
             "kugou" | "kg" => Ok(Self::Kugou),
+            "lrclib" | "lrc" | "lrc_lib" => Ok(Self::LrcLib),
             "gecimi" | "gc" => Ok(Self::Gecimi),
             "syair" | "sy" => Ok(Self::Syair),
             _ => Err(format!("unknown lyrics service: {s}")),
@@ -121,11 +125,9 @@ impl Default for LyricsSearchOptions {
             timeout_ms: 10_000,
             strict_match: false,
             services: vec![
-                LyricsService::Netease,
                 LyricsService::QQMusic,
-                LyricsService::Kugou,
-                LyricsService::Gecimi,
-                LyricsService::Syair,
+                LyricsService::Netease,
+                LyricsService::LrcLib,
             ],
         }
     }
@@ -145,6 +147,8 @@ pub struct LyricsSearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
 
+    /// 0-100: matching confidence aligned to BetterLyrics' weighting strategy.
+    pub match_percentage: u8,
     pub quality: f64,
     pub matched: bool,
     pub has_translation: bool,
@@ -157,4 +161,3 @@ pub struct LyricsSearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug: Option<serde_json::Value>,
 }
-

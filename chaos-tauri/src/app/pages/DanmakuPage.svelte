@@ -168,7 +168,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <fluent-text-field
           class="input dm-url"
-          placeholder="例如：https://live.bilibili.com/1 / https://www.douyu.com/xxx / https://www.huya.com/xxx"
+          placeholder=""
           value={input}
           on:input={onInput}
           on:keydown={onKeyDown}

@@ -12,6 +12,8 @@ import OverlayApp from './app/OverlayApp.svelte'
 import PlayerApp from './app/PlayerApp.svelte'
 import LyricsChatApp from './app/LyricsChatApp.svelte'
 import LyricsOverlayApp from './app/LyricsOverlayApp.svelte'
+import LyricsDockApp from './app/LyricsDockApp.svelte'
+import LyricsFloatApp from './app/LyricsFloatApp.svelte'
 import { resolveView } from './shared/bootView'
 import { windowPresence } from './stores/windowPresence'
 import { prefs, resolvedTheme } from './stores/prefs'
@@ -32,7 +34,7 @@ function mountError(e: unknown) {
 }
 
 function applyBackdrop(mode: BackdropMode, view: BootView) {
-  if (view === 'overlay' || view === 'player' || view === 'lyrics_overlay') {
+  if (view === 'overlay' || view === 'player' || view === 'lyrics_overlay' || view === 'lyrics_dock' || view === 'lyrics_float') {
     document.documentElement.dataset.backdrop = 'none'
     return
   }
@@ -78,13 +80,13 @@ async function main() {
 
   let prevBackdrop: BackdropMode | null = null
   const unBackdrop = prefs.subscribe((s) => {
-  if (view === 'overlay' || view === 'player' || view === 'lyrics_overlay') return
+    if (view === 'overlay' || view === 'player' || view === 'lyrics_overlay' || view === 'lyrics_dock' || view === 'lyrics_float') return
     if (prevBackdrop === s.backdropMode) return
     prevBackdrop = s.backdropMode
     applyBackdrop(s.backdropMode, view)
   })
   // Ensure overlay/player never tries to use backdrop CSS.
-  if (view === 'overlay' || view === 'player' || view === 'lyrics_overlay') applyBackdrop('none', view)
+  if (view === 'overlay' || view === 'player' || view === 'lyrics_overlay' || view === 'lyrics_dock' || view === 'lyrics_float') applyBackdrop('none', view)
 
   const root = document.getElementById('app')
   if (!root) throw new Error('#app not found')
@@ -126,6 +128,16 @@ async function main() {
 
   if (view === 'lyrics_overlay') {
     app = mount(LyricsOverlayApp, { target: root })
+    return
+  }
+
+  if (view === 'lyrics_dock') {
+    app = mount(LyricsDockApp, { target: root })
+    return
+  }
+
+  if (view === 'lyrics_float') {
+    app = mount(LyricsFloatApp, { target: root })
     return
   }
 

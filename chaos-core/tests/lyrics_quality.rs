@@ -20,6 +20,7 @@ fn base_result(title: Option<&str>, artist: Option<&str>, duration_ms: Option<u6
         artist: artist.map(|s| s.to_string()),
         album: None,
         duration_ms,
+        match_percentage: 0,
         quality: 0.0,
         matched: false,
         has_translation: false,
@@ -62,4 +63,3 @@ fn duration_quality_penalizes_large_diff() {
     let q_far = quality::compute_quality(&r_far, &req);
     assert!(q_close > q_far);
 }
-

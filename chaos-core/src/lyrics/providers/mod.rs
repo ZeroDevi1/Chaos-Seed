@@ -1,5 +1,6 @@
 mod gecimi;
 mod kugou;
+mod lrclib;
 mod netease;
 mod qq;
 mod syair;
@@ -13,6 +14,7 @@ use crate::lyrics::model::{LyricsSearchRequest, LyricsSearchResult, LyricsServic
 
 pub use gecimi::GecimiProvider;
 pub use kugou::KugouProvider;
+pub use lrclib::LrcLibProvider;
 pub use netease::NeteaseProvider;
 pub use qq::QqMusicProvider;
 pub use syair::SyairProvider;
@@ -22,6 +24,7 @@ pub enum ProviderToken {
     Netease(netease::NeteaseToken),
     QQ(qq::QqToken),
     Kugou(kugou::KugouToken),
+    LrcLib(lrclib::LrcLibToken),
     Gecimi(gecimi::GecimiToken),
     Syair(syair::SyairToken),
 }
@@ -31,6 +34,7 @@ pub enum Provider {
     Netease(NeteaseProvider),
     QQ(QqMusicProvider),
     Kugou(KugouProvider),
+    LrcLib(LrcLibProvider),
     Gecimi(GecimiProvider),
     Syair(SyairProvider),
 }
@@ -41,6 +45,7 @@ impl Provider {
             Self::Netease(_) => LyricsService::Netease,
             Self::QQ(_) => LyricsService::QQMusic,
             Self::Kugou(_) => LyricsService::Kugou,
+            Self::LrcLib(_) => LyricsService::LrcLib,
             Self::Gecimi(_) => LyricsService::Gecimi,
             Self::Syair(_) => LyricsService::Syair,
         }
@@ -65,6 +70,10 @@ impl Provider {
                 .search(http, req, timeout)
                 .await
                 .map(|v| v.into_iter().map(ProviderToken::Kugou).collect()),
+            Self::LrcLib(p) => p
+                .search(http, req, timeout)
+                .await
+                .map(|v| v.into_iter().map(ProviderToken::LrcLib).collect()),
             Self::Gecimi(p) => p
                 .search(http, req, timeout)
                 .await
@@ -87,6 +96,7 @@ impl Provider {
             (Self::Netease(p), ProviderToken::Netease(t)) => p.fetch(http, t, req, timeout).await,
             (Self::QQ(p), ProviderToken::QQ(t)) => p.fetch(http, t, req, timeout).await,
             (Self::Kugou(p), ProviderToken::Kugou(t)) => p.fetch(http, t, req, timeout).await,
+            (Self::LrcLib(p), ProviderToken::LrcLib(t)) => p.fetch(http, t, req, timeout).await,
             (Self::Gecimi(p), ProviderToken::Gecimi(t)) => p.fetch(http, t, req, timeout).await,
             (Self::Syair(p), ProviderToken::Syair(t)) => p.fetch(http, t, req, timeout).await,
             _ => Err(LyricsError::Parse(
@@ -95,4 +105,3 @@ impl Provider {
         }
     }
 }
-

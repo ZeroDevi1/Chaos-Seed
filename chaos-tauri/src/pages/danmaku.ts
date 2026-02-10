@@ -23,7 +23,7 @@ export async function buildDanmakuPage(root: HTMLElement): Promise<Cleanup | und
   const row1 = el('div', { className: 'row gap-12 wrap align-center' })
   const input = el('input', { className: 'input' }) as HTMLInputElement
   input.placeholder =
-    '例如：https://live.bilibili.com/1 / https://www.douyu.com/xxx / https://www.huya.com/xxx'
+    ''
   input.style.minWidth = '520px'
 
   const connectBtn = el('button', { className: 'button primary', text: '解析/连接' }) as HTMLButtonElement

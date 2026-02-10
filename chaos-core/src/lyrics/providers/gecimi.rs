@@ -80,6 +80,7 @@ impl GecimiProvider {
             artist: None,
             album: None,
             duration_ms: None,
+            match_percentage: 0,
             quality: 0.0,
             matched: false,
             has_translation: false,
@@ -107,4 +108,3 @@ struct GecimiItem {
     lrc: String,
     aid: i64,
 }
-

@@ -2,7 +2,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use chaos_core::lyrics::model::{LyricsSearchRequest, LyricsSearchTerm};
-use chaos_core::lyrics::providers::{KugouProvider, NeteaseProvider, QqMusicProvider};
+use chaos_core::lyrics::providers::{KugouProvider, LrcLibProvider, NeteaseProvider, QqMusicProvider};
 use httpmock::Method::{GET, POST};
 use httpmock::MockServer;
 
@@ -120,6 +120,28 @@ async fn netease_search_uses_cookie_roundtrip_and_fetches_lyrics() {
     let item = p.fetch(&http, toks[0].clone(), &req, Duration::from_millis(1000)).await.unwrap();
     assert!(item.lyrics_original.contains("[00:01.00]"));
     assert!(item.lyrics_translation.as_deref().unwrap().contains("[00:01.00]"));
+}
+
+#[tokio::test]
+async fn lrclib_search_returns_synced_lyrics() {
+    let server = MockServer::start();
+
+    server.mock(|when, then| {
+        when.method(GET).path("/api/search");
+        then.status(200).body(
+            r#"[{"id":"x1","trackName":"Hello","artistName":"Adele","albumName":"Hello","duration":296.0,"syncedLyrics":"[00:01.00]hello\n"}]"#,
+        );
+    });
+
+    let p = LrcLibProvider::with_base_url(&format!("{}/api/search", server.base_url()));
+    let http = reqwest::Client::new();
+    let req = req_info("Hello", "Adele", Some(296_000));
+
+    let toks = p.search(&http, &req, Duration::from_millis(1000)).await.unwrap();
+    assert_eq!(toks.len(), 1);
+    let item = p.fetch(&http, toks[0].clone(), &req, Duration::from_millis(1000)).await.unwrap();
+    assert_eq!(item.service.to_string(), "lrclib");
+    assert!(item.lyrics_original.contains("[00:01.00]hello"));
 }
 
 fn gzip_bytes(data: &[u8]) -> Vec<u8> {

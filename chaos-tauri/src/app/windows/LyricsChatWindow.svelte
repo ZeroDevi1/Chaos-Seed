@@ -63,8 +63,8 @@
 
     void (async () => {
       try {
-        const u = await listen<LyricsSearchResult>('lyrics_current_changed', (e) => {
-          applyItem(e.payload)
+        const u = await listen<LyricsSearchResult | null>('lyrics_current_changed', (e) => {
+          applyItem((e as unknown as { payload: LyricsSearchResult | null }).payload)
         })
         if (disposed) return u()
         un = u

@@ -60,7 +60,7 @@ export component SubtitleDownloadView inherits VerticalLayout {
                 background: transparent;
                 AppLineEdit {
                     width: parent.width;
-                    placeholder-text: "例如：泽塔奥特曼 / 电影名 / 剧名（回车搜索）";
+                    placeholder-text: "";
                     text <=> root.query;
                     enabled: !root.busy;
                     accepted(t) => {

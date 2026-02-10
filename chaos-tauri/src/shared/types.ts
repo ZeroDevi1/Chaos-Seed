@@ -42,6 +42,8 @@ export type NowPlayingSession = {
   album_title?: string | null
   position_ms?: number | null
   duration_ms?: number | null
+  genres?: string[] | null
+  song_id?: string | null
   thumbnail?: NowPlayingThumbnail | null
   error?: string | null
 }
@@ -61,6 +63,7 @@ export type LyricsSearchResult = {
   artist?: string | null
   album?: string | null
   duration_ms?: number | null
+  match_percentage: number
   quality: number
   matched: boolean
   has_translation: boolean

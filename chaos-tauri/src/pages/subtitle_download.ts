@@ -34,7 +34,7 @@ export async function buildSubtitleDownloadPage(root: HTMLElement): Promise<Clea
   qGroup.appendChild(el('div', { className: 'field-label', text: '关键词' }))
   const qRow = el('div', { className: 'row gap-12' })
   const q = el('input', { className: 'input' }) as HTMLInputElement
-  q.placeholder = '例如：泽塔奥特曼 / 电影名 / 剧名（回车搜索）'
+  q.placeholder = ''
   q.style.minWidth = '420px'
   const searchBtn = el('button', { className: 'button primary', text: '搜索' }) as HTMLButtonElement
   searchBtn.type = 'button'

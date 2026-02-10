@@ -21,8 +21,11 @@ use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
+use lyrics_app::{LyricsAppSettings, LyricsAppSettingsPatch, LyricsAppState};
+
 mod danmaku_ui;
 mod livestream_ui;
+mod lyrics_app;
 
 const HOMEPAGE: &str = "https://github.com/ZeroDevi1/Chaos-Seed";
 
@@ -481,7 +484,7 @@ async fn lyrics_search(
     let csv = services_csv
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "netease,qq,kugou".to_string());
+        .unwrap_or_else(|| "qq,netease,lrclib".to_string());
     let mut services = Vec::new();
     for part in csv.split(',') {
         let p = part.trim();
@@ -880,6 +883,109 @@ window.__CHAOS_SEED_BOOT = {boot_json};
     )
 }
 
+fn init_lyrics_tray(app: &AppHandle) -> Result<(), String> {
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        return Ok(());
+    }
+
+    #[cfg(desktop)]
+    {
+        use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItem};
+        use tauri::tray::TrayIconBuilder;
+
+        let enabled = app
+            .state::<LyricsAppState>()
+            .detection_enabled
+            .load(Ordering::Relaxed);
+
+        let item_open =
+            MenuItem::with_id(app, "tray_open_main", "打开主界面", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+
+        let item_detect =
+            CheckMenuItemBuilder::with_id("tray_toggle_detection", "歌词检测（开/关）")
+                .checked(enabled)
+                .build(app)
+                .map_err(|e| e.to_string())?;
+
+        let item_dock =
+            MenuItem::with_id(app, "tray_open_dock", "打开停靠模式", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+
+        let item_float =
+            MenuItem::with_id(app, "tray_open_float", "打开桌面悬浮", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+
+        let item_quit = MenuItem::with_id(app, "tray_quit", "退出", true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+
+        let menu = MenuBuilder::new(app)
+            .item(&item_open)
+            .item(&item_detect)
+            .separator()
+            .item(&item_dock)
+            .item(&item_float)
+            .separator()
+            .item(&item_quit)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let icon = app.default_window_icon().cloned();
+
+        let mut builder = TrayIconBuilder::with_id("chaos_seed_tray")
+            .menu(&menu)
+            .tooltip("chaos-seed")
+            .on_menu_event(move |app, ev| {
+                let id = ev.id();
+                if id == "tray_open_main" {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                    return;
+                }
+                if id == "tray_open_dock" {
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = open_lyrics_dock_window(app2).await;
+                    });
+                    return;
+                }
+                if id == "tray_open_float" {
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = open_lyrics_float_window(app2).await;
+                    });
+                    return;
+                }
+                if id == "tray_toggle_detection" {
+                    let st = app.state::<LyricsAppState>();
+                    let mut s = st.settings.lock().expect("lyrics settings mutex");
+                    let next = !s.lyrics_detection_enabled;
+                    s.lyrics_detection_enabled = next;
+                    st.detection_enabled.store(next, Ordering::Relaxed);
+                    let _ = lyrics_app::save_settings(app, &s);
+                    drop(s);
+                    let _ = item_detect.set_checked(next);
+                    lyrics_app::emit_detection_state(app, next);
+                    return;
+                }
+                if id == "tray_quit" {
+                    app.exit(0);
+                }
+            });
+
+        if let Some(icon) = icon {
+            builder = builder.icon(icon);
+        }
+
+        let _ = builder.build(app);
+        Ok(())
+    }
+}
+
 #[tauri::command]
 async fn open_chat_window(app: AppHandle) -> Result<(), String> {
     if ensure_window(&app, "chat").is_some() {
@@ -1123,6 +1229,53 @@ fn lyrics_get_current(state: State<'_, LyricsWindowState>) -> Option<lyrics::mod
 }
 
 #[tauri::command]
+fn lyrics_settings_get(app: AppHandle, state: State<'_, LyricsAppState>) -> Result<LyricsAppSettings, String> {
+    let loaded = lyrics_app::load_settings(&app).unwrap_or_default();
+    {
+        let mut s = state.settings.lock().expect("lyrics settings mutex");
+        *s = loaded.clone();
+    }
+    state
+        .detection_enabled
+        .store(loaded.lyrics_detection_enabled, Ordering::Relaxed);
+    Ok(loaded)
+}
+
+#[tauri::command]
+fn lyrics_settings_set(
+    app: AppHandle,
+    state: State<'_, LyricsAppState>,
+    partial: LyricsAppSettingsPatch,
+) -> Result<LyricsAppSettings, String> {
+    let next = state.apply_settings_patch(partial);
+    lyrics_app::save_settings(&app, &next)?;
+    lyrics_app::emit_detection_state(&app, next.lyrics_detection_enabled);
+    Ok(next)
+}
+
+#[tauri::command]
+fn lyrics_detection_set_enabled(
+    app: AppHandle,
+    state: State<'_, LyricsAppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let next = state.apply_settings_patch(LyricsAppSettingsPatch {
+        lyrics_detection_enabled: Some(enabled),
+        auto_hide_on_pause: None,
+        auto_hide_delay_ms: None,
+        matching_threshold: None,
+        timeout_ms: None,
+        limit: None,
+        providers_order: None,
+        default_display: None,
+        effects: None,
+    });
+    lyrics_app::save_settings(&app, &next)?;
+    lyrics_app::emit_detection_state(&app, enabled);
+    Ok(())
+}
+
+#[tauri::command]
 fn lyrics_set_current(
     app: AppHandle,
     state: State<'_, LyricsWindowState>,
@@ -1261,6 +1414,132 @@ async fn open_lyrics_overlay_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn open_lyrics_dock_window(app: AppHandle) -> Result<(), String> {
+    if ensure_window(&app, "lyrics_dock").is_some() {
+        let st = app.state::<LyricsAppState>();
+        st.dock_open.store(true, Ordering::Relaxed);
+        return Ok(());
+    }
+
+    let boot = serde_json::json!({
+        "view": "lyrics_dock",
+        "label": "lyrics_dock",
+        "build": env!("CARGO_PKG_VERSION")
+    });
+    let init_script = child_init_script(boot);
+    let url = child_url_from_main(&app, "lyrics_dock", None);
+
+    let w = tauri::WebviewWindowBuilder::new(&app, "lyrics_dock", url)
+        .title("歌词 - Dock")
+        .inner_size(420.0, 720.0)
+        .resizable(true)
+        .decorations(false)
+        .transparent(false)
+        .always_on_top(true)
+        .initialization_script(init_script)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let _ = w.show();
+    let _ = w.set_focus();
+    // Best-effort: snap to the right edge of the current monitor.
+    if let Ok(Some(m)) = w.current_monitor() {
+        let size = m.size();
+        // Keep a small margin so it doesn't overlap with rounded screen edges / auto-hide taskbars.
+        let x = (size.width as i32).saturating_sub(420 + 6);
+        let y = 6;
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+    }
+    let _ = app.emit(
+        "chaos_window_state",
+        WindowStatePayload {
+            label: "lyrics_dock".to_string(),
+            open: true,
+        },
+    );
+    {
+        let st = app.state::<LyricsAppState>();
+        st.dock_open.store(true, Ordering::Relaxed);
+    }
+    {
+        let app2 = app.clone();
+        w.on_window_event(move |ev| {
+            if matches!(ev, tauri::WindowEvent::Destroyed) {
+                let st = app2.state::<LyricsAppState>();
+                st.dock_open.store(false, Ordering::Relaxed);
+                let _ = app2.emit(
+                    "chaos_window_state",
+                    WindowStatePayload {
+                        label: "lyrics_dock".to_string(),
+                        open: false,
+                    },
+                );
+            }
+        });
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_lyrics_float_window(app: AppHandle) -> Result<(), String> {
+    if ensure_window(&app, "lyrics_float").is_some() {
+        let st = app.state::<LyricsAppState>();
+        st.float_open.store(true, Ordering::Relaxed);
+        return Ok(());
+    }
+
+    let boot = serde_json::json!({
+        "view": "lyrics_float",
+        "label": "lyrics_float",
+        "build": env!("CARGO_PKG_VERSION")
+    });
+    let init_script = child_init_script(boot);
+    let url = child_url_from_main(&app, "lyrics_float", None);
+
+    let w = tauri::WebviewWindowBuilder::new(&app, "lyrics_float", url)
+        .title("歌词 - Float")
+        .inner_size(960.0, 220.0)
+        .resizable(true)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .initialization_script(init_script)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let _ = w.show();
+    let _ = w.set_focus();
+    let _ = app.emit(
+        "chaos_window_state",
+        WindowStatePayload {
+            label: "lyrics_float".to_string(),
+            open: true,
+        },
+    );
+    {
+        let st = app.state::<LyricsAppState>();
+        st.float_open.store(true, Ordering::Relaxed);
+    }
+    {
+        let app2 = app.clone();
+        w.on_window_event(move |ev| {
+            if matches!(ev, tauri::WindowEvent::Destroyed) {
+                let st = app2.state::<LyricsAppState>();
+                st.float_open.store(false, Ordering::Relaxed);
+                let _ = app2.emit(
+                    "chaos_window_state",
+                    WindowStatePayload {
+                        label: "lyrics_float".to_string(),
+                        open: false,
+                    },
+                );
+            }
+        });
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn open_player_window(
     app: AppHandle,
     req: livestream_ui::PlayerBootRequest,
@@ -1386,12 +1665,31 @@ fn main() {
                     let _ = w.set_effects(EffectsBuilder::new().effect(Effect::Mica).build());
                 }
             }
+
+            // Lyrics app settings + background watcher (Now Playing -> events -> auto search).
+            {
+                let handle = app.handle().clone();
+                let st = handle.state::<LyricsAppState>();
+                if let Ok(settings) = lyrics_app::load_settings(&handle) {
+                    st.detection_enabled
+                        .store(settings.lyrics_detection_enabled, Ordering::Relaxed);
+                    *st.settings.lock().expect("lyrics settings mutex") = settings.clone();
+                    lyrics_app::emit_detection_state(&handle, settings.lyrics_detection_enabled);
+                }
+
+                // The watch loop is cheap when disabled; it self-throttles.
+                tauri::async_runtime::spawn(lyrics_app::start_watch_loop(handle.clone()));
+
+                // Tray is best-effort. If it fails, the app should still run.
+                let _ = init_lyrics_tray(&handle);
+            }
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
         .manage(DanmakuState::default())
         .manage(StreamProxyState::default())
         .manage(LyricsWindowState::default())
+        .manage(LyricsAppState::default())
         .invoke_handler(tauri::generate_handler![
             stream_open,
             stream_read,
@@ -1410,10 +1708,15 @@ fn main() {
             danmaku_set_msg_subscription,
             open_chat_window,
             open_overlay_window,
+            lyrics_settings_get,
+            lyrics_settings_set,
+            lyrics_detection_set_enabled,
             lyrics_get_current,
             lyrics_set_current,
             open_lyrics_chat_window,
             open_lyrics_overlay_window,
+            open_lyrics_dock_window,
+            open_lyrics_float_window,
             open_player_window,
             set_backdrop
         ])

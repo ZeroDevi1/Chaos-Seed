@@ -124,6 +124,7 @@ impl KugouProvider {
             artist: Some(token.artist),
             album: None,
             duration_ms: Some(token.duration_ms),
+            match_percentage: 0,
             quality: 0.0,
             matched: false,
             has_translation: false,

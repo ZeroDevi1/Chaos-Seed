@@ -3,6 +3,7 @@ use std::time::Duration;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 
 use crate::lyrics::error::LyricsError;
+use crate::lyrics::match_score;
 use crate::lyrics::model::{LyricsSearchOptions, LyricsSearchRequest, LyricsSearchResult, LyricsService};
 use crate::lyrics::providers::Provider;
 use crate::lyrics::quality;
@@ -48,6 +49,7 @@ pub async fn search_with_http(
     // Compute match + quality.
     for item in &mut results {
         item.matched = quality::is_matched(item, req);
+        item.match_percentage = match_score::compute_match_percentage(req, item);
         item.quality = quality::compute_quality(item, req);
     }
 
@@ -57,6 +59,10 @@ pub async fn search_with_http(
 
     let order = service_order_index(&opt.services);
     results.sort_by(|a, b| {
+        let by_match = b.match_percentage.cmp(&a.match_percentage);
+        if by_match != std::cmp::Ordering::Equal {
+            return by_match;
+        }
         let qa = a.quality;
         let qb = b.quality;
         let by_q = qb
@@ -82,6 +88,7 @@ fn build_providers(services: &[LyricsService]) -> Vec<Provider> {
             LyricsService::Netease => Provider::Netease(Default::default()),
             LyricsService::QQMusic => Provider::QQ(Default::default()),
             LyricsService::Kugou => Provider::Kugou(Default::default()),
+            LyricsService::LrcLib => Provider::LrcLib(Default::default()),
             LyricsService::Gecimi => Provider::Gecimi(Default::default()),
             LyricsService::Syair => Provider::Syair(Default::default()),
         })

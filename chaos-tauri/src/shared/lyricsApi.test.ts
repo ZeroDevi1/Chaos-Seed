@@ -24,7 +24,7 @@ describe('lyricsApi', () => {
       durationMs: 296000,
       limit: 7,
       strictMatch: true,
-      servicesCsv: 'netease,qq,kugou',
+      servicesCsv: 'qq,netease,lrclib',
       timeoutMs: 8000
     })
     expect(invoke).toHaveBeenCalledWith('lyrics_search', {
@@ -34,9 +34,8 @@ describe('lyricsApi', () => {
       durationMs: 296000,
       limit: 7,
       strictMatch: true,
-      servicesCsv: 'netease,qq,kugou',
+      servicesCsv: 'qq,netease,lrclib',
       timeoutMs: 8000
     })
   })
 })
-
