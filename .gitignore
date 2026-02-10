@@ -3,6 +3,8 @@
 /.vscode
 /refs
 /logs
+/.wiki-export
+/wiki
 sync_to_win.sh
 /chaos-tauri/node_modules
 /chaos-tauri/dist
