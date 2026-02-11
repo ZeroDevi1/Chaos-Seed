@@ -160,7 +160,6 @@
                 VerticalAlignment="Stretch"
                 ResizeDirection="Columns"
                 ResizeBehavior="PreviousAndNext"
-                DragCompleted="OnDanmakuSplitterDragCompleted"
                 Opacity="0.55"
                 Background="{ThemeResource DividerStrokeColorDefaultBrush}"
                 ToolTipService.ToolTip="拖拽调整弹幕宽度" />

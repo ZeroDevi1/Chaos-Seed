@@ -8,7 +8,6 @@ using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.Storage.Streams;
@@ -489,6 +488,20 @@ public sealed partial class LivePage : Page
 
     private async void OnToggleDanmaku(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
+        if (_danmakuExpanded && _mode == LiveMode.Playing)
+        {
+            // Best-effort: persist current splitter width before collapsing.
+            try
+            {
+                var w = (int)Math.Round(DanmakuCol.ActualWidth);
+                _danmakuWidthPx = Math.Clamp(w, DanmakuMinWidthPx, DanmakuMaxWidthPx);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         _danmakuExpanded = !_danmakuExpanded;
         await AnimateDanmakuPaneAsync(_danmakuExpanded);
     }
@@ -612,26 +625,6 @@ public sealed partial class LivePage : Page
         SelectPane.Visibility = mode == LiveMode.Playing ? Visibility.Collapsed : Visibility.Visible;
         PlayerPane.Visibility = mode == LiveMode.Playing ? Visibility.Visible : Visibility.Collapsed;
         UpdateDanmakuPane();
-    }
-
-    private void OnDanmakuSplitterDragCompleted(object sender, DragCompletedEventArgs e)
-    {
-        if (!_danmakuExpanded || _mode != LiveMode.Playing)
-        {
-            return;
-        }
-
-        try
-        {
-            var w = (int)Math.Round(DanmakuCol.ActualWidth);
-            w = Math.Clamp(w, DanmakuMinWidthPx, DanmakuMaxWidthPx);
-            _danmakuWidthPx = w;
-            DanmakuCol.Width = new GridLength(_danmakuWidthPx);
-        }
-        catch
-        {
-            // ignore
-        }
     }
 
     private void OnVariantCardPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
