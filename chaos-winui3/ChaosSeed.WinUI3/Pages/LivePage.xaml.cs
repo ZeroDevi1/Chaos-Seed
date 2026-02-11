@@ -3,13 +3,16 @@ using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Services;
+using ChaosSeed.WinUI3.Services.LiveBackends;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Media.Animation;
+using StreamJsonRpc;
 using Windows.Storage.Streams;
 
 namespace ChaosSeed.WinUI3.Pages;
@@ -23,10 +26,32 @@ public sealed partial class LivePage : Page
         Playing = 2,
     }
 
-    private const int DanmakuDefaultWidthPx = 280;
+    private enum PlayUiState
+    {
+        Idle = 0,
+        Opening = 1,
+        Playing = 2,
+        Failed = 3,
+    }
+
+    private sealed class LastPlayRequest
+    {
+        public string Input { get; init; } = "";
+        public string VariantId { get; init; } = "";
+        public object? CoverRef { get; init; }
+        public int PlaySeq { get; init; }
+    }
+
+    private const int DanmakuDefaultWidthPx = 180;
     private const int SplitterWidthPx = 6;
-    private const int DanmakuMinWidthPx = 220;
-    private const int DanmakuMaxWidthPx = 480;
+    private const int DanmakuMinWidthPx = 110;
+    private const int DanmakuMaxWidthPx = 320;
+    private static readonly PlayOpenOptions _playOptions = new()
+    {
+        OpenTimeout = TimeSpan.FromSeconds(15),
+        RetryPerUrl = 1,
+        RetryDelay = TimeSpan.FromMilliseconds(300),
+    };
     public ObservableCollection<DanmakuRowVm> Rows { get; } = new();
     public ObservableCollection<LiveVariantCardVm> VariantCards { get; } = new();
 
@@ -34,16 +59,21 @@ public sealed partial class LivePage : Page
     private readonly SemaphoreSlim _imageSem = new(4, 4);
     private readonly FlyleafPlayerService? _player;
     private readonly string? _playerUnavailableMsg;
+    private readonly ILiveBackend _backend;
 
     private string? _sessionId;
-    private bool _danmakuExpanded = true;
+    private bool _danmakuExpanded = false;
     private int _danmakuWidthPx = DanmakuDefaultWidthPx;
     private CancellationTokenSource? _danmakuAnimCts;
+    private CancellationTokenSource? _danmakuToggleHideCts;
     private LiveMode _mode = LiveMode.Parse;
     private LivestreamDecodeManifestResult? _manifest;
     private string? _lastInput;
     private CancellationTokenSource? _playCts;
     private CancellationTokenSource? _decodeCts;
+    private int _playSeq;
+    private PlayUiState _playUiState = PlayUiState.Idle;
+    private LastPlayRequest? _lastPlayRequest;
 
     public string OverviewTitle => _manifest?.Info?.Title ?? "";
     public string OverviewStreamer => $"主播：{(_manifest?.Info?.Name ?? "-")}";
@@ -53,8 +83,24 @@ public sealed partial class LivePage : Page
     public LivePage()
     {
         InitializeComponent();
-        DaemonClient.Instance.DanmakuMessageReceived += OnDanmakuMessage;
+        FlyleafHost.Loaded += OnFlyleafHostLoaded;
+        _backend = LiveBackendFactory.Create();
+        _backend.DanmakuMessageReceived += OnDanmakuMessage;
         _player = TryInitPlayer(out _playerUnavailableMsg);
+        BindFlyleafHostPlayer(_player);
+        Bindings.Update();
+
+        if (!string.IsNullOrWhiteSpace(_backend.InitNotice))
+        {
+            if (_backend is ErrorLiveBackend)
+            {
+                ShowParseError(_backend.InitNotice!);
+            }
+            else
+            {
+                ShowParseInfo(_backend.InitNotice!);
+            }
+        }
     }
 
     private Task RunOnUiAsync(Action action)
@@ -86,6 +132,34 @@ public sealed partial class LivePage : Page
         return tcs.Task;
     }
 
+    private Task RunOnUiAsync(Func<Task> action)
+    {
+        if (_dq.HasThreadAccess)
+        {
+            return action();
+        }
+
+        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ok = _dq.TryEnqueue(async () =>
+        {
+            try
+            {
+                await action();
+                tcs.TrySetResult(null);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+        if (!ok)
+        {
+            tcs.TrySetException(new InvalidOperationException("failed to enqueue UI async action"));
+        }
+
+        return tcs.Task;
+    }
+
     private FlyleafPlayerService? TryInitPlayer(out string? unavailableMsg)
     {
         unavailableMsg = null;
@@ -101,9 +175,15 @@ public sealed partial class LivePage : Page
         try
         {
             var p = new FlyleafPlayerService(_dq);
-            p.Error += (_, msg) => _dq.TryEnqueue(() => ShowPlayerError(msg));
-            p.Info += (_, msg) => _dq.TryEnqueue(() => ShowPlayerInfo(msg));
-            FlyleafHost.Player = p.Player;
+            p.Error += (_, msg) => _dq.TryEnqueue(() =>
+            {
+                try { ShowPlayerError(msg); } catch { }
+            });
+            p.Info += (_, msg) => _dq.TryEnqueue(() =>
+            {
+                try { ShowPlayerInfo(msg); } catch { }
+            });
+            BindFlyleafHostPlayer(p);
             return p;
         }
         catch (Exception ex)
@@ -114,6 +194,39 @@ public sealed partial class LivePage : Page
             ShowParseError(unavailableMsg);
             return null;
         }
+    }
+
+    private void OnFlyleafHostLoaded(object sender, RoutedEventArgs e)
+    {
+        BindFlyleafHostPlayer();
+    }
+
+    private void BindFlyleafHostPlayer(FlyleafPlayerService? service = null)
+    {
+        var s = service ?? _player;
+        if (s is null)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(FlyleafHost.Player, s.Player))
+        {
+            return;
+        }
+
+        try
+        {
+            FlyleafHost.Player = s.Player;
+        }
+        catch (Exception ex)
+        {
+            ShowParseError($"绑定播放器失败：{ex.Message}");
+        }
+    }
+
+    private void UnbindFlyleafHostPlayer()
+    {
+        try { FlyleafHost.Player = null; } catch { }
     }
 
     protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
@@ -131,18 +244,54 @@ public sealed partial class LivePage : Page
     protected override async void OnNavigatedFrom(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
     {
         base.OnNavigatedFrom(e);
-        DaemonClient.Instance.DanmakuMessageReceived -= OnDanmakuMessage;
-
-        _decodeCts?.Cancel();
-        _decodeCts?.Dispose();
-        _decodeCts = null;
-
-        if (_sessionId is not null)
+        try
         {
-            try { await DaemonClient.Instance.CloseLiveAsync(_sessionId); } catch { }
-        }
+            Interlocked.Increment(ref _playSeq);
+            _backend.DanmakuMessageReceived -= OnDanmakuMessage;
 
-        _player?.Dispose();
+            try { _playCts?.Cancel(); } catch { }
+            _playCts?.Dispose();
+            _playCts = null;
+
+            _danmakuToggleHideCts?.Cancel();
+            _danmakuToggleHideCts?.Dispose();
+            _danmakuToggleHideCts = null;
+
+            _danmakuAnimCts?.Cancel();
+            _danmakuAnimCts?.Dispose();
+            _danmakuAnimCts = null;
+
+            _decodeCts?.Cancel();
+            _decodeCts?.Dispose();
+            _decodeCts = null;
+            _lastPlayRequest = null;
+
+            await RunOnUiAsync(() =>
+            {
+                try { _player?.Stop(); } catch { }
+                UnbindFlyleafHostPlayer();
+            });
+
+            if (_sessionId is not null)
+            {
+                try { await _backend.CloseLiveAsync(_sessionId, CancellationToken.None); } catch { }
+                _sessionId = null;
+            }
+
+            await RunOnUiAsync(() =>
+            {
+                try { _player?.Dispose(); } catch { }
+            });
+
+            await Task.Run(() =>
+            {
+                try { _backend.Dispose(); } catch { }
+            });
+        }
+        catch
+        {
+            // ignore - page is being torn down
+        }
     }
 
     private void ShowParsePanelOnly()
@@ -150,6 +299,7 @@ public sealed partial class LivePage : Page
         _manifest = null;
         VariantCards.Clear();
         _lastInput = null;
+        _lastPlayRequest = null;
         SetMode(LiveMode.Parse);
         ParseStatusBar.IsOpen = false;
         PlayerStatusBar.IsOpen = false;
@@ -162,14 +312,21 @@ public sealed partial class LivePage : Page
 
     private async void OnParseClicked(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        var input = (InputBox.Text ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(input))
+        try
         {
-            ShowParseError("请输入直播间地址。");
-            return;
-        }
+            var input = (InputBox.Text ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                ShowParseError("请输入直播间地址。");
+                return;
+            }
 
-        await DecodeAndShowAsync(input);
+            await DecodeAndShowAsync(input);
+        }
+        catch (Exception ex)
+        {
+            try { ShowParseError(ex.Message); } catch { }
+        }
     }
 
     private async Task DecodeAndShowAsync(string input)
@@ -188,7 +345,7 @@ public sealed partial class LivePage : Page
 
         try
         {
-            var man = await DaemonClient.Instance.DecodeManifestAsync(input, ct);
+            var man = await _backend.DecodeManifestAsync(input, ct);
             await RunOnUiAsync(() =>
             {
                 _manifest = man;
@@ -226,7 +383,7 @@ public sealed partial class LivePage : Page
         }
         catch (OperationCanceledException)
         {
-            var hint = DaemonClient.Instance.DaemonLogPath;
+            var hint = TryGetDaemonLogPath();
             var msg = "解析超时/已取消，请重试。";
             if (!string.IsNullOrWhiteSpace(hint))
             {
@@ -240,7 +397,7 @@ public sealed partial class LivePage : Page
         }
         catch (Exception ex)
         {
-            var hint = DaemonClient.Instance.DaemonLogPath;
+            var hint = TryGetDaemonLogPath();
             var msg = ex.Message;
             if (!string.IsNullOrWhiteSpace(hint))
             {
@@ -280,26 +437,33 @@ public sealed partial class LivePage : Page
 
     private async void OnVariantItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is not LiveVariantCardVm vm)
-        {
-            return;
-        }
-
-        Image? sourceCover = null;
         try
         {
-            if (VariantGrid.ContainerFromItem(vm) is GridViewItem gvi &&
-                gvi.ContentTemplateRoot is FrameworkElement root)
+            if (e.ClickedItem is not LiveVariantCardVm vm)
             {
-                sourceCover = root.FindName("CardCover") as Image;
+                return;
             }
-        }
-        catch
-        {
-            // ignore
-        }
 
-        await BeginPlayFromCardAsync(vm, sourceCover);
+            Image? sourceCover = null;
+            try
+            {
+                if (VariantGrid.ContainerFromItem(vm) is GridViewItem gvi &&
+                    gvi.ContentTemplateRoot is FrameworkElement root)
+                {
+                    sourceCover = root.FindName("CardCover") as Image;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            await BeginPlayFromCardAsync(vm, sourceCover);
+        }
+        catch (Exception ex)
+        {
+            try { ShowPlayerError(ex.Message); } catch { }
+        }
     }
 
     private async Task BeginPlayFromCardAsync(LiveVariantCardVm vm, Image? sourceCover)
@@ -317,16 +481,34 @@ public sealed partial class LivePage : Page
             return;
         }
 
+        await BeginPlayAsync(input, vm.VariantId, sourceCover?.Source, sourceCover);
+    }
+
+    private async Task BeginPlayAsync(
+        string input,
+        string variantId,
+        object? coverRef,
+        Image? animationSourceCover
+    )
+    {
+        if (_player is null)
+        {
+            throw new InvalidOperationException("播放器未初始化");
+        }
+
+        var playSeq = Interlocked.Increment(ref _playSeq);
+
         _playCts?.Cancel();
+        _playCts?.Dispose();
         _playCts = new CancellationTokenSource();
         var ct = _playCts.Token;
 
         ConnectedAnimation? anim = null;
-        if (sourceCover?.Source is not null)
+        if (animationSourceCover?.Source is not null)
         {
             try
             {
-                anim = ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("liveHeroCover", sourceCover);
+                anim = ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("liveHeroCover", animationSourceCover);
             }
             catch
             {
@@ -334,14 +516,26 @@ public sealed partial class LivePage : Page
             }
         }
 
+        _lastPlayRequest = new LastPlayRequest
+        {
+            Input = input,
+            VariantId = variantId,
+            CoverRef = coverRef,
+            PlaySeq = playSeq,
+        };
+
         VariantGrid.IsEnabled = false;
+        _danmakuExpanded = false;
+        _danmakuWidthPx = Math.Clamp(_danmakuWidthPx, DanmakuMinWidthPx, DanmakuMaxWidthPx);
         SetMode(LiveMode.Playing);
+        BindFlyleafHostPlayer();
+        SetPlayUiState(PlayUiState.Opening, null);
         PlayerStatusBar.IsOpen = false;
         ShowPlayerInfo("正在打开直播…");
 
-        if (sourceCover?.Source is not null)
+        if (coverRef is Microsoft.UI.Xaml.Media.ImageSource src)
         {
-            HeroCover.Source = sourceCover.Source;
+            HeroCover.Source = src;
             HeroCover.Visibility = Visibility.Visible;
             HeroCover.Opacity = 1;
         }
@@ -351,7 +545,6 @@ public sealed partial class LivePage : Page
             HeroCover.Visibility = Visibility.Collapsed;
         }
 
-        UpdateLayout();
         if (anim is not null)
         {
             try
@@ -368,51 +561,107 @@ public sealed partial class LivePage : Page
         {
             await StopCurrentAsync();
 
-            using var openCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            openCts.CancelAfter(TimeSpan.FromSeconds(20));
+            var res = await OpenLiveWithRetryAsync(input, variantId, ct);
+            if (playSeq != _playSeq || ct.IsCancellationRequested)
+            {
+                try { await _backend.CloseLiveAsync(res.SessionId, CancellationToken.None); } catch { }
+                return;
+            }
 
-            var res = await DaemonClient.Instance.OpenLiveAsync(input, vm.VariantId, openCts.Token);
+            if (!string.IsNullOrWhiteSpace(variantId) &&
+                !string.Equals(variantId.Trim(), (res.VariantId ?? "").Trim(), StringComparison.Ordinal))
+            {
+                ShowPlayerInfo($"线路回执不一致：请求={variantId}，返回={res.VariantId}");
+            }
+
+            var shortUrl = (res.Url ?? "").Trim();
+            if (shortUrl.Length > 96)
+            {
+                shortUrl = shortUrl[..96] + "...";
+            }
+            ShowPlayerInfo($"回执线路：{(string.IsNullOrWhiteSpace(res.VariantId) ? "-" : res.VariantId)}，备链数：{res.BackupUrls?.Length ?? 0}\n{shortUrl}");
+
             await RunOnUiAsync(() =>
             {
+                if (playSeq != _playSeq)
+                {
+                    return;
+                }
                 _sessionId = res.SessionId;
                 Rows.Clear();
             });
 
-            await _player.PlayAsync(res.Site, res.Url, res.BackupUrls, res.Referer, res.UserAgent, ct);
+            await _player.PlayAsync(
+                res.Site ?? "",
+                res.Url ?? "",
+                res.BackupUrls ?? Array.Empty<string>(),
+                res.Referer,
+                res.UserAgent,
+                ct,
+                _playOptions
+            );
+            if (playSeq != _playSeq || ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            SetPlayUiState(PlayUiState.Playing, null);
             await FadeOutHeroCoverAsync();
         }
         catch (OperationCanceledException)
         {
-            if (!ct.IsCancellationRequested)
+            if (playSeq == _playSeq && !ct.IsCancellationRequested)
             {
                 await StopCurrentAsync();
                 await RunOnUiAsync(() =>
                 {
-                    SetMode(LiveMode.Select);
-                    ShowPlayerError("打开直播超时/已取消，请重试。");
+                    if (playSeq != _playSeq)
+                    {
+                        return;
+                    }
+                    SetPlayUiState(PlayUiState.Failed, "打开直播超时/已取消，请点击重试。");
+                    ShowPlayerError("打开直播超时/已取消，请点击重试。");
                     VariantGrid.IsEnabled = true;
                 });
             }
+        }
+        catch (RemoteInvocationException ex)
+        {
+            await StopCurrentAsync();
+            await RunOnUiAsync(() =>
+            {
+                if (playSeq != _playSeq)
+                {
+                    return;
+                }
+                var msg = BuildRemoteInvokeMessage(ex);
+                SetPlayUiState(PlayUiState.Failed, msg);
+                ShowPlayerError(msg);
+                VariantGrid.IsEnabled = true;
+            });
         }
         catch (Exception ex)
         {
             await StopCurrentAsync();
             await RunOnUiAsync(() =>
             {
-                SetMode(LiveMode.Select);
+                if (playSeq != _playSeq)
+                {
+                    return;
+                }
+                SetPlayUiState(PlayUiState.Failed, ex.Message);
                 ShowPlayerError(ex.Message);
                 VariantGrid.IsEnabled = true;
             });
         }
         finally
         {
-            if (_mode == LiveMode.Playing)
+            if (playSeq == _playSeq && _mode == LiveMode.Playing)
             {
                 await RunOnUiAsync(() => VariantGrid.IsEnabled = true);
             }
 
-            // Best-effort: ensure the poster is not stuck visible if playback failed/canceled.
-            if (_mode != LiveMode.Playing)
+            if (playSeq == _playSeq && _playUiState != PlayUiState.Playing)
             {
                 await RunOnUiAsync(() =>
                 {
@@ -422,6 +671,56 @@ public sealed partial class LivePage : Page
                 });
             }
         }
+    }
+
+    private async Task<LiveOpenResult> OpenLiveWithRetryAsync(
+        string input,
+        string variantId,
+        CancellationToken ct
+    )
+    {
+        Exception? last = null;
+        const int totalAttempts = 2;
+
+        for (var attempt = 1; attempt <= totalAttempts; attempt++)
+        {
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                ShowPlayerInfo($"会话打开[{attempt}/{totalAttempts}]…");
+                using var openCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                openCts.CancelAfter(_playOptions.OpenTimeout);
+                return await _backend.OpenLiveAsync(input, variantId, openCts.Token);
+            }
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+            {
+                last = ex;
+                ShowPlayerInfo($"会话打开超时[{attempt}/{totalAttempts}]");
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                ShowPlayerInfo($"会话打开失败[{attempt}/{totalAttempts}]：{ex.Message}");
+            }
+
+            if (attempt < totalAttempts)
+            {
+                await Task.Delay(_playOptions.RetryDelay, ct);
+            }
+        }
+
+        throw last ?? new Exception("live.open failed");
+    }
+
+    private string BuildRemoteInvokeMessage(RemoteInvocationException ex)
+    {
+        var msg = $"RPC 调用失败：{ex.Message}";
+        var hint = TryGetDaemonLogPath();
+        if (!string.IsNullOrWhiteSpace(hint))
+        {
+            msg += $"\n（daemon 日志：{hint}）";
+        }
+        return msg;
     }
 
     private Task FadeOutHeroCoverAsync()
@@ -462,48 +761,250 @@ public sealed partial class LivePage : Page
         });
     }
 
-    private async void OnBackToSelect(object sender, RoutedEventArgs e)
-    {
-        await StopCurrentAsync();
-        SetMode(LiveMode.Select);
-    }
-
-    private async Task StopCurrentAsync()
+    private async void OnRetryPlayClicked(object sender, RoutedEventArgs e)
     {
         try
         {
-            _player?.Stop();
-        }
-        catch
-        {
-            // ignore
-        }
+            var req = _lastPlayRequest;
+            if (_mode != LiveMode.Playing || _playUiState != PlayUiState.Failed || req is null)
+            {
+                return;
+            }
 
-        if (_sessionId is not null)
+            await BeginPlayAsync(req.Input, req.VariantId, req.CoverRef, null);
+        }
+        catch (Exception ex)
         {
-            try { await DaemonClient.Instance.CloseLiveAsync(_sessionId); } catch { }
-            _sessionId = null;
+            ShowPlayerError($"重试失败：{ex.Message}");
         }
     }
 
-    private async void OnToggleDanmaku(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private async void OnBackToSelectFromFailedClicked(object sender, RoutedEventArgs e)
     {
-        if (_danmakuExpanded && _mode == LiveMode.Playing)
+        await ReturnToSelectAsync();
+    }
+
+    private async void OnBackToSelect(object sender, RoutedEventArgs e)
+    {
+        await ReturnToSelectAsync();
+    }
+
+    private async Task ReturnToSelectAsync()
+    {
+        try
         {
-            // Best-effort: persist current splitter width before collapsing.
+            Interlocked.Increment(ref _playSeq);
             try
             {
-                var w = (int)Math.Round(DanmakuCol.ActualWidth);
-                _danmakuWidthPx = Math.Clamp(w, DanmakuMinWidthPx, DanmakuMaxWidthPx);
+                _playCts?.Cancel();
             }
             catch
             {
                 // ignore
             }
+
+            var stopTask = StopCurrentAsync();
+            _lastPlayRequest = null;
+            SetMode(LiveMode.Select);
+            await stopTask;
+        }
+        catch (Exception ex)
+        {
+            try { ShowPlayerError($"返回失败：{ex.Message}"); } catch { }
+            try { SetMode(LiveMode.Select); } catch { }
+        }
+    }
+
+    private async Task StopCurrentAsync()
+    {
+        await RunOnUiAsync(() =>
+        {
+            try
+            {
+                _player?.Stop();
+            }
+            catch
+            {
+                // ignore
+            }
+        });
+
+        var sid = _sessionId;
+        _sessionId = null;
+
+        if (sid is not null)
+        {
+            try { await _backend.CloseLiveAsync(sid, CancellationToken.None); } catch { }
         }
 
-        _danmakuExpanded = !_danmakuExpanded;
-        await AnimateDanmakuPaneAsync(_danmakuExpanded);
+        try
+        {
+            await RunOnUiAsync(() => Rows.Clear());
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async void OnToggleDanmaku(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_danmakuExpanded && _mode == LiveMode.Playing)
+            {
+                // Best-effort: persist current splitter width before collapsing.
+                try
+                {
+                    var w = (int)Math.Round(DanmakuCol.ActualWidth);
+                    _danmakuWidthPx = Math.Clamp(w, DanmakuMinWidthPx, DanmakuMaxWidthPx);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            _danmakuExpanded = !_danmakuExpanded;
+            await AnimateDanmakuPaneAsync(_danmakuExpanded);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void HideDanmakuToggleImmediately()
+    {
+        _danmakuToggleHideCts?.Cancel();
+        _danmakuToggleHideCts?.Dispose();
+        _danmakuToggleHideCts = null;
+
+        try
+        {
+            DanmakuToggleBtn.Opacity = 0;
+            DanmakuToggleBtn.IsHitTestVisible = false;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void ShowDanmakuToggle()
+    {
+        _danmakuToggleHideCts?.Cancel();
+        _danmakuToggleHideCts?.Dispose();
+        _danmakuToggleHideCts = null;
+
+        try
+        {
+            DanmakuToggleBtn.Opacity = 1;
+            DanmakuToggleBtn.IsHitTestVisible = true;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task HideDanmakuToggleWithDelayAsync(int delayMs = 300)
+    {
+        try
+        {
+            _danmakuToggleHideCts?.Cancel();
+            _danmakuToggleHideCts?.Dispose();
+            _danmakuToggleHideCts = new CancellationTokenSource();
+            var ct = _danmakuToggleHideCts.Token;
+
+            await Task.Delay(delayMs, ct);
+
+            if (ct.IsCancellationRequested || _mode != LiveMode.Playing)
+            {
+                return;
+            }
+
+            _dq.TryEnqueue(() =>
+            {
+                try
+                {
+                    if (_mode != LiveMode.Playing)
+                    {
+                        return;
+                    }
+                    DanmakuToggleBtn.Opacity = 0;
+                    DanmakuToggleBtn.IsHitTestVisible = false;
+                }
+                catch
+                {
+                    // ignore
+                }
+            });
+        }
+        catch
+        {
+            // ignore - best effort UI
+        }
+    }
+
+    private void OnDanmakuToggleHotZonePointerEntered(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e
+    )
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        ShowDanmakuToggle();
+    }
+
+    private void OnDanmakuToggleHotZonePointerExited(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e
+    )
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        _ = HideDanmakuToggleWithDelayAsync();
+    }
+
+    private void OnDanmakuTogglePointerEntered(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e
+    )
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        ShowDanmakuToggle();
+    }
+
+    private void OnDanmakuTogglePointerExited(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e
+    )
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        _ = HideDanmakuToggleWithDelayAsync();
+    }
+
+    private void UpdateDanmakuToggleIcon()
+    {
+        try
+        {
+            DanmakuToggleIcon.Glyph = _danmakuExpanded ? "\uE76B" : "\uE76C"; // ChevronLeft / ChevronRight
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private void UpdateDanmakuPane()
@@ -514,18 +1015,19 @@ public sealed partial class LivePage : Page
             SplitterCol.Width = new GridLength(0);
             DanmakuPane.Visibility = Visibility.Collapsed;
             DanmakuSplitter.Visibility = Visibility.Collapsed;
-            DanmakuToggleBtn.Visibility = Visibility.Collapsed;
+            DanmakuToggleHotZone.Visibility = Visibility.Collapsed;
+            HideDanmakuToggleImmediately();
             return;
         }
 
-        DanmakuToggleBtn.Visibility = Visibility.Visible;
+        DanmakuToggleHotZone.Visibility = Visibility.Visible;
         if (_danmakuExpanded)
         {
             DanmakuCol.Width = new GridLength(_danmakuWidthPx);
             SplitterCol.Width = new Microsoft.UI.Xaml.GridLength(SplitterWidthPx);
             DanmakuPane.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
             DanmakuSplitter.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
-            DanmakuToggleIcon.Symbol = Symbol.Back;
+            UpdateDanmakuToggleIcon();
         }
         else
         {
@@ -533,7 +1035,7 @@ public sealed partial class LivePage : Page
             SplitterCol.Width = new Microsoft.UI.Xaml.GridLength(0);
             DanmakuPane.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
             DanmakuSplitter.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
-            DanmakuToggleIcon.Symbol = Symbol.Forward;
+            UpdateDanmakuToggleIcon();
         }
     }
 
@@ -601,7 +1103,7 @@ public sealed partial class LivePage : Page
         await RunOnUiAsync(() =>
         {
             DanmakuSplitter.IsHitTestVisible = true;
-            DanmakuToggleIcon.Symbol = expand ? Symbol.Back : Symbol.Forward;
+            UpdateDanmakuToggleIcon();
             if (!expand)
             {
                 DanmakuPane.Visibility = Visibility.Collapsed;
@@ -621,10 +1123,45 @@ public sealed partial class LivePage : Page
     private void SetMode(LiveMode mode)
     {
         _mode = mode;
+
         ParsePanel.Visibility = mode == LiveMode.Playing ? Visibility.Collapsed : Visibility.Visible;
         SelectPane.Visibility = mode == LiveMode.Playing ? Visibility.Collapsed : Visibility.Visible;
         PlayerPane.Visibility = mode == LiveMode.Playing ? Visibility.Visible : Visibility.Collapsed;
+        if (mode == LiveMode.Playing)
+        {
+            HideDanmakuToggleImmediately();
+            ShowDanmakuToggle();
+            _ = HideDanmakuToggleWithDelayAsync(1500);
+        }
+        else
+        {
+            SetPlayUiState(PlayUiState.Idle, null);
+        }
         UpdateDanmakuPane();
+    }
+
+    private void SetPlayUiState(PlayUiState state, string? failureMessage)
+    {
+        _playUiState = state;
+        PlayerOpeningOverlay.Visibility = state == PlayUiState.Opening
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PlayerFailedOverlay.Visibility = state == PlayUiState.Failed
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        if (state == PlayUiState.Failed)
+        {
+            PlayerFailedMessage.Text = string.IsNullOrWhiteSpace(failureMessage)
+                ? "未知错误"
+                : failureMessage;
+            RetryPlayBtn.IsEnabled = _lastPlayRequest is not null;
+        }
+        else
+        {
+            PlayerFailedMessage.Text = "";
+            RetryPlayBtn.IsEnabled = false;
+        }
     }
 
     private void OnVariantCardPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
@@ -712,34 +1249,54 @@ public sealed partial class LivePage : Page
 
     private void OnDanmakuMessage(object? sender, DanmakuMessage msg)
     {
-        if (_sessionId is null || msg.SessionId != _sessionId)
+        var sid = _sessionId;
+        if (sid is null || msg.SessionId != sid)
         {
             return;
         }
 
-        _dq.TryEnqueue(async () =>
+        _dq.TryEnqueue(() =>
         {
-            var row = new DanmakuRowVm(msg.User, msg.Text);
-            Rows.Add(row);
-            if (Rows.Count > 5000)
+            try
             {
-                Rows.RemoveAt(0);
-            }
-            if (_danmakuExpanded)
-            {
-                DanmakuList.ScrollIntoView(row);
-            }
+                if (_sessionId != sid)
+                {
+                    return;
+                }
 
-            if (!string.IsNullOrWhiteSpace(msg.ImageUrl))
+                var row = new DanmakuRowVm(msg.User, msg.Text);
+                Rows.Add(row);
+                if (Rows.Count > 5000)
+                {
+                    Rows.RemoveAt(0);
+                }
+                if (_danmakuExpanded)
+                {
+                    try
+                    {
+                        DanmakuList.ScrollIntoView(row);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(msg.ImageUrl))
+                {
+                    _ = TryLoadEmoteAsync(sid, row, msg.ImageUrl!);
+                }
+            }
+            catch
             {
-                await TryLoadEmoteAsync(row, msg.ImageUrl!);
+                // ignore
             }
         });
     }
 
-    private async Task TryLoadEmoteAsync(DanmakuRowVm row, string url)
+    private async Task TryLoadEmoteAsync(string sid, DanmakuRowVm row, string url)
     {
-        if (_sessionId is null)
+        if (_sessionId != sid)
         {
             return;
         }
@@ -747,7 +1304,12 @@ public sealed partial class LivePage : Page
         await _imageSem.WaitAsync();
         try
         {
-            var res = await DaemonClient.Instance.FetchDanmakuImageAsync(_sessionId, url);
+            if (_sessionId != sid)
+            {
+                return;
+            }
+
+            var res = await _backend.FetchDanmakuImageAsync(sid, url, CancellationToken.None);
             if (string.IsNullOrWhiteSpace(res.Base64))
             {
                 return;
@@ -758,9 +1320,17 @@ public sealed partial class LivePage : Page
             await ms.WriteAsync(bytes.AsBuffer());
             ms.Seek(0);
 
-            var bmp = new BitmapImage();
-            await bmp.SetSourceAsync(ms);
-            row.Emote = bmp;
+            await RunOnUiAsync(async () =>
+            {
+                if (_sessionId != sid)
+                {
+                    return;
+                }
+                var bmp = new BitmapImage();
+                ms.Seek(0);
+                await bmp.SetSourceAsync(ms);
+                row.Emote = bmp;
+            });
         }
         catch
         {
@@ -770,6 +1340,23 @@ public sealed partial class LivePage : Page
         {
             _imageSem.Release();
         }
+    }
+
+    private string? TryGetDaemonLogPath()
+    {
+        try
+        {
+            if (_backend is DaemonLiveBackend)
+            {
+                return DaemonClient.Instance.DaemonLogPath;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return null;
     }
 }
 

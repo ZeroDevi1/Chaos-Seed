@@ -55,6 +55,13 @@ fn build_winui3(release: bool) -> Result<(), String> {
     }
     run_cmd(cargo)?;
 
+    let mut cargo_ffi = Command::new("cargo");
+    cargo_ffi.arg("build").arg("-p").arg("chaos-ffi");
+    if release {
+        cargo_ffi.arg("--release");
+    }
+    run_cmd(cargo_ffi)?;
+
     if !cfg!(windows) {
         return Ok(());
     }
@@ -99,6 +106,11 @@ fn build_winui3(release: bool) -> Result<(), String> {
         .join("chaos-daemon.exe");
     if !exe.exists() {
         return Err(format!("expected daemon at {}", exe.display()));
+    }
+
+    let ffi = root.join("target").join(profile).join("chaos_ffi.dll");
+    if !ffi.exists() {
+        return Err(format!("expected ffi dll at {}", ffi.display()));
     }
 
     Ok(())

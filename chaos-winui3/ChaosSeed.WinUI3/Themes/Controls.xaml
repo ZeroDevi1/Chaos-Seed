@@ -24,5 +24,16 @@
         <Setter Property="CornerRadius" Value="{StaticResource ChaosCornerRadius12}" />
         <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
     </Style>
-</ResourceDictionary>
 
+    <Style x:Key="ChaosDanmakuEdgeToggleStyle" TargetType="Button">
+        <Setter Property="Width" Value="12" />
+        <Setter Property="Height" Value="56" />
+        <Setter Property="MinWidth" Value="12" />
+        <Setter Property="MinHeight" Value="56" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="{ThemeResource SystemControlBackgroundBaseLowBrush}" />
+    </Style>
+</ResourceDictionary>

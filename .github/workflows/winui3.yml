@@ -1,0 +1,88 @@
+name: winui3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "chaos-winui3/**"
+      - "chaos-core/**"
+      - "chaos-ffi/**"
+      - "chaos-daemon/**"
+      - "chaos-app/**"
+      - "scripts/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/winui3.yml"
+  pull_request:
+    paths:
+      - "chaos-winui3/**"
+      - "chaos-core/**"
+      - "chaos-ffi/**"
+      - "chaos-daemon/**"
+      - "chaos-app/**"
+      - "scripts/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/winui3.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winui3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (1.93.0)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.0"
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build WinUI3 (Release)
+        shell: pwsh
+        run: cargo xtask build-winui3 --release
+
+      - name: Package ChaosSeed.WinUI3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          $candidates = @(
+            "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64",
+            "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release/net8.0-windows10.0.19041.0",
+            "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release"
+          )
+
+          $outDir = $candidates | Where-Object { Test-Path (Join-Path $_ "ChaosSeed.WinUI3.exe") } | Select-Object -First 1
+          if (!$outDir) {
+            $probe = Get-ChildItem -Recurse -ErrorAction SilentlyContinue -Path "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release" -Filter "ChaosSeed.WinUI3.exe" | Select-Object -First 1
+            if ($probe) { $outDir = Split-Path -Parent $probe.FullName }
+          }
+          if (!$outDir) { throw "failed to locate WinUI3 output directory (missing ChaosSeed.WinUI3.exe)" }
+
+          Compress-Archive -Force -Path (Join-Path $outDir "*") -DestinationPath dist/chaos-winui3-windows-x86_64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-winui3-windows-x86_64
+          path: dist/chaos-winui3-windows-x86_64.zip
+

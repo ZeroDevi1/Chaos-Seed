@@ -34,8 +34,8 @@
         <Grid Grid.Row="1" Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition x:Name="SplitterCol" Width="6" />
-                <ColumnDefinition x:Name="DanmakuCol" Width="280" />
+                <ColumnDefinition x:Name="SplitterCol" Width="0" />
+                <ColumnDefinition x:Name="DanmakuCol" Width="0" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="0">
@@ -111,43 +111,94 @@
                                 <EntranceThemeTransition FromHorizontalOffset="64" />
                             </TransitionCollection>
                         </Grid.Transitions>
-                        <Grid>
-                            <fl:FlyleafHost x:Name="FlyleafHost" />
 
-                            <Image x:Name="HeroCover" Visibility="Collapsed" Stretch="UniformToFill" />
+                        <fl:FlyleafHost
+                            x:Name="FlyleafHost"
+                            Background="Black"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch" />
 
-                            <muxc:InfoBar
-                                x:Name="PlayerStatusBar"
-                                IsOpen="False"
-                                IsClosable="True"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Top"
-                                Margin="12"
-                                MaxWidth="720" />
+                        <Image x:Name="HeroCover" Visibility="Collapsed" Stretch="UniformToFill" />
 
-                            <Button
-                                x:Name="BackToSelectBtn"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Top"
-                                Margin="12,12,0,0"
-                                Click="OnBackToSelect">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <muxc:SymbolIcon Symbol="Back" />
-                                    <TextBlock Text="返回" />
-                                </StackPanel>
-                            </Button>
+                        <muxc:InfoBar
+                            x:Name="PlayerStatusBar"
+                            IsOpen="False"
+                            IsClosable="True"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Margin="12"
+                            MaxWidth="720" />
 
+                        <Button
+                            x:Name="BackToSelectBtn"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Margin="12,12,0,0"
+                            Click="OnBackToSelect">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <muxc:SymbolIcon Symbol="Back" />
+                                <TextBlock Text="返回" />
+                            </StackPanel>
+                        </Button>
+
+                        <Border
+                            x:Name="DanmakuToggleHotZone"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Stretch"
+                            Width="20"
+                            Background="Transparent"
+                            PointerEntered="OnDanmakuToggleHotZonePointerEntered"
+                            PointerExited="OnDanmakuToggleHotZonePointerExited">
                             <Button
                                 x:Name="DanmakuToggleBtn"
-                                HorizontalAlignment="Right"
+                                Style="{StaticResource ChaosDanmakuEdgeToggleStyle}"
+                                HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
-                                Margin="0,0,8,0"
                                 Click="OnToggleDanmaku"
-                                Width="36"
-                                Height="36">
-                                <muxc:SymbolIcon x:Name="DanmakuToggleIcon" Symbol="Back" />
+                                Opacity="0"
+                                IsHitTestVisible="False"
+                                PointerEntered="OnDanmakuTogglePointerEntered"
+                                PointerExited="OnDanmakuTogglePointerExited">
+                                <FontIcon
+                                    x:Name="DanmakuToggleIcon"
+                                    FontFamily="Segoe MDL2 Assets"
+                                    Glyph="&#xE76B;"
+                                    FontSize="12" />
                             </Button>
-                        </Grid>
+                        </Border>
+
+                        <Border
+                            x:Name="PlayerOpeningOverlay"
+                            Visibility="Collapsed"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="#88000000"
+                            CornerRadius="10"
+                            Padding="18">
+                            <StackPanel Spacing="10" Orientation="Horizontal">
+                                <ProgressRing Width="24" Height="24" IsActive="True" />
+                                <TextBlock VerticalAlignment="Center" Text="正在打开直播流..." />
+                            </StackPanel>
+                        </Border>
+
+                        <Border
+                            x:Name="PlayerFailedOverlay"
+                            Visibility="Collapsed"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Background="#AA101010"
+                            CornerRadius="10"
+                            Padding="16"
+                            MaxWidth="560">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="播放打开失败" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock x:Name="PlayerFailedMessage" TextWrapping="WrapWholeWords" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="RetryPlayBtn" Content="重试" Click="OnRetryPlayClicked" />
+                                    <Button x:Name="BackToSelectFailedBtn" Content="返回选择" Click="OnBackToSelectFromFailedClicked" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </Grid>
                 </Grid>
             </Border>
@@ -167,7 +218,7 @@
             <Border
                 x:Name="DanmakuPane"
                 Grid.Column="2"
-                Margin="12,0,0,0"
+                Margin="6,0,0,0"
                 Style="{StaticResource ChaosCardBorderStyle}"
                 Padding="0">
                 <ListView x:Name="DanmakuList" ItemsSource="{x:Bind Rows, Mode=OneTime}">
@@ -179,7 +230,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <TextBlock Text="{x:Bind DisplayText}" TextWrapping="NoWrap" />
+                                <TextBlock Text="{x:Bind DisplayText}" FontSize="12" TextWrapping="Wrap" />
                                 <Image Grid.Column="1" Width="24" Height="24" Margin="8,0,0,0" Source="{x:Bind Emote, Mode=OneWay}" />
                             </Grid>
                         </DataTemplate>

@@ -1,4 +1,8 @@
 using System.IO;
+using System.Diagnostics;
+using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
+using System.Threading;
 using FlyleafLib;
 using Microsoft.UI.Xaml;
 
@@ -8,12 +12,45 @@ public sealed partial class App : Application
 {
     public static MainWindow? MainWindowInstance { get; private set; }
     public static string? FlyleafInitError { get; private set; }
+#if DEBUG
+    private static int _comFirstChanceLogged;
+#endif
 
     public App()
     {
         InitializeComponent();
+#if DEBUG
+        AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
+#endif
         TryInitFlyleaf();
     }
+
+#if DEBUG
+    private static void OnFirstChanceException(object? sender, FirstChanceExceptionEventArgs e)
+    {
+        if (e.Exception is not COMException com)
+        {
+            return;
+        }
+
+        var idx = Interlocked.Increment(ref _comFirstChanceLogged);
+        if (idx > 10)
+        {
+            return;
+        }
+
+        try
+        {
+            Debug.WriteLine(
+                $"[COM#{idx}] HRESULT=0x{com.HResult:X8} {com.Message}\n{com.StackTrace}\n"
+            );
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+#endif
 
     private static void TryInitFlyleaf()
     {
@@ -29,67 +66,18 @@ public sealed partial class App : Application
             {
                 FFmpegPath = ffmpegDir,
 #if DEBUG
-                FFmpegLogLevel = Flyleaf.FFmpeg.LogLevel.Warn,
                 LogLevel = LogLevel.Debug,
                 LogOutput = ":debug",
 #else
-                FFmpegLogLevel = Flyleaf.FFmpeg.LogLevel.Quiet,
                 LogLevel = LogLevel.Quiet,
 #endif
-                UIRefresh = false,
-                UIRefreshInterval = 250,
             };
-
-            TrySetBool(cfg, "FFmpegDevices", false);
-            TrySetBool(cfg, "UICurTimePerSecond", true);
-            TrySetEnum(cfg, "FFmpegLoadProfile", "Filters");
 
             Engine.Start(cfg);
         }
         catch (Exception ex)
         {
             FlyleafInitError = ex.ToString();
-        }
-    }
-
-    private static void TrySetBool(object target, string propName, bool value)
-    {
-        try
-        {
-            var p = target.GetType().GetProperty(propName);
-            if (p?.PropertyType == typeof(bool) && p.CanWrite)
-            {
-                p.SetValue(target, value);
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-
-    private static void TrySetEnum(object target, string propName, string enumName)
-    {
-        try
-        {
-            var p = target.GetType().GetProperty(propName);
-            if (p?.CanWrite != true)
-            {
-                return;
-            }
-            var t = p.PropertyType;
-            if (!t.IsEnum)
-            {
-                return;
-            }
-            if (Enum.TryParse(t, enumName, ignoreCase: true, out var v))
-            {
-                p.SetValue(target, v);
-            }
-        }
-        catch
-        {
-            // ignore
         }
     }
 

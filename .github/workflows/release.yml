@@ -20,6 +20,11 @@ jobs:
         with:
           toolchain: "1.93.0"
 
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -29,9 +34,9 @@ jobs:
         shell: pwsh
         run: corepack enable
 
-      - name: Build chaos-ffi (release)
+      - name: Build WinUI3 + daemon + ffi (release)
         shell: pwsh
-        run: cargo build -p chaos-ffi --release
+        run: cargo xtask build-winui3 --release
 
       - name: Package chaos-ffi
         shell: pwsh
@@ -43,6 +48,32 @@ jobs:
           $hdr = Join-Path "chaos-ffi/include" "chaos_ffi_bindings.h"
           if (!(Test-Path $hdr)) { throw "missing $hdr" }
           Compress-Archive -Force -Path $dll, $hdr -DestinationPath dist/chaos-ffi-windows-x86_64.zip
+
+      - name: Package ChaosSeed.WinUI3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          $candidates = @(
+            "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64",
+            "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release/net8.0-windows10.0.19041.0",
+            "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release"
+          )
+
+          $outDir = $candidates | Where-Object { Test-Path (Join-Path $_ "ChaosSeed.WinUI3.exe") } | Select-Object -First 1
+          if (!$outDir) {
+            $probe = Get-ChildItem -Recurse -ErrorAction SilentlyContinue -Path "chaos-winui3/ChaosSeed.WinUI3/bin/x64/Release" -Filter "ChaosSeed.WinUI3.exe" | Select-Object -First 1
+            if ($probe) { $outDir = Split-Path -Parent $probe.FullName }
+          }
+          if (!$outDir) { throw "failed to locate WinUI3 output directory (missing ChaosSeed.WinUI3.exe)" }
+
+          # Sanity-check key runtime dependencies expected by FFI/daemon playback.
+          if (!(Test-Path (Join-Path $outDir "chaos-daemon.exe"))) { throw "missing chaos-daemon.exe in output dir: $outDir" }
+          if (!(Test-Path (Join-Path $outDir "chaos_ffi.dll"))) { throw "missing chaos_ffi.dll in output dir: $outDir" }
+          if (!(Test-Path (Join-Path $outDir "FFmpeg"))) { throw "missing FFmpeg/ in output dir: $outDir" }
+
+          Compress-Archive -Force -Path (Join-Path $outDir "*") -DestinationPath dist/chaos-winui3-windows-x86_64.zip
 
       - name: Install frontend deps
         shell: pwsh
@@ -90,4 +121,5 @@ jobs:
         with:
           files: |
             dist/chaos-ffi-windows-x86_64.zip
+            dist/chaos-winui3-windows-x86_64.zip
             dist/chaos-tauri-windows-x86_64.zip

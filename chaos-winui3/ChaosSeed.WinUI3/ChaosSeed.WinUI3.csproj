@@ -10,6 +10,8 @@
     <Platforms>x64</Platforms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Required by LibraryImport source generator (SYSLIB1062). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Provide our own Program.Main to call XamlCheckProcessRequirements early. -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
@@ -33,10 +35,17 @@
     <RustProfile Condition="'$(Configuration)'=='Release'">release</RustProfile>
     <RustProfile Condition="'$(Configuration)'!='Release'">debug</RustProfile>
     <ChaosDaemonExe>$(RustTargetDir)\$(RustProfile)\chaos-daemon.exe</ChaosDaemonExe>
+    <ChaosFfiDll>$(RustTargetDir)\$(RustProfile)\chaos_ffi.dll</ChaosFfiDll>
   </PropertyGroup>
 
   <Target Name="CopyChaosDaemon" AfterTargets="Build">
     <Message Importance="high" Text="Copying chaos-daemon from $(ChaosDaemonExe) to $(OutDir)" />
     <Copy SourceFiles="$(ChaosDaemonExe)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyChaosFfi" AfterTargets="Build">
+    <Message Importance="high" Text="Copying chaos_ffi from $(ChaosFfiDll) to $(OutDir)" Condition="Exists('$(ChaosFfiDll)')" />
+    <Copy SourceFiles="$(ChaosFfiDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('$(ChaosFfiDll)')" />
+    <Message Importance="high" Text="chaos_ffi.dll not found at $(ChaosFfiDll). Build it first with: cargo build -p chaos-ffi (or cargo xtask build-winui3 --release)" Condition="!Exists('$(ChaosFfiDll)')" />
   </Target>
 </Project>

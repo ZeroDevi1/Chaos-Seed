@@ -1,6 +1,8 @@
-# BUILD_WINUI3（Windows / WinUI 3 + chaos-daemon）
+# BUILD_WINUI3（Windows / WinUI 3 + daemon/FFI）
 
-> 本文档用于在 Windows 上构建与运行 `chaos-winui3`（WinUI 3 UI）与 `chaos-daemon`（Rust NamedPipe JSON-RPC 后端）。
+> 本文档用于在 Windows 上构建与运行 `chaos-winui3`（WinUI 3 UI），并支持两种直播后端：
+> - daemon：`chaos-daemon.exe`（Rust NamedPipe JSON-RPC）
+> - FFI：`chaos_ffi.dll`（直接 P/Invoke 调用）
 > 本仓库在 WSL 内开发时，推荐先同步到 Windows 文件系统后再在 Windows 侧执行构建。
 
 ## 依赖（Windows）
@@ -19,20 +21,23 @@
 
 ```bash
 # 1) cargo build -p chaos-daemon --release
-# 2) msbuild/dotnet build chaos-winui3/ChaosSeed.WinUI3.sln
+# 2) cargo build -p chaos-ffi --release
+# 3) msbuild/dotnet build chaos-winui3/ChaosSeed.WinUI3.sln
 cargo xtask build-winui3 --release
 ```
 
 说明：
 - `chaos-winui3` 的 `csproj` 会在构建完成后，把 `target/release/chaos-daemon.exe` 复制到 WinUI 3 输出目录（与 WinUI exe 同目录）。
+- 同时会把 `target/release/chaos_ffi.dll` 复制到 WinUI 3 输出目录，供设置页选择 FFI 后端使用。
 
 ## 运行（开发/调试）
 
-1. 运行 `chaos-winui3` 输出目录下的 WinUI 3 可执行文件（会自动启动 `chaos-daemon.exe`）
+1. 运行 `chaos-winui3` 输出目录下的 WinUI 3 可执行文件（当选择 daemon 后端时会自动启动 `chaos-daemon.exe`）
+   - 设置页可选择直播后端：自动 / FFI / daemon
 2. 在主页输入直播间地址（URL 或带平台前缀的输入）
 3. 点击“解析并进入直播”进入直播页：
    - 先解析并展示清晰度/线路卡片（含缩略图/标题/主播/状态等）
-   - 点击卡片进入播放（Flyleaf）并连接右侧弹幕滚动（`用户名: 内容`；表情图片通过 `danmaku.fetchImage` 拉取）
+   - 点击卡片进入播放（Flyleaf）并连接右侧弹幕滚动（`用户名: 内容`；带表情的弹幕会尝试拉取图片并显示）
 
 ## 运行时依赖（FFmpeg / Flyleaf）
 

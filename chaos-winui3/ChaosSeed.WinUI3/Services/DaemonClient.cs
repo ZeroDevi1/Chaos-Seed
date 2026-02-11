@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using ChaosSeed.WinUI3.Models;
 using StreamJsonRpc;
 using StreamJsonRpc.Protocol;
+using StreamJsonRpc.Reflection;
 
 namespace ChaosSeed.WinUI3.Services;
 
@@ -108,7 +109,17 @@ public sealed class DaemonClient : IDisposable
 
             var formatter = new JsonMessageFormatter();
             var handler = new HeaderDelimitedMessageHandler(_pipe, _pipe, formatter);
-            _rpc = new JsonRpc(handler, _notifications);
+            _rpc = new JsonRpc(handler);
+            _rpc.AddLocalRpcTarget(
+                _notifications,
+                new JsonRpcTargetOptions
+                {
+                    // daemon sends notification payload as a single object (params = { sessionId, ... })
+                    // instead of wrapping it with the argument name (params = { msg: { ... } }).
+                    // Enable single-object deserialization so DanmakuMessage(DanmakuMessage msg) can bind.
+                    UseSingleObjectParameterDeserialization = true,
+                }
+            );
             _rpc.StartListening();
 
             await _rpc.InvokeWithParameterObjectAsync<DaemonPingResult>(
@@ -136,11 +147,18 @@ public sealed class DaemonClient : IDisposable
             throw new InvalidOperationException("rpc not connected");
         }
 
-        return await _rpc.InvokeWithParameterObjectAsync<LiveOpenResult>(
-            "live.open",
-            new { input, preferredQuality = "highest" },
-            ct
-        );
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<LiveOpenResult>(
+                "live.open",
+                new { input, preferredQuality = "highest" },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("live.open", ex);
+        }
     }
 
     public async Task<LiveOpenResult> OpenLiveAsync(string input, string? variantId, CancellationToken ct = default)
@@ -151,11 +169,22 @@ public sealed class DaemonClient : IDisposable
             throw new InvalidOperationException("rpc not connected");
         }
 
-        return await _rpc.InvokeWithParameterObjectAsync<LiveOpenResult>(
-            "live.open",
-            new { input, preferredQuality = "highest", variantId },
-            ct
-        );
+        object payload = string.IsNullOrWhiteSpace(variantId)
+            ? new { input, preferredQuality = "highest" }
+            : new { input, preferredQuality = "highest", variantId = variantId.Trim() };
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<LiveOpenResult>(
+                "live.open",
+                payload,
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("live.open", ex);
+        }
     }
 
     public async Task<LivestreamDecodeManifestResult> DecodeManifestAsync(string input, CancellationToken ct = default)
@@ -320,6 +349,16 @@ public sealed class DaemonClient : IDisposable
                 _daemonLogTail.Dequeue();
             }
         }
+    }
+
+    private Exception WrapRpcFailure(string method, RemoteInvocationException ex)
+    {
+        var msg = $"{method} failed: {ex.Message}";
+        if (!string.IsNullOrWhiteSpace(_daemonLogPath))
+        {
+            msg += $"\n（daemon 日志：{_daemonLogPath}）";
+        }
+        return new Exception(msg, ex);
     }
 
     private bool IsConnectionHealthy()

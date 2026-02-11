@@ -38,6 +38,13 @@ public sealed partial class SettingsPage : Page
             _ => 0, // Mica
         };
 
+        LiveBackendCombo.SelectedIndex = s.LiveBackendMode switch
+        {
+            LiveBackendMode.Ffi => 1,
+            LiveBackendMode.Daemon => 2,
+            _ => 0, // Auto
+        };
+
         var win11 = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
         BackdropCombo.IsEnabled = win11;
         BackdropHint.IsOpen = !win11;
@@ -81,5 +88,25 @@ public sealed partial class SettingsPage : Page
             _ => BackdropMode.Mica,
         };
         SettingsService.Instance.Update(s => s.BackdropMode = mode);
+    }
+
+    private void OnLiveBackendChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_init)
+        {
+            return;
+        }
+        if (LiveBackendCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string tag)
+        {
+            return;
+        }
+
+        var mode = tag switch
+        {
+            "Ffi" => LiveBackendMode.Ffi,
+            "Daemon" => LiveBackendMode.Daemon,
+            _ => LiveBackendMode.Auto,
+        };
+        SettingsService.Instance.Update(s => s.LiveBackendMode = mode);
     }
 }

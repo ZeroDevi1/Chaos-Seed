@@ -13,7 +13,7 @@
             </Grid.Transitions>
             <StackPanel Spacing="12">
                 <TextBlock Text="设置" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="提示：主题 / Backdrop / 播放器内核 会自动持久化。" Opacity="0.8" />
+                <TextBlock Text="提示：主题 / Backdrop / 直播后端 会自动持久化。" Opacity="0.8" />
 
                 <Border Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                     <StackPanel Spacing="12">
@@ -40,6 +40,19 @@
                                 <ComboBoxItem Content="Mica（更像原生）" Tag="Mica" />
                                 <ComboBoxItem Content="Mica Alt（更浅/更分层）" Tag="MicaAlt" />
                                 <ComboBoxItem Content="无" Tag="None" />
+                            </ComboBox>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="直播后端" VerticalAlignment="Center" />
+                            <ComboBox x:Name="LiveBackendCombo" Grid.Column="1" SelectionChanged="OnLiveBackendChanged">
+                                <ComboBoxItem Content="自动（优先 FFI）" Tag="Auto" />
+                                <ComboBoxItem Content="FFI（chaos_ffi.dll）" Tag="Ffi" />
+                                <ComboBoxItem Content="Daemon（chaos-daemon.exe）" Tag="Daemon" />
                             </ComboBox>
                         </Grid>
 

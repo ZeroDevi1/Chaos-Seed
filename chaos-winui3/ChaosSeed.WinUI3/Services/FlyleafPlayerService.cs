@@ -1,18 +1,28 @@
+using System.Threading;
 using FlyleafLib;
 using FlyleafLib.MediaPlayer;
 using Microsoft.UI.Dispatching;
 
 namespace ChaosSeed.WinUI3.Services;
 
+public sealed class PlayOpenOptions
+{
+    public TimeSpan OpenTimeout { get; init; } = TimeSpan.FromSeconds(15);
+    public int RetryPerUrl { get; init; } = 1;
+    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(300);
+}
+
 public sealed class FlyleafPlayerService : IDisposable
 {
     private readonly DispatcherQueue _dq;
     private readonly Config _config;
     private readonly Player _player;
+    private readonly SemaphoreSlim _openGate = new(1, 1);
 
     public FlyleafPlayerService(DispatcherQueue dispatcherQueue)
     {
-        _dq = dispatcherQueue;
+        _dq = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
+
         if (!Engine.IsLoaded)
         {
             throw new InvalidOperationException(
@@ -20,38 +30,23 @@ public sealed class FlyleafPlayerService : IDisposable
             );
         }
 
-        try
+        // Player / FlyleafHost 的渲染相关对象带有线程亲和性，强制要求在 UI 线程创建。
+        // 如果这里不在 UI 线程创建，后续即使封送到 UI 调用也可能触发 0x8001010E。
+        if (!_dq.HasThreadAccess)
         {
-            _config = new Config();
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"创建 Flyleaf Config 失败：{ex.Message}（通常是 FFmpeg DLL 缺失/不匹配）",
-                ex
-            );
+            throw new InvalidOperationException("FlyleafPlayerService 必须在 UI 线程创建（DispatcherQueue 线程）。");
         }
 
         try
         {
-            if (_config.Player is not null)
-            {
-                _config.Player.AutoPlay = false;
-            }
-        }
-        catch
-        {
-            // ignore - config surface may vary by Flyleaf version
-        }
-
-        try
-        {
-            _player = new Player(_config);
+            _player = new Player();
+            _config = _player.Config;
+            _config.Player.AutoPlay = false;
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException(
-                $"创建 Flyleaf Player 失败：{ex.Message}（通常是 FFmpeg DLL 缺失/不匹配）",
+                $"创建 Flyleaf Player 失败：{ex.Message}（通常是 FFmpeg DLL 缺失/不匹配，或渲染设备初始化失败）",
                 ex
             );
         }
@@ -68,15 +63,70 @@ public sealed class FlyleafPlayerService : IDisposable
         IReadOnlyList<string> backupUrls,
         string? referer,
         string? userAgent,
-        CancellationToken ct = default
+        CancellationToken ct = default,
+        PlayOpenOptions? options = null
     )
     {
-        Stop();
+        await _openGate.WaitAsync(ct);
+        try
+        {
+            // Keep main chain stable: the whole player open/play state machine is executed on UI thread.
+            // This avoids sync-blocking UI marshalling (GetResult) which is a common trigger for 0x8001010E.
+            await RunOnUiAsync(() => PlayCoreOnUiAsync(site, url, backupUrls, referer, userAgent, ct, options), ct);
+        }
+        finally
+        {
+            _openGate.Release();
+        }
+    }
 
-        ApplyHttpHints(referer, userAgent);
+    public void Stop()
+    {
+        try
+        {
+            if (_dq.HasThreadAccess)
+            {
+                _player.Stop();
+            }
+            else
+            {
+                // Don't block. If we're called off-thread (teardown/background), just enqueue best-effort.
+                _dq.TryEnqueue(() =>
+                {
+                    try { _player.Stop(); } catch { }
+                });
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task PlayCoreOnUiAsync(
+        string site,
+        string url,
+        IReadOnlyList<string> backupUrls,
+        string? referer,
+        string? userAgent,
+        CancellationToken ct,
+        PlayOpenOptions? options
+    )
+    {
+        if (!_dq.HasThreadAccess)
+        {
+            throw new InvalidOperationException("PlayCoreOnUiAsync must run on UI thread.");
+        }
+
+        _ = site;
+        options ??= new PlayOpenOptions();
+
+        // Ensure a clean state before trying URLs.
+        try { _player.Stop(); } catch { }
+        ApplyHttpHintsUnsafe(referer, userAgent);
 
         var primary = (url ?? "").Trim();
-        var backups = backupUrls
+        var backups = (backupUrls ?? Array.Empty<string>())
             .Select(u => (u ?? "").Trim())
             .Where(u => !string.IsNullOrWhiteSpace(u))
             .ToList();
@@ -87,22 +137,11 @@ public sealed class FlyleafPlayerService : IDisposable
         }
 
         var candidates = new List<string>();
-        if (string.Equals(site?.Trim(), "bili_live", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(primary))
         {
-            candidates.AddRange(backups);
-            if (!string.IsNullOrWhiteSpace(primary))
-            {
-                candidates.Add(primary);
-            }
+            candidates.Add(primary);
         }
-        else
-        {
-            if (!string.IsNullOrWhiteSpace(primary))
-            {
-                candidates.Add(primary);
-            }
-            candidates.AddRange(backups);
-        }
+        candidates.AddRange(backups);
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         candidates = candidates.Where(u => seen.Add(u)).ToList();
@@ -110,37 +149,42 @@ public sealed class FlyleafPlayerService : IDisposable
         Exception? last = null;
         foreach (var u in candidates)
         {
-            try
+            for (var attempt = 0; attempt <= Math.Max(0, options.RetryPerUrl); attempt++)
             {
-                ct.ThrowIfCancellationRequested();
-                Info?.Invoke(this, $"加载：{u}");
-                await OpenOnceAsync(u, ct);
-                _player.Play();
-                return;
-            }
-            catch (Exception ex)
-            {
-                last = ex;
-                Error?.Invoke(this, $"尝试播放失败：{ex.Message}");
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Info?.Invoke(this, $"加载[{attempt + 1}/{Math.Max(0, options.RetryPerUrl) + 1}]：{u}");
+
+                    using var openCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    openCts.CancelAfter(options.OpenTimeout);
+                    await OpenWithDefaultsOnUiAsync(u, openCts.Token);
+
+                    Info?.Invoke(this, "播放开始");
+                    return;
+                }
+                catch (OperationCanceledException ocex) when (!ct.IsCancellationRequested)
+                {
+                    last = ocex;
+                    Error?.Invoke(this, $"打开超时：{u}");
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    Error?.Invoke(this, $"尝试播放失败：{ex.Message}");
+                }
+
+                if (attempt < Math.Max(0, options.RetryPerUrl))
+                {
+                    await Task.Delay(options.RetryDelay, ct);
+                }
             }
         }
 
         throw last ?? new Exception("play failed");
     }
 
-    public void Stop()
-    {
-        try
-        {
-            _player.Stop();
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-
-    private void ApplyHttpHints(string? referer, string? userAgent)
+    private void ApplyHttpHintsUnsafe(string? referer, string? userAgent)
     {
         try
         {
@@ -192,49 +236,150 @@ public sealed class FlyleafPlayerService : IDisposable
         }
     }
 
-    private Task OpenOnceAsync(string url, CancellationToken ct)
+    private async Task OpenWithDefaultsOnUiAsync(string url, CancellationToken ct)
     {
-        var tcs = new TaskCompletionSource<OpenCompletedArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_dq.HasThreadAccess)
+        {
+            throw new InvalidOperationException("OpenWithDefaultsOnUiAsync must run on UI thread.");
+        }
+
+        // Flyleaf may raise OpenCompleted from a non-UI thread, and `OpenCompletedArgs` can be thread-affine.
+        // Always marshal args inspection back to the UI thread to avoid COM marshaling failures (0x8001010E).
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         EventHandler<OpenCompletedArgs>? handler = null;
         handler = (_, args) =>
         {
-            if (args is null || args.IsSubtitles)
+            if (args is null)
             {
                 return;
             }
 
-            _player.OpenCompleted -= handler;
+            var ok = _dq.TryEnqueue(() =>
+            {
+                try
+                {
+                    if (args.IsSubtitles)
+                    {
+                        return;
+                    }
 
-            if (args.Success)
+                    if (args.Success)
+                    {
+                        tcs.TrySetResult(true);
+                    }
+                    else
+                    {
+                        tcs.TrySetException(new Exception(args.Error ?? "open failed"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            });
+
+            if (!ok)
             {
-                tcs.TrySetResult(args);
-            }
-            else
-            {
-                tcs.TrySetException(new Exception(args.Error ?? "open failed"));
+                tcs.TrySetException(new InvalidOperationException("failed to enqueue OpenCompleted handler"));
             }
         };
 
         _player.OpenCompleted += handler;
 
+        CancellationTokenRegistration ctr = default;
         try
         {
-            _player.OpenAsync(url);
-        }
-        catch (Exception ex)
-        {
-            _player.OpenCompleted -= handler;
-            tcs.TrySetException(ex);
-        }
+            if (ct.CanBeCanceled)
+            {
+                // Cancellation callback must not touch WinRT/Flyleaf objects.
+                ctr = ct.Register(() => tcs.TrySetCanceled(ct));
+            }
 
-        if (ct.CanBeCanceled)
+            _player.OpenAsync(url);
+            _player.Play();
+            await tcs.Task;
+        }
+        finally
         {
-            ct.Register(() =>
+            ctr.Dispose();
+            try
             {
                 _player.OpenCompleted -= handler;
-                tcs.TrySetCanceled(ct);
-            });
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    private Task RunOnUiAsync(Action action, CancellationToken ct = default)
+    {
+        if (_dq.HasThreadAccess)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (ct.CanBeCanceled)
+        {
+            ct.Register(() => tcs.TrySetCanceled(ct));
+        }
+
+        if (!_dq.TryEnqueue(() =>
+        {
+            try
+            {
+                action();
+                tcs.TrySetResult(null);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        }))
+        {
+            tcs.TrySetException(new InvalidOperationException("failed to enqueue UI action"));
+        }
+
+        return tcs.Task;
+    }
+
+    private Task RunOnUiAsync(Func<Task> action, CancellationToken ct = default)
+    {
+        if (_dq.HasThreadAccess)
+        {
+            return action();
+        }
+
+        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (ct.CanBeCanceled)
+        {
+            ct.Register(() => tcs.TrySetCanceled(ct));
+        }
+
+        if (!_dq.TryEnqueue(() =>
+        {
+            _ = InvokeInnerAsync();
+            return;
+
+            async Task InvokeInnerAsync()
+            {
+                try
+                {
+                    await action();
+                    tcs.TrySetResult(null);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }
+        }))
+        {
+            tcs.TrySetException(new InvalidOperationException("failed to enqueue UI async action"));
         }
 
         return tcs.Task;
@@ -245,7 +390,26 @@ public sealed class FlyleafPlayerService : IDisposable
         Stop();
         try
         {
-            _player.Dispose();
+            _openGate.Dispose();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            if (_dq.HasThreadAccess)
+            {
+                _player.Dispose();
+            }
+            else
+            {
+                _dq.TryEnqueue(() =>
+                {
+                    try { _player.Dispose(); } catch { }
+                });
+            }
         }
         catch
         {
