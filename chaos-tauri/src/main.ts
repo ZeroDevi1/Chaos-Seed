@@ -21,7 +21,7 @@ import type { BackdropMode } from './shared/prefs'
 import type { BootView } from './shared/bootView'
 import { installDisableZoom } from './ui/disableZoom'
 import { applyEarlyTheme } from './ui/earlyTheme'
-import { applyFluentTokens } from './ui/fluent'
+import { applyFluentTokens, initSystemAccent } from './ui/fluent'
 
 function mountError(e: unknown) {
   const root = document.getElementById('app')
@@ -48,6 +48,11 @@ async function main() {
 
   // Reduce "WebView app" vibes: disable browser zoom shortcuts in the embedded webview.
   installDisableZoom()
+
+  // Best-effort: sync Fluent accent tokens to the Windows system accent color.
+  // If this fails (non-Windows/dev mode), the app keeps the fallback accent.
+  await initSystemAccent()
+  applyFluentTokens(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
 
   let unWindowState: (() => void) | undefined
   void (async () => {

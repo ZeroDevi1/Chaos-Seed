@@ -22,10 +22,9 @@ public sealed partial class HomePage : Page
 
         GoBtn.IsEnabled = false;
         InputBox.IsEnabled = false;
-        ShowInfo("解析中...");
+        ShowInfo("跳转到直播页…");
         try
         {
-            var res = await DaemonClient.Instance.OpenLiveAsync(input);
             StatusBar.IsOpen = false;
 
             if (App.MainWindowInstance is not MainWindow mw)
@@ -33,11 +32,7 @@ public sealed partial class HomePage : Page
                 ShowError("无法获取主窗口实例，无法跳转到直播页面。");
                 return;
             }
-            mw.NavigateToLive(res);
-        }
-        catch (Exception ex)
-        {
-            ShowError(ex.Message);
+            mw.NavigateToLive(input);
         }
         finally
         {

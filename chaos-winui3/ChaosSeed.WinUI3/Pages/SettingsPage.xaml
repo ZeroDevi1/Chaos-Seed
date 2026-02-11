@@ -5,12 +5,17 @@
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
 
     <ScrollViewer>
-        <Grid Padding="24">
+        <Grid Padding="{StaticResource ChaosPagePadding}">
+            <Grid.Transitions>
+                <TransitionCollection>
+                    <EntranceThemeTransition FromVerticalOffset="10" />
+                </TransitionCollection>
+            </Grid.Transitions>
             <StackPanel Spacing="12">
                 <TextBlock Text="设置" FontSize="28" FontWeight="SemiBold" />
                 <TextBlock Text="提示：主题 / Backdrop / 播放器内核 会自动持久化。" Opacity="0.8" />
 
-                <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <Border Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                     <StackPanel Spacing="12">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -33,19 +38,8 @@
                             <TextBlock Text="Backdrop（Win11）" VerticalAlignment="Center" />
                             <ComboBox x:Name="BackdropCombo" Grid.Column="1" SelectionChanged="OnBackdropChanged">
                                 <ComboBoxItem Content="Mica（更像原生）" Tag="Mica" />
+                                <ComboBoxItem Content="Mica Alt（更浅/更分层）" Tag="MicaAlt" />
                                 <ComboBoxItem Content="无" Tag="None" />
-                            </ComboBox>
-                        </Grid>
-
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="240" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="播放器内核" VerticalAlignment="Center" />
-                            <ComboBox x:Name="PlayerCombo" Grid.Column="1" SelectionChanged="OnPlayerChanged">
-                                <ComboBoxItem Content="VLC（推荐，支持 FLV）" Tag="Vlc" />
-                                <ComboBoxItem Content="系统（为 FFmpegInteropX 预留）" Tag="System" />
                             </ComboBox>
                         </Grid>
 

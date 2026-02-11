@@ -1,89 +1,96 @@
 :root {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-family:
+    'Segoe UI Variable Text',
+    'Segoe UI Variable Display',
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
   font-size: 14px;
 }
 
 /* Theme variables mapped from `chaos-slint/ui/theme.slint` */
 html[data-theme='light'] {
-  /* WeChat-like: clean white surfaces + subtle separators */
-  --accent: #07c160;
+  /* Prefer Fluent design tokens; fall back to our previous palette if tokens are missing. */
+  --accent: var(--accent-base-color, #07c160);
 
-  --app-bg: #ffffff;
-  --panel-bg: #ffffff;
-  --sidebar-bg: #fafafa;
+  --app-bg: var(--neutral-layer-1, #ffffff);
+  --panel-bg: var(--neutral-layer-2, #ffffff);
+  --sidebar-bg: var(--neutral-layer-1, #fafafa);
 
-  --card-bg: #ffffff;
-  --hover-bg: rgba(0, 0, 0, 0.035);
-  --selected-bg: rgba(7, 193, 96, 0.1);
+  --card-bg: var(--neutral-layer-2, #ffffff);
+  --hover-bg: var(--neutral-fill-stealth-hover, rgba(0, 0, 0, 0.035));
+  --selected-bg: color-mix(in srgb, var(--accent) 16%, transparent);
 
-  --text-primary: #111111;
-  --text-secondary: rgba(0, 0, 0, 0.65);
-  --text-muted: rgba(0, 0, 0, 0.45);
+  --text-primary: var(--neutral-foreground-rest, #111111);
+  --text-secondary: var(--neutral-foreground-hint, rgba(0, 0, 0, 0.65));
+  --text-muted: color-mix(in srgb, var(--text-secondary) 70%, transparent);
 
-  --border-color: rgba(0, 0, 0, 0.08);
-  --input-bg: #ffffff;
-  --input-bg-disabled: rgba(0, 0, 0, 0.04);
-  --input-border: rgba(0, 0, 0, 0.12);
+  --border-color: var(--neutral-stroke-divider-rest, rgba(0, 0, 0, 0.08));
+  --input-bg: var(--neutral-fill-input-rest, #ffffff);
+  --input-bg-disabled: color-mix(in srgb, var(--input-bg) 70%, transparent);
+  --input-border: var(--neutral-stroke-rest, rgba(0, 0, 0, 0.12));
 
-  --button-primary-bg: var(--accent);
-  --button-primary-bg-hover: #06ad56;
-  --button-primary-bg-pressed: #059b4d;
-  --button-primary-fg: #ffffff;
+  --button-primary-bg: var(--accent-fill-rest, var(--accent));
+  --button-primary-bg-hover: var(--accent-fill-hover, #06ad56);
+  --button-primary-bg-pressed: var(--accent-fill-active, #059b4d);
+  --button-primary-fg: var(--foreground-on-accent-rest, #ffffff);
 
-  --button-secondary-bg: #ffffff;
-  --button-secondary-bg-hover: var(--hover-bg);
-  --button-secondary-bg-pressed: var(--selected-bg);
-  --button-secondary-fg: var(--text-primary);
+  --button-secondary-bg: var(--neutral-fill-stealth-rest, #ffffff);
+  --button-secondary-bg-hover: var(--neutral-fill-stealth-hover, var(--hover-bg));
+  --button-secondary-bg-pressed: var(--neutral-fill-stealth-active, var(--selected-bg));
+  --button-secondary-fg: var(--neutral-foreground-rest, var(--text-primary));
 }
 
 html[data-theme='dark'] {
-  /* WeChat-like: deep gray base (not pure black) + subtle elevation */
-  --accent: #07c160;
+  --accent: var(--accent-base-color, #07c160);
 
-  /* Keep surfaces close to each other to avoid a "split" look. */
-  --app-bg: #1b1b1d;
-  --panel-bg: #1f1f22;
-  --sidebar-bg: #19191b;
+  --app-bg: var(--neutral-layer-1, #1b1b1d);
+  --panel-bg: var(--neutral-layer-2, #1f1f22);
+  --sidebar-bg: var(--neutral-layer-1, #19191b);
 
-  --card-bg: #1f1f22;
-  --hover-bg: rgba(255, 255, 255, 0.06);
-  --selected-bg: rgba(7, 193, 96, 0.14);
+  --card-bg: var(--neutral-layer-2, #1f1f22);
+  --hover-bg: var(--neutral-fill-stealth-hover, rgba(255, 255, 255, 0.06));
+  --selected-bg: color-mix(in srgb, var(--accent) 22%, transparent);
 
-  --text-primary: #f5f5f5;
-  --text-secondary: rgba(255, 255, 255, 0.74);
-  --text-muted: rgba(255, 255, 255, 0.55);
+  --text-primary: var(--neutral-foreground-rest, #f5f5f5);
+  --text-secondary: var(--neutral-foreground-hint, rgba(255, 255, 255, 0.74));
+  --text-muted: color-mix(in srgb, var(--text-secondary) 70%, transparent);
 
-  --border-color: rgba(255, 255, 255, 0.08);
-  --input-bg: rgba(255, 255, 255, 0.06);
-  --input-bg-disabled: rgba(255, 255, 255, 0.04);
-  --input-border: rgba(255, 255, 255, 0.16);
+  --border-color: var(--neutral-stroke-divider-rest, rgba(255, 255, 255, 0.08));
+  --input-bg: var(--neutral-fill-input-rest, rgba(255, 255, 255, 0.06));
+  --input-bg-disabled: color-mix(in srgb, var(--input-bg) 70%, transparent);
+  --input-border: var(--neutral-stroke-rest, rgba(255, 255, 255, 0.16));
 
-  --button-primary-bg: var(--accent);
-  --button-primary-bg-hover: #06ad56;
-  --button-primary-bg-pressed: #059b4d;
-  --button-primary-fg: #ffffff;
+  --button-primary-bg: var(--accent-fill-rest, var(--accent));
+  --button-primary-bg-hover: var(--accent-fill-hover, #06ad56);
+  --button-primary-bg-pressed: var(--accent-fill-active, #059b4d);
+  --button-primary-fg: var(--foreground-on-accent-rest, #ffffff);
 
-  --button-secondary-bg: rgba(255, 255, 255, 0.06);
-  --button-secondary-bg-hover: rgba(255, 255, 255, 0.1);
-  --button-secondary-bg-pressed: rgba(7, 193, 96, 0.18);
-  --button-secondary-fg: var(--text-primary);
+  --button-secondary-bg: var(--neutral-fill-stealth-rest, rgba(255, 255, 255, 0.06));
+  --button-secondary-bg-hover: var(--neutral-fill-stealth-hover, rgba(255, 255, 255, 0.1));
+  --button-secondary-bg-pressed: var(--neutral-fill-stealth-active, rgba(255, 255, 255, 0.14));
+  --button-secondary-fg: var(--neutral-foreground-rest, var(--text-primary));
 }
 
 /* Optional Win11-style backdrop (Mica): make app surfaces slightly translucent so the OS effect can show through.
    The actual window effect is applied by Tauri on Windows; this is just the webview side. */
 html[data-backdrop='mica'][data-theme='light'] {
   /* If OS theme is dark, "transparent" surfaces look split; keep a high-opacity light layer. */
-  --app-bg: color-mix(in srgb, #ffffff 94%, transparent);
-  --panel-bg: color-mix(in srgb, #ffffff 96%, transparent);
-  --sidebar-bg: color-mix(in srgb, #fafafa 92%, transparent);
-  --card-bg: color-mix(in srgb, #ffffff 96%, transparent);
+  --app-bg: color-mix(in srgb, var(--neutral-layer-1, #ffffff) 94%, transparent);
+  --panel-bg: color-mix(in srgb, var(--neutral-layer-2, #ffffff) 96%, transparent);
+  --sidebar-bg: color-mix(in srgb, var(--neutral-layer-1, #fafafa) 92%, transparent);
+  --card-bg: color-mix(in srgb, var(--neutral-layer-2, #ffffff) 96%, transparent);
 }
 
 html[data-backdrop='mica'][data-theme='dark'] {
-  --app-bg: color-mix(in srgb, #1b1b1d 90%, transparent);
-  --panel-bg: color-mix(in srgb, #1f1f22 92%, transparent);
-  --sidebar-bg: color-mix(in srgb, #19191b 90%, transparent);
-  --card-bg: color-mix(in srgb, #1f1f22 92%, transparent);
+  --app-bg: color-mix(in srgb, var(--neutral-layer-1, #1b1b1d) 90%, transparent);
+  --panel-bg: color-mix(in srgb, var(--neutral-layer-2, #1f1f22) 92%, transparent);
+  --sidebar-bg: color-mix(in srgb, var(--neutral-layer-1, #19191b) 90%, transparent);
+  --card-bg: color-mix(in srgb, var(--neutral-layer-2, #1f1f22) 92%, transparent);
 }
 
 html,
@@ -124,6 +131,11 @@ select {
   font: inherit;
 }
 
+:focus-visible {
+  outline: 2px solid var(--focus-stroke-outer, var(--accent));
+  outline-offset: 2px;
+}
+
 /* Layout */
 .app-root {
   height: 100%;
@@ -155,35 +167,31 @@ select {
 
 .sidebar-header-btn {
   width: 100%;
+  color: var(--text-primary);
+}
+
+.sidebar-header-btn::part(control) {
+  width: 100%;
   height: 44px;
   border-radius: 8px;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   padding: 0 10px;
 }
 
 .sidebar.collapsed .sidebar-header-btn {
   justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
 }
 
-.sidebar-header-btn:hover {
-  background: var(--hover-bg);
+.sidebar.collapsed .sidebar-header-btn::part(control) {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .sidebar-title {
   font-size: 16px;
   font-weight: 600;
-}
-
-.sidebar.collapsed .sidebar-title {
-  display: none;
 }
 
 .sidebar-nav {
@@ -221,6 +229,32 @@ select {
 .sidebar.collapsed .sidebar-sep {
   margin-left: 8px;
   margin-right: 8px;
+}
+
+fluent-tree-view.nav-tree {
+  width: 100%;
+  gap: 6px;
+}
+
+fluent-tree-item.nav-item {
+  width: 100%;
+}
+
+.nav-start {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+fluent-tree-item.nav-item[selected] .nav-start {
+  color: var(--accent);
+}
+
+.nav-label {
+  font-size: 14px;
 }
 
 .sidebar-item {
@@ -313,6 +347,16 @@ select {
   padding: 0 16px;
 }
 
+.topbar-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-secondary);
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .topbar-spacer {
   flex: 1;
 }
@@ -331,6 +375,7 @@ select {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  position: relative;
 }
 
 .route-host {
@@ -340,6 +385,26 @@ select {
   width: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.route-host.keep {
+  transition:
+    opacity 180ms ease-out,
+    transform 180ms ease-out;
+}
+
+.route-host.keep:not(.active) {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+
+.route-host.keep.active {
+  position: relative;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .page {
@@ -785,4 +850,18 @@ fluent-number-field.input {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+
+  .route-host.keep {
+    transition: none;
+  }
+
+  * {
+    scroll-behavior: auto !important;
+  }
 }

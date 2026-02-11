@@ -1,8 +1,10 @@
 use crate::lsp::{read_lsp_frame, write_lsp_frame};
 use crate::rpc::{JsonRpcError, JsonRpcResponse, RpcErrorCode};
 use chaos_proto::{
-    DaemonPingParams, DaemonPingResult, DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams,
+    DaemonPingParams, DaemonPingResult, DanmakuFetchImageParams, LiveCloseParams,
+    LiveOpenParams, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult,
     METHOD_DAEMON_PING, METHOD_DANMAKU_FETCH_IMAGE, METHOD_LIVE_CLOSE, METHOD_LIVE_OPEN,
+    METHOD_LIVESTREAM_DECODE_MANIFEST,
     NOTIF_DANMAKU_MESSAGE,
 };
 use serde::de::DeserializeOwned;
@@ -13,6 +15,11 @@ use tokio::sync::mpsc;
 
 pub trait ChaosService: Send + Sync + 'static {
     fn version(&self) -> String;
+
+    fn livestream_decode_manifest(
+        &self,
+        params: LivestreamDecodeManifestParams,
+    ) -> impl Future<Output = Result<LivestreamDecodeManifestResult, String>> + Send;
 
     fn live_open(
         &self,
@@ -137,6 +144,30 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                         let resp = JsonRpcResponse::ok(id, serde_json::to_value(result).unwrap());
                         let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
                         let _ = write_lsp_frame(&mut w, &bytes).await;
+                    }
+                    METHOD_LIVESTREAM_DECODE_MANIFEST => {
+                        let params: LivestreamDecodeManifestParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+
+                        match svc.livestream_decode_manifest(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
                     }
                     METHOD_LIVE_OPEN => {
                         if let Some(prev) = active_session_id.take() {

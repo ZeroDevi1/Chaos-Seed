@@ -5,6 +5,7 @@ pub const PIPE_NAME_PREFIX: &str = "chaos-seed-";
 pub const METHOD_DAEMON_PING: &str = "daemon.ping";
 pub const METHOD_LIVE_OPEN: &str = "live.open";
 pub const METHOD_LIVE_CLOSE: &str = "live.close";
+pub const METHOD_LIVESTREAM_DECODE_MANIFEST: &str = "livestream.decodeManifest";
 pub const METHOD_DANMAKU_FETCH_IMAGE: &str = "danmaku.fetchImage";
 
 pub const NOTIF_DANMAKU_MESSAGE: &str = "danmaku.message";
@@ -39,6 +40,7 @@ impl Default for PreferredQuality {
 pub struct LiveOpenParams {
     pub input: String,
     pub preferred_quality: Option<PreferredQuality>,
+    pub variant_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,6 +56,51 @@ pub struct LiveOpenResult {
     pub backup_urls: Vec<String>,
     pub referer: Option<String>,
     pub user_agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LivestreamDecodeManifestParams {
+    pub input: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LivestreamInfo {
+    pub title: String,
+    pub name: Option<String>,
+    pub avatar: Option<String>,
+    pub cover: Option<String>,
+    pub is_living: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LivestreamPlaybackHints {
+    pub referer: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LivestreamVariant {
+    pub id: String,
+    pub label: String,
+    pub quality: i32,
+    pub rate: Option<i32>,
+    pub url: Option<String>,
+    pub backup_urls: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LivestreamDecodeManifestResult {
+    pub site: String,
+    pub room_id: String,
+    pub raw_input: String,
+    pub info: LivestreamInfo,
+    pub playback: LivestreamPlaybackHints,
+    pub variants: Vec<LivestreamVariant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

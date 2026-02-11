@@ -1594,6 +1594,7 @@ async fn open_lyrics_float_window(app: AppHandle) -> Result<(), String> {
 async fn open_player_window(
     app: AppHandle,
     req: livestream_ui::PlayerBootRequest,
+    from_rect: Option<livestream_ui::WindowRect>,
 ) -> Result<(), String> {
     if let Some(_w) = ensure_window(&app, "player") {
         // Best-effort: ask the player window to load a new source.
@@ -1601,10 +1602,15 @@ async fn open_player_window(
         return Ok(());
     }
 
+    let has_hero = from_rect.is_some();
+    // Used by the frontend as the minimum time to keep the hero/poster overlay visible.
+    // We still start loading immediately to overlap buffering/decoder init with the window animation.
+    let hero_delay_ms: u32 = if from_rect.is_some() { 220 } else { 0 };
     let boot = serde_json::json!({
         "view": "player",
         "label": "player",
         "player": req,
+        "heroDelayMs": hero_delay_ms,
         "build": env!("CARGO_PKG_VERSION")
     });
     let init_script = child_init_script(boot);
@@ -1619,6 +1625,11 @@ async fn open_player_window(
         .resizable(true)
         .transparent(false)
         .initialization_script(init_script);
+
+    if has_hero {
+        // Avoid a visible "first frame" at default position/size before we apply the hero rect.
+        builder = builder.visible(false);
+    }
 
     if debug_enabled() {
         let eval_script = child_init_script(serde_json::json!({
@@ -1641,6 +1652,25 @@ async fn open_player_window(
     }
 
     let w = builder.build().map_err(|e| e.to_string())?;
+
+    let from_rect = from_rect.map(|mut r| {
+        if r.width < 80 {
+            r.width = 80;
+        }
+        if r.height < 60 {
+            r.height = 60;
+        }
+        r
+    });
+
+    if let Some(r) = from_rect.as_ref() {
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: r.x, y: r.y }));
+        let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: r.width,
+            height: r.height,
+        }));
+    }
+
     let _ = w.show();
     let _ = w.set_focus();
     let _ = app.emit(
@@ -1666,6 +1696,65 @@ async fn open_player_window(
         });
     }
 
+    if let Some(fr) = from_rect {
+        let app2 = app.clone();
+        let w2 = w.clone();
+        tauri::async_runtime::spawn(async move {
+            let mon = app2
+                .get_webview_window("main")
+                .and_then(|mw| mw.current_monitor().ok().flatten())
+                .or_else(|| w2.current_monitor().ok().flatten());
+
+            let (mon_pos, mon_size) = mon
+                .map(|m| (*m.position(), *m.size()))
+                .unwrap_or((
+                    tauri::PhysicalPosition { x: 0, y: 0 },
+                    tauri::PhysicalSize { width: 1920, height: 1080 },
+                ));
+
+            let sf = w2.scale_factor().unwrap_or(1.0);
+            let mut tw = (960.0 * sf).round() as u32;
+            let mut th = (540.0 * sf).round() as u32;
+
+            let max_w = mon_size.width.saturating_sub(40);
+            let max_h = mon_size.height.saturating_sub(40);
+            if tw > max_w || th > max_h {
+                let aspect = 540.0 / 960.0;
+                tw = tw.min(max_w);
+                th = (tw as f64 * aspect).round() as u32;
+                if th > max_h {
+                    th = th.min(max_h);
+                    tw = (th as f64 / aspect).round() as u32;
+                }
+            }
+
+            let cx = fr.x.saturating_add((fr.width / 2) as i32);
+            let cy = fr.y.saturating_add((fr.height / 2) as i32);
+
+            let mut tx = cx.saturating_sub((tw / 2) as i32);
+            let mut ty = cy.saturating_sub((th / 2) as i32);
+
+            let min_x = mon_pos.x;
+            let min_y = mon_pos.y;
+            let max_x = mon_pos.x.saturating_add(mon_size.width as i32).saturating_sub(tw as i32);
+            let max_y = mon_pos.y.saturating_add(mon_size.height as i32).saturating_sub(th as i32);
+
+            tx = tx.clamp(min_x, max_x);
+            ty = ty.clamp(min_y, max_y);
+
+            let to = livestream_ui::WindowRect {
+                x: tx,
+                y: ty,
+                width: tw,
+                height: th,
+            };
+
+            // Give the window manager a frame to settle after show() to reduce occasional jitter.
+            tokio::time::sleep(Duration::from_millis(16)).await;
+            animate_window_rect(w2, fr, to, 220).await;
+        });
+    }
+
     #[cfg(debug_assertions)]
     {
         if std::env::var("CHAOS_SEED_CHILD_DEVTOOLS").is_ok() {
@@ -1674,6 +1763,62 @@ async fn open_player_window(
     }
 
     Ok(())
+}
+
+async fn animate_window_rect(
+    w: tauri::WebviewWindow,
+    from: livestream_ui::WindowRect,
+    to: livestream_ui::WindowRect,
+    duration_ms: u64,
+) {
+    let frames = (duration_ms / 16).max(8);
+    for i in 0..=frames {
+        let t = (i as f64) / (frames as f64);
+        let e = 1.0 - (1.0 - t).powi(3); // easeOutCubic
+
+        let lerp_i32 = |a: i32, b: i32| -> i32 { (a as f64 + (b - a) as f64 * e).round() as i32 };
+        let lerp_u32 = |a: u32, b: u32| -> u32 { (a as f64 + (b - a) as f64 * e).round().max(1.0) as u32 };
+
+        let x = lerp_i32(from.x, to.x);
+        let y = lerp_i32(from.y, to.y);
+        let width = lerp_u32(from.width, to.width);
+        let height = lerp_u32(from.height, to.height);
+
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+        let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
+
+        tokio::time::sleep(Duration::from_millis(16)).await;
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct RgbColor {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
+#[tauri::command]
+fn system_accent_rgb() -> Result<RgbColor, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::UI::ViewManagement::{UISettings, UIColorType};
+
+        let ui = UISettings::new().map_err(|e| format!("{e}"))?;
+        let c = ui
+            .GetColorValue(UIColorType::Accent)
+            .map_err(|e| format!("{e}"))?;
+
+        Ok(RgbColor {
+            r: c.R,
+            g: c.G,
+            b: c.B,
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("unsupported".to_string())
+    }
 }
 
 #[tauri::command]
@@ -1769,6 +1914,7 @@ fn main() {
             open_lyrics_dock_window,
             open_lyrics_float_window,
             open_player_window,
+            system_accent_rgb,
             set_backdrop
         ])
         .run(tauri::generate_context!())

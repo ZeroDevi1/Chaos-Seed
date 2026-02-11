@@ -1,6 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
+use std::{fs, path::Path};
 
 fn main() -> ExitCode {
     match run() {
@@ -64,6 +65,8 @@ fn build_winui3(release: bool) -> Result<(), String> {
         return Err(format!("missing solution: {}", sln.display()));
     }
 
+    ensure_winui3_ffmpeg(&root)?;
+
     let cfg = if release { "Release" } else { "Debug" };
 
     // Prefer MSBuild; fall back to dotnet build.
@@ -99,6 +102,89 @@ fn build_winui3(release: bool) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn ensure_winui3_ffmpeg(root: &Path) -> Result<(), String> {
+    let proj = root.join("chaos-winui3").join("ChaosSeed.WinUI3");
+    let ffmpeg_dir = proj.join("FFmpeg");
+
+    if has_ffmpeg_dlls(&ffmpeg_dir) {
+        return Ok(());
+    }
+
+    let script = root.join("scripts").join("fetch_ffmpeg_win.ps1");
+    if !script.exists() {
+        return Err(format!(
+            "missing ffmpeg fetch script: {}",
+            script.display()
+        ));
+    }
+
+    eprintln!(
+        "> FFmpeg DLLs not found under {}; fetching via {}",
+        ffmpeg_dir.display(),
+        script.display()
+    );
+
+    // Prefer Windows PowerShell; fall back to pwsh.
+    let mut ps = Command::new("powershell");
+    ps.arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-File")
+        .arg(&script)
+        .arg("-ProjectDir")
+        .arg(&proj)
+        .arg("-Track")
+        .arg("n8.0");
+
+    match run_cmd_allow_not_found(ps) {
+        Ok(()) => return Ok(()),
+        Err(RunErr::NotFound) => {}
+        Err(RunErr::Failed(e)) => return Err(e),
+    }
+
+    let mut pwsh = Command::new("pwsh");
+    pwsh.arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-File")
+        .arg(&script)
+        .arg("-ProjectDir")
+        .arg(&proj)
+        .arg("-Track")
+        .arg("n8.0");
+
+    run_cmd(pwsh)?;
+
+    if !has_ffmpeg_dlls(&ffmpeg_dir) {
+        return Err(format!(
+            "ffmpeg fetch succeeded but DLLs still missing under {}",
+            ffmpeg_dir.display()
+        ));
+    }
+
+    Ok(())
+}
+
+fn has_ffmpeg_dlls(dir: &Path) -> bool {
+    let Ok(rd) = fs::read_dir(dir) else {
+        return false;
+    };
+    for ent in rd.flatten() {
+        let p = ent.path();
+        if !p.is_file() {
+            continue;
+        }
+        let Some(name) = p.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let n = name.to_ascii_lowercase();
+        if n.starts_with("avcodec") && n.ends_with(".dll") {
+            return true;
+        }
+    }
+    false
 }
 
 fn repo_root() -> Result<PathBuf, String> {

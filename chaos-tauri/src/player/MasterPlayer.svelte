@@ -26,6 +26,7 @@
   let lastErr = ''
   let lastReq: PlayerBootRequest | null = null
   let pausedByStop = false
+  let prepared = false
 
   function clearHideTimer() {
     if (hideTimer) {
@@ -78,6 +79,7 @@
 
   async function loadInternal(req: PlayerBootRequest) {
     lastReq = req
+    prepared = false
     lastErr = ''
     const primary = (req?.url || '').toString().trim()
     const backups = (req?.backup_urls || []).map((u) => (u || '').toString().trim()).filter(Boolean)
@@ -112,6 +114,7 @@
         await engine!.load(source)
         await engine!.play()
         playing = true
+        prepared = true
         scheduleHide()
         lastErr = ''
         break
@@ -148,6 +151,50 @@
     }
   }
 
+  async function prepareInternal(req: PlayerBootRequest) {
+    lastReq = req
+    prepared = false
+    lastErr = ''
+    const primary = (req?.url || '').toString().trim()
+    const backups = (req?.backup_urls || []).map((u) => (u || '').toString().trim()).filter(Boolean)
+    const urlsRaw = [primary, ...backups].filter(Boolean)
+    if (urlsRaw.length === 0) throw new Error('empty url')
+
+    const candidates = (req.site === 'bili_live' ? [...backups, primary] : urlsRaw)
+      .flatMap((u) => expandHttpToHttps(u))
+      .map((u) => u.trim())
+      .filter(Boolean)
+      .filter((u, idx, arr) => arr.indexOf(u) === idx)
+
+    let last: unknown = null
+    for (const url of candidates) {
+      const kindFromUrl = inferStreamType(url)
+      const kind: PlayerEngineKind =
+        kindFromUrl === 'hls' ? 'hls' : kindFromUrl === 'flv' ? 'avplayer' : 'native'
+      try {
+        await recreateEngine(kind)
+        const source: PlayerSource = {
+          url,
+          backup_urls: candidates.filter((x) => x !== url),
+          isLive: true,
+          kind,
+          referer: req.referer,
+          user_agent: req.user_agent
+        }
+        await engine!.load(source)
+        prepared = true
+        lastErr = ''
+        break
+      } catch (e) {
+        last = e
+        lastErr = `尝试预加载失败：${String(e)}`
+      }
+    }
+    if (!prepared) {
+      throw last instanceof Error ? last : new Error(String(last ?? 'prepare failed'))
+    }
+  }
+
   const cleanupFns: Array<() => void> = []
   async function destroyInternal() {
     clearHideTimer()
@@ -167,6 +214,7 @@
     }
     engine = null
     playing = false
+    prepared = false
   }
 
   export async function load(req: PlayerBootRequest) {
@@ -176,6 +224,24 @@
     pausedByStop = false
     await destroyInternal()
     await loadInternal(req)
+  }
+
+  export async function prepare(req: PlayerBootRequest) {
+    const nextKey = `${req.site}:${req.room_id}:${req.variant_id}:${req.url}`
+    if (nextKey === currentKey && prepared && !playing) return
+    currentKey = nextKey
+    pausedByStop = false
+    await destroyInternal()
+    await prepareInternal(req)
+  }
+
+  export async function start() {
+    if (!engine) throw new Error('engine not ready')
+    if (playing) return
+    await engine.play()
+    playing = true
+    prepared = true
+    scheduleHide()
   }
 
   export async function destroy() {

@@ -18,7 +18,15 @@ vi.mock('@fluentui/web-components', () => {
     fluentTextField: vi.fn(() => ({})),
     fluentNumberField: vi.fn(() => ({})),
     fluentSelect: vi.fn(() => ({})),
-    fluentOption: vi.fn(() => ({}))
+    fluentOption: vi.fn(() => ({})),
+    fluentDivider: vi.fn(() => ({})),
+    fluentTreeView: vi.fn(() => ({})),
+    fluentTreeItem: vi.fn(() => ({})),
+    fluentTooltip: vi.fn(() => ({})),
+    fluentToolbar: vi.fn(() => ({})),
+    fluentMenu: vi.fn(() => ({})),
+    fluentMenuItem: vi.fn(() => ({})),
+    fluentSkeleton: vi.fn(() => ({}))
   }
 })
 

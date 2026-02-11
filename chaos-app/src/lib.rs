@@ -10,7 +10,10 @@ use chaos_core::danmaku::client::DanmakuClient;
 use chaos_core::danmaku::model::{ConnectOptions, DanmakuSession, Site};
 use chaos_core::livestream::client::LivestreamClient;
 use chaos_core::livestream::model::{ResolveOptions, StreamVariant};
-use chaos_proto::{DanmakuFetchImageParams, DanmakuFetchImageResult, DanmakuMessage, LiveOpenResult};
+use chaos_proto::{
+    DanmakuFetchImageParams, DanmakuFetchImageResult, DanmakuMessage, LiveOpenResult,
+    LivestreamDecodeManifestResult, LivestreamInfo, LivestreamPlaybackHints, LivestreamVariant,
+};
 use tokio::sync::mpsc;
 
 use crate::cache::ByteLruCache;
@@ -116,10 +119,29 @@ impl ChaosApp {
         })
     }
 
+    pub async fn decode_manifest(
+        &self,
+        input: &str,
+    ) -> Result<LivestreamDecodeManifestResult, ChaosAppError> {
+        let raw = input.trim();
+        if raw.is_empty() {
+            return Err(ChaosAppError::InvalidInput("empty input".to_string()));
+        }
+
+        let man = self
+            .livestream
+            .decode_manifest(raw, ResolveOptions::default())
+            .await
+            .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+
+        Ok(map_manifest_to_proto(man))
+    }
+
     pub async fn open_live(
         &self,
         input: &str,
         prefer_lowest: bool,
+        variant_id: Option<&str>,
     ) -> Result<(LiveOpenResult, mpsc::UnboundedReceiver<DanmakuMessage>), ChaosAppError> {
         let raw = input.trim();
         if raw.is_empty() {
@@ -133,7 +155,13 @@ impl ChaosApp {
             .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
 
         let (variant, url, backup_urls) = self
-            .select_and_resolve_variant(man.site, &man.room_id, man.variants, prefer_lowest)
+            .select_and_resolve_variant(
+                man.site,
+                &man.room_id,
+                man.variants,
+                prefer_lowest,
+                variant_id,
+            )
             .await?;
 
         let title = man.info.title.clone();
@@ -203,6 +231,7 @@ impl ChaosApp {
         room_id: &str,
         variants: Vec<StreamVariant>,
         prefer_lowest: bool,
+        variant_id: Option<&str>,
     ) -> Result<(StreamVariant, String, Vec<String>), ChaosAppError> {
         let mut vars = variants;
         vars.retain(|v| !v.id.trim().is_empty());
@@ -210,64 +239,56 @@ impl ChaosApp {
             return Err(ChaosAppError::Livestream("no variants".to_string()));
         }
 
-        // Prefer URLs that Windows MediaPlayerElement is more likely to handle (m3u8/mp4).
-        // Many livestream sources may be FLV and won't play without a custom player.
+        if let Some(vid) = variant_id.map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            let found = vars
+                .iter()
+                .find(|v| v.id.trim() == vid)
+                .cloned()
+                .ok_or_else(|| ChaosAppError::Livestream(format!("variant not found: {vid}")))?;
+            return self.resolve_variant_or_use_url(site, room_id, found).await;
+        }
+
         if prefer_lowest {
             vars.sort_by_key(|v| v.quality);
         } else {
             vars.sort_by(|a, b| b.quality.cmp(&a.quality));
         }
 
-        let mut fallback: Option<StreamVariant> = None;
-
-        // 1) Already-resolved playable URLs.
-        for v in &vars {
-            let Some(u) = v.url.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
-                continue;
-            };
-            if is_media_player_playable_url(u) {
-                return Ok((v.clone(), u.to_string(), v.backup_urls.clone()));
-            }
-            if fallback.is_none() {
-                fallback = Some(v.clone());
+        let mut last_err: Option<ChaosAppError> = None;
+        for v in vars {
+            match self.resolve_variant_or_use_url(site, room_id, v).await {
+                Ok(r) => return Ok(r),
+                Err(e) => last_err = Some(e),
             }
         }
 
-        // 2) Try resolving candidates until we find a playable URL.
-        for v in &vars {
-            let need_resolve = v.url.as_deref().unwrap_or_default().trim().is_empty();
-            if !need_resolve {
-                continue;
-            }
+        Err(last_err.unwrap_or_else(|| ChaosAppError::Livestream("missing url".to_string())))
+    }
 
-            let resolved = self
-                .livestream
-                .resolve_variant(site, room_id, &v.id)
-                .await
-                .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
-            let Some(u) = resolved
-                .url
-                .as_deref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-            else {
-                continue;
-            };
-
-            if is_media_player_playable_url(u) {
-                return Ok((resolved.clone(), u.to_string(), resolved.backup_urls.clone()));
-            }
-
-            if fallback.is_none() {
-                fallback = Some(resolved);
-            }
+    async fn resolve_variant_or_use_url(
+        &self,
+        site: Site,
+        room_id: &str,
+        v: StreamVariant,
+    ) -> Result<(StreamVariant, String, Vec<String>), ChaosAppError> {
+        if let Some(u) = v.url.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            return Ok((v.clone(), u.to_string(), v.backup_urls.clone()));
         }
 
-        let resolved = fallback.ok_or_else(|| ChaosAppError::Livestream("missing url".to_string()))?;
+        let resolved = self
+            .livestream
+            .resolve_variant(site, room_id, &v.id)
+            .await
+            .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+
         let url = resolved
             .url
-            .clone()
-            .ok_or_else(|| ChaosAppError::Livestream("missing url".to_string()))?;
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| ChaosAppError::Livestream("missing url".to_string()))?
+            .to_string();
+
         Ok((resolved.clone(), url, resolved.backup_urls.clone()))
     }
 
@@ -388,29 +409,33 @@ fn uuid_string() -> String {
     format!("{:x}{:x}", t, fastrand::u64(..))
 }
 
-fn is_media_player_playable_url(url: &str) -> bool {
-    let u = url.trim().to_lowercase();
-    // Rough heuristics: allow m3u8/mp4 and common query forms.
-    u.contains(".m3u8")
-        || u.contains(".mp4")
-        || u.contains(".ism/")
-        || u.contains(".ism?")
-        || u.contains("manifest(format=m3u8)")
-}
-
-#[cfg(test)]
-mod media_playable_tests {
-    use super::is_media_player_playable_url;
-
-    #[test]
-    fn accepts_m3u8_and_mp4() {
-        assert!(is_media_player_playable_url("https://a/b.m3u8"));
-        assert!(is_media_player_playable_url("https://a/b.m3u8?x=1"));
-        assert!(is_media_player_playable_url("https://a/b.mp4"));
-    }
-
-    #[test]
-    fn rejects_flv() {
-        assert!(!is_media_player_playable_url("https://a/b.flv"));
+fn map_manifest_to_proto(man: chaos_core::livestream::model::LiveManifest) -> LivestreamDecodeManifestResult {
+    LivestreamDecodeManifestResult {
+        site: man.site.as_str().to_string(),
+        room_id: man.room_id,
+        raw_input: man.raw_input,
+        info: LivestreamInfo {
+            title: man.info.title,
+            name: man.info.name,
+            avatar: man.info.avatar,
+            cover: man.info.cover,
+            is_living: man.info.is_living,
+        },
+        playback: LivestreamPlaybackHints {
+            referer: man.playback.referer,
+            user_agent: man.playback.user_agent,
+        },
+        variants: man
+            .variants
+            .into_iter()
+            .map(|v| LivestreamVariant {
+                id: v.id,
+                label: v.label,
+                quality: v.quality,
+                rate: v.rate,
+                url: v.url,
+                backup_urls: v.backup_urls,
+            })
+            .collect(),
     }
 }

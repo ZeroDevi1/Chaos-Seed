@@ -33,14 +33,9 @@ public sealed partial class SettingsPage : Page
 
         BackdropCombo.SelectedIndex = s.BackdropMode switch
         {
-            BackdropMode.None => 1,
-            _ => 0,
-        };
-
-        PlayerCombo.SelectedIndex = s.PlayerEngine switch
-        {
-            PlayerEngine.System => 1,
-            _ => 0,
+            BackdropMode.MicaAlt => 1,
+            BackdropMode.None => 2,
+            _ => 0, // Mica
         };
 
         var win11 = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
@@ -82,27 +77,9 @@ public sealed partial class SettingsPage : Page
         var mode = tag switch
         {
             "None" => BackdropMode.None,
+            "MicaAlt" => BackdropMode.MicaAlt,
             _ => BackdropMode.Mica,
         };
         SettingsService.Instance.Update(s => s.BackdropMode = mode);
-    }
-
-    private void OnPlayerChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_init)
-        {
-            return;
-        }
-        if (PlayerCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string tag)
-        {
-            return;
-        }
-
-        var mode = tag switch
-        {
-            "System" => PlayerEngine.System,
-            _ => PlayerEngine.Vlc,
-        };
-        SettingsService.Instance.Update(s => s.PlayerEngine = mode);
     }
 }

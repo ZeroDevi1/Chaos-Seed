@@ -7,11 +7,38 @@
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
 
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Custom title bar (Win11 native feel) -->
+        <Grid
+            x:Name="AppTitleBar"
+            Height="{StaticResource ChaosTitleBarHeight}"
+            Background="Transparent"
+            Padding="12,0,12,0"
+            VerticalAlignment="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <muxc:SymbolIcon Symbol="Globe" Margin="0,0,10,0" />
+            <TextBlock
+                Grid.Column="1"
+                Text="Chaos Seed"
+                VerticalAlignment="Center"
+                FontWeight="SemiBold"
+                Opacity="0.95" />
+        </Grid>
+
         <muxc:NavigationView
             x:Name="Nav"
+            Grid.Row="1"
             IsBackButtonVisible="Collapsed"
             IsSettingsVisible="False"
-            PaneDisplayMode="LeftCompact"
+            PaneDisplayMode="Left"
             IsPaneOpen="False"
             OpenPaneLength="176"
             CompactPaneLength="40"

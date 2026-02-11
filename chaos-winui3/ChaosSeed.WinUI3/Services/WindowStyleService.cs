@@ -1,4 +1,5 @@
 using ChaosSeed.WinUI3.Models;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 
@@ -37,7 +38,16 @@ public static class WindowStyleService
 
         try
         {
-            window.SystemBackdrop = new MicaBackdrop();
+            var mica = new MicaBackdrop();
+            try
+            {
+                mica.Kind = mode == BackdropMode.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base;
+            }
+            catch
+            {
+                // ignore - Kind may not be available on some Windows App SDK versions.
+            }
+            window.SystemBackdrop = mica;
         }
         catch
         {
@@ -45,4 +55,3 @@ public static class WindowStyleService
         }
     }
 }
-

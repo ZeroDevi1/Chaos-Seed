@@ -3,6 +3,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:ChaosSeed.WinUI3.Pages"
+    xmlns:fl="using:FlyleafLib.Controls.WinUI"
+    xmlns:ctk="using:CommunityToolkit.WinUI.Controls"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
 
     <Grid Padding="12">
@@ -14,11 +16,9 @@
         <Border
             x:Name="ParsePanel"
             Grid.Row="0"
-            CornerRadius="8"
-            Padding="12"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            Style="{StaticResource ChaosCardBorderStyle}">
             <StackPanel Spacing="8">
-                <TextBlock Text="输入直播间地址，点击解析开始播放并连接弹幕。" Opacity="0.8" />
+                <TextBlock Text="输入直播间地址，点击解析后在下方选择清晰度进入播放并连接弹幕。" Opacity="0.8" />
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -38,56 +38,140 @@
                 <ColumnDefinition x:Name="DanmakuCol" Width="280" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <Border Grid.Column="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="0">
                 <Grid>
-                    <muxc:MediaPlayerElement
-                        x:Name="SystemPlayer"
-                        AreTransportControlsEnabled="False"
-                        Visibility="Collapsed" />
-                    <Image x:Name="VlcImage" Visibility="Collapsed" Stretch="Uniform" />
+                    <Grid x:Name="SelectPane">
+                        <Grid.Transitions>
+                            <TransitionCollection>
+                                <EntranceThemeTransition FromVerticalOffset="16" />
+                            </TransitionCollection>
+                        </Grid.Transitions>
+                        <ScrollViewer>
+                            <StackPanel Padding="12" Spacing="12">
+                                <StackPanel x:Name="ManifestOverview" Spacing="8" Visibility="Collapsed">
+                                    <TextBlock Text="{x:Bind OverviewTitle, Mode=OneTime}" FontSize="20" FontWeight="SemiBold" />
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <TextBlock Text="{x:Bind OverviewStreamer, Mode=OneTime}" Opacity="0.85" />
+                                        <TextBlock Text="{x:Bind OverviewStatus, Mode=OneTime}" Opacity="0.85" />
+                                        <TextBlock Text="{x:Bind OverviewRoom, Mode=OneTime}" Opacity="0.7" />
+                                    </StackPanel>
+                                </StackPanel>
 
-                    <muxc:InfoBar
-                        x:Name="PlayerStatusBar"
-                        IsOpen="False"
-                        IsClosable="True"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Top"
-                        Margin="12"
-                        MaxWidth="720" />
+                                <TextBlock x:Name="EmptyHint" Text="请先在上方输入直播间地址并点击解析。" Opacity="0.7" />
 
-                    <Button
-                        x:Name="DanmakuToggleBtn"
-                        HorizontalAlignment="Right"
-                        VerticalAlignment="Center"
-                        Margin="0,0,8,0"
-                        Click="OnToggleDanmaku"
-                        Width="36"
-                        Height="36">
-                        <muxc:SymbolIcon x:Name="DanmakuToggleIcon" Symbol="Back" />
-                    </Button>
+                                <GridView
+                                    x:Name="VariantGrid"
+                                    ItemsSource="{x:Bind VariantCards, Mode=OneTime}"
+                                    IsItemClickEnabled="True"
+                                    ItemClick="OnVariantItemClick"
+                                    SelectionMode="None"
+                                    ItemContainerStyle="{StaticResource ChaosCardGridViewItemStyle}">
+                                    <GridView.ItemTemplate>
+                                        <DataTemplate x:DataType="local:LiveVariantCardVm">
+                                            <Border
+                                                x:Name="CardRoot"
+                                                CornerRadius="{StaticResource ChaosCornerRadius12}"
+                                                Padding="10"
+                                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                                PointerEntered="OnVariantCardPointerEntered"
+                                                PointerExited="OnVariantCardPointerExited"
+                                                PointerPressed="OnVariantCardPointerPressed"
+                                                PointerReleased="OnVariantCardPointerReleased">
+                                                <Grid ColumnSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="96" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border CornerRadius="{StaticResource ChaosCornerRadius10}" Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+                                                        <Image
+                                                            x:Name="CardCover"
+                                                            Source="{x:Bind Cover, Mode=OneTime}"
+                                                            Stretch="UniformToFill" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Spacing="6">
+                                                        <TextBlock Text="{x:Bind Title, Mode=OneTime}" FontWeight="SemiBold" TextWrapping="NoWrap" />
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <TextBlock Text="{x:Bind Streamer, Mode=OneTime}" Opacity="0.85" />
+                                                            <TextBlock Text="{x:Bind StatusText, Mode=OneTime}" Opacity="0.85" />
+                                                        </StackPanel>
+                                                        <TextBlock Text="{x:Bind VariantText, Mode=OneTime}" Opacity="0.7" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </GridView.ItemTemplate>
+                                </GridView>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Grid x:Name="PlayerPane" Visibility="Collapsed">
+                        <Grid.Transitions>
+                            <TransitionCollection>
+                                <EntranceThemeTransition FromHorizontalOffset="64" />
+                            </TransitionCollection>
+                        </Grid.Transitions>
+                        <Grid>
+                            <fl:FlyleafHost x:Name="FlyleafHost" />
+
+                            <Image x:Name="HeroCover" Visibility="Collapsed" Stretch="UniformToFill" />
+
+                            <muxc:InfoBar
+                                x:Name="PlayerStatusBar"
+                                IsOpen="False"
+                                IsClosable="True"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Top"
+                                Margin="12"
+                                MaxWidth="720" />
+
+                            <Button
+                                x:Name="BackToSelectBtn"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Top"
+                                Margin="12,12,0,0"
+                                Click="OnBackToSelect">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <muxc:SymbolIcon Symbol="Back" />
+                                    <TextBlock Text="返回" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button
+                                x:Name="DanmakuToggleBtn"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Margin="0,0,8,0"
+                                Click="OnToggleDanmaku"
+                                Width="36"
+                                Height="36">
+                                <muxc:SymbolIcon x:Name="DanmakuToggleIcon" Symbol="Back" />
+                            </Button>
+                        </Grid>
+                    </Grid>
                 </Grid>
             </Border>
 
-            <Border
-                x:Name="DanmakuResizeHandle"
+            <ctk:GridSplitter
+                x:Name="DanmakuSplitter"
                 Grid.Column="1"
+                Width="6"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Stretch"
-                Background="Transparent"
-                PointerPressed="OnDanmakuResizePressed"
-                PointerMoved="OnDanmakuResizeMoved"
-                PointerReleased="OnDanmakuResizeReleased"
-                PointerCanceled="OnDanmakuResizeReleased"
-                PointerCaptureLost="OnDanmakuResizeReleased"
+                ResizeDirection="Columns"
+                ResizeBehavior="PreviousAndNext"
+                DragCompleted="OnDanmakuSplitterDragCompleted"
+                Opacity="0.55"
+                Background="{ThemeResource DividerStrokeColorDefaultBrush}"
                 ToolTipService.ToolTip="拖拽调整弹幕宽度" />
 
             <Border
                 x:Name="DanmakuPane"
                 Grid.Column="2"
                 Margin="12,0,0,0"
-                CornerRadius="8"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <ListView x:Name="DanmakuList" ItemsSource="{x:Bind Rows, Mode=OneWay}">
+                Style="{StaticResource ChaosCardBorderStyle}"
+                Padding="0">
+                <ListView x:Name="DanmakuList" ItemsSource="{x:Bind Rows, Mode=OneTime}">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:DanmakuRowVm">
                             <Grid Padding="8">

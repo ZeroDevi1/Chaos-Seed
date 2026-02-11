@@ -4,6 +4,7 @@ export type PlayerBootRequest = {
   site: string
   room_id: string
   title: string
+  cover?: string | null
   variant_id: string
   variant_label: string
   url: string
@@ -34,4 +35,3 @@ export type PlayerEngine = {
   setVolume: (volume01: number) => void
   destroy: () => Promise<void> | void
 }
-

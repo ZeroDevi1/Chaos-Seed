@@ -2,10 +2,12 @@
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
+  import { fade } from 'svelte/transition'
 
   import MasterPlayer from '@/player/MasterPlayer.svelte'
   import type { PlayerBootRequest } from '@/player/types'
+  import { fetchDanmakuImage } from '@/shared/danmakuApi'
   import type { StreamVariant } from '@/shared/livestreamTypes'
 
   let player: MasterPlayer | null = null
@@ -13,6 +15,30 @@
   let lastErr = ''
 
   let win: ReturnType<typeof getCurrentWebviewWindow> | null = null
+  let disposed = false
+  let heroMinMs = 0
+  let heroMinDone = true
+  let ready = false
+  let prepared = false
+  let preparingKey = ''
+
+  let posterObjectUrl: string | null = null
+  let posterKey = ''
+  let posterFadeMs = 180
+
+  function revokePosterObjectUrl() {
+    if (!posterObjectUrl) return
+    try {
+      URL.revokeObjectURL(posterObjectUrl)
+    } catch {
+      // ignore
+    }
+    posterObjectUrl = null
+  }
+
+  onDestroy(() => {
+    revokePosterObjectUrl()
+  })
 
   async function closeSelf() {
     if (!win) return
@@ -26,10 +52,70 @@
   async function applyReq(req: PlayerBootRequest) {
     bootReq = req
     lastErr = ''
+    ready = false
+    prepared = false
+    const k = `${req.site}:${req.room_id}:${req.variant_id}:${req.url}`
+    preparingKey = k
     try {
-      await player?.load(req)
+      await player?.prepare(req)
+      if (disposed || preparingKey !== k) return
+      prepared = true
+      await maybeStart()
     } catch (e) {
       lastErr = String(e)
+      ready = false
+      prepared = false
+    }
+  }
+
+  async function maybeStart() {
+    if (disposed) return
+    if (!heroMinDone) return
+    if (!prepared) return
+    if (ready) return
+    try {
+      await player?.start()
+      if (disposed) return
+      ready = true
+    } catch (e) {
+      lastErr = String(e)
+      ready = false
+    }
+  }
+
+  async function syncPoster(req: PlayerBootRequest | null) {
+    if (!req) {
+      posterKey = ''
+      revokePosterObjectUrl()
+      return
+    }
+
+    const raw = (req.cover ?? '').toString().trim()
+    const nextKey = `${req.site}|${req.room_id}|${raw}`
+    if (nextKey === posterKey) return
+    posterKey = nextKey
+    const myKey = nextKey
+
+    revokePosterObjectUrl()
+    if (!raw) return
+
+    try {
+      const reply = await fetchDanmakuImage({ url: raw, site: req.site, roomId: req.room_id })
+      const mime = (reply.mime || '').toString().trim() || 'image/jpeg'
+      const buf = new Uint8Array(reply.bytes)
+      const blob = new Blob([buf], { type: mime })
+      const objectUrl = URL.createObjectURL(blob)
+      if (posterKey !== myKey) {
+        try {
+          URL.revokeObjectURL(objectUrl)
+        } catch {
+          // ignore
+        }
+        return
+      }
+      posterObjectUrl = objectUrl
+    } catch {
+      posterObjectUrl = null
     }
   }
 
@@ -81,7 +167,6 @@
   }
 
   onMount(() => {
-    let disposed = false
     let unLoad: (() => void) | undefined
     let onKey: ((ev: KeyboardEvent) => void) | undefined
     let onUnload: (() => void) | undefined
@@ -112,6 +197,18 @@
     const boot = window.__CHAOS_SEED_BOOT as any
     const maybe = boot?.player
     if (maybe && typeof maybe === 'object') {
+      const delay = Number(boot?.heroDelayMs ?? 0)
+      heroMinMs = Number.isFinite(delay) ? Math.max(0, Math.round(delay)) : 0
+      heroMinDone = heroMinMs <= 0
+      if (!heroMinDone) {
+        window.setTimeout(() => {
+          if (disposed) return
+          heroMinDone = true
+          void maybeStart()
+        }, heroMinMs)
+      }
+
+      // Start loading immediately; we keep a poster overlay for `heroMinMs` to avoid visual pop.
       void applyReq(maybe as PlayerBootRequest)
     }
 
@@ -120,6 +217,8 @@
       try {
         const un = await listen<PlayerBootRequest>('player_load', (e) => {
           if (disposed) return
+          heroMinMs = 0
+          heroMinDone = true
           void applyReq(e.payload)
         })
         if (disposed) return un()
@@ -132,12 +231,34 @@
     // Best-effort: keep the same Win11 backdrop mode as main/chat when player opens.
     void invoke('set_backdrop', { mode: 'none' }).catch(() => {})
 
+    try {
+      posterFadeMs = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 0 : 180
+    } catch {
+      posterFadeMs = 180
+    }
+
     return cleanup
   })
+
+  $: void syncPoster(bootReq)
 </script>
 
 <div class="player-window">
   <MasterPlayer bind:this={player} boot={bootReq} />
+  {#if bootReq && !lastErr && (posterObjectUrl || (bootReq.cover ?? '').toString().trim()) && !ready}
+    <div class="player-window-poster" aria-hidden="true" out:fade={{ duration: posterFadeMs }}>
+      {#if posterObjectUrl}
+        <img class="player-window-poster-img" alt="" src={posterObjectUrl} />
+      {:else}
+        <img class="player-window-poster-img" alt="" src={bootReq.cover} />
+      {/if}
+      <div class="player-window-poster-shade"></div>
+      <div class="player-window-poster-meta">
+        <div class="player-window-poster-title">{bootReq.title}</div>
+        <div class="player-window-poster-sub">{bootReq.site} / {bootReq.room_id} / {bootReq.variant_label}</div>
+      </div>
+    </div>
+  {/if}
   {#if bootReq && getVariants(bootReq).length > 1}
     <div class="player-window-top">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -160,6 +281,54 @@
     width: 100%;
     height: 100%;
     background: #000;
+  }
+
+  .player-window-poster {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    overflow: hidden;
+    pointer-events: none;
+    background: #000;
+  }
+
+  .player-window-poster-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scale(1.02);
+    filter: blur(10px) saturate(1.05);
+    opacity: 0.92;
+  }
+
+  .player-window-poster-shade {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 30% 20%, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.72));
+  }
+
+  .player-window-poster-meta {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    color: #fff;
+  }
+
+  .player-window-poster-title {
+    font-weight: 700;
+    font-size: 16px;
+    line-height: 1.25;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  }
+
+  .player-window-poster-sub {
+    margin-top: 4px;
+    opacity: 0.78;
+    font-size: 12px;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
   }
 
   .player-window-top {

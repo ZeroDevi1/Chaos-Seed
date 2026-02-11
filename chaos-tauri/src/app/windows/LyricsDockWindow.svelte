@@ -404,41 +404,38 @@
 
     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
     <div class="actions" on:mousedown|stopPropagation>
-      <button class="icon" title="菜单 (F1)" on:click={() => (menuOpen = !menuOpen)}>⋯</button>
-      <button class="icon danger" title="关闭" on:click={() => void closeSelf()}>×</button>
+      <fluent-button class="icon" appearance="stealth" title="菜单 (F1)" on:click={() => (menuOpen = !menuOpen)}>⋯</fluent-button>
+      <fluent-button class="icon danger" appearance="stealth" title="关闭" on:click={() => void closeSelf()}>×</fluent-button>
     </div>
 
     {#if menuOpen}
       <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-      <div class="menu" on:mousedown|stopPropagation>
-        <button
-          class={alwaysOnTop ? 'menu-item active' : 'menu-item'}
+      <fluent-menu class="menu" on:mousedown|stopPropagation>
+        <fluent-menu-item
           on:click={() => {
             menuOpen = false
             void toggleAlwaysOnTop()
           }}
         >
           {alwaysOnTop ? '✓ 置顶' : '置顶'}
-        </button>
-        <button
-          class="menu-item"
+        </fluent-menu-item>
+        <fluent-menu-item
           on:click={() => {
             menuOpen = false
             void snapTo('left')
           }}
         >
           贴左
-        </button>
-        <button
-          class="menu-item"
+        </fluent-menu-item>
+        <fluent-menu-item
           on:click={() => {
             menuOpen = false
             void snapTo('right')
           }}
         >
           贴右
-        </button>
-      </div>
+        </fluent-menu-item>
+      </fluent-menu>
     {/if}
   </div>
 
@@ -538,20 +535,26 @@
   .icon {
     width: 30px;
     height: 28px;
+  }
+
+  .icon::part(control) {
+    width: 30px;
+    height: 28px;
     border-radius: 10px;
     border: 1px solid var(--border-color);
     background: var(--button-secondary-bg);
     color: var(--button-secondary-fg);
-    cursor: pointer;
     line-height: 1;
     font-size: 18px;
+    padding: 0;
+    justify-content: center;
   }
 
-  .icon:hover {
+  .icon::part(control):hover {
     background: var(--button-secondary-bg-hover);
   }
 
-  .icon.danger:hover {
+  .icon.danger::part(control):hover {
     background: color-mix(in srgb, #ff5050 18%, var(--button-secondary-bg-hover));
   }
 
@@ -559,44 +562,8 @@
     position: absolute;
     right: 12px;
     top: 52px;
-    width: 160px;
-    padding: 6px;
-    border-radius: 12px;
-    border: 1px solid var(--border-color);
-    background: var(--panel-bg);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+    width: 180px;
     z-index: 5;
-  }
-
-  .menu-item {
-    width: 100%;
-    text-align: left;
-    padding: 9px 10px;
-    border-radius: 10px;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text-primary);
-    cursor: pointer;
-    font-size: 13px;
-  }
-
-  .menu-item:hover {
-    background: var(--hover-bg);
-  }
-
-  .menu-item.active {
-    background: var(--selected-bg);
-    border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-  }
-
-  .menu-item.danger:hover {
-    background: color-mix(in srgb, #ff5050 18%, transparent);
-  }
-
-  .sep {
-    height: 1px;
-    background: var(--border-color);
-    margin: 6px 0;
   }
 
   .body {

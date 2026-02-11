@@ -3,10 +3,18 @@ import {
   baseLayerLuminance,
   fluentButton,
   fluentCard,
+  fluentDivider,
+  fluentMenu,
+  fluentMenuItem,
   fluentNumberField,
   fluentOption,
   fluentSelect,
+  fluentSkeleton,
   fluentTextField,
+  fluentToolbar,
+  fluentTooltip,
+  fluentTreeItem,
+  fluentTreeView,
   provideFluentDesignSystem,
   StandardLuminance,
   SwatchRGB
@@ -14,11 +22,21 @@ import {
 
 export type ResolvedTheme = 'light' | 'dark'
 
-// Match our CSS accent (WeChat-like green): #07C160
-const ACCENT = SwatchRGB.create(7, 193, 96)
+// Fallback accent (keeps a stable look when the system accent is unavailable).
+const FALLBACK_ACCENT = SwatchRGB.create(7, 193, 96) // #07C160
 
 let registered = false
 const appliedCache = new WeakMap<HTMLElement, { lum?: number; accent?: unknown }>()
+
+type RgbReply = { r: number; g: number; b: number }
+
+function clampByte(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(255, Math.round(n)))
+}
+
+let accentSwatch = FALLBACK_ACCENT
+let accentInitPromise: Promise<void> | null = null
 
 function ensureRegistered() {
   if (registered) return
@@ -30,7 +48,15 @@ function ensureRegistered() {
     fluentTextField(),
     fluentNumberField(),
     fluentSelect(),
-    fluentOption()
+    fluentOption(),
+    fluentDivider(),
+    fluentTreeView(),
+    fluentTreeItem(),
+    fluentTooltip(),
+    fluentToolbar(),
+    fluentMenu(),
+    fluentMenuItem(),
+    fluentSkeleton()
   )
 }
 
@@ -71,10 +97,32 @@ export function applyFluentTokens(resolved: ResolvedTheme) {
     baseLayerLuminance.setValueFor(host, nextLum)
     prev.lum = nextLum
   }
-  if (prev.accent !== ACCENT) {
-    accentBaseColor.setValueFor(host, ACCENT)
-    prev.accent = ACCENT
+  if (prev.accent !== accentSwatch) {
+    accentBaseColor.setValueFor(host, accentSwatch)
+    prev.accent = accentSwatch
   }
 
   appliedCache.set(host, prev)
+}
+
+/**
+ * Best-effort: read Windows system accent and sync it to Fluent tokens.
+ *
+ * This is safe to call on any platform; unsupported platforms no-op.
+ */
+export function initSystemAccent(): Promise<void> {
+  if (accentInitPromise) return accentInitPromise
+  accentInitPromise = (async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const rgb = await invoke<RgbReply>('system_accent_rgb')
+      const r = clampByte(rgb?.r)
+      const g = clampByte(rgb?.g)
+      const b = clampByte(rgb?.b)
+      accentSwatch = SwatchRGB.create(r, g, b)
+    } catch {
+      // ignore - keep fallback accent
+    }
+  })()
+  return accentInitPromise
 }

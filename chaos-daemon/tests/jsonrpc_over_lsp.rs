@@ -1,7 +1,8 @@
 use chaos_daemon::{read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame, ChaosService};
 use chaos_proto::{
     DanmakuFetchImageParams, DanmakuFetchImageResult, DanmakuMessage, LiveCloseParams, LiveOpenParams,
-    LiveOpenResult,
+    LiveOpenResult, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
+    LivestreamPlaybackHints, LivestreamVariant,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -30,6 +31,36 @@ impl FakeSvc {
 impl ChaosService for FakeSvc {
     fn version(&self) -> String {
         "0.0.0-test".to_string()
+    }
+
+    async fn livestream_decode_manifest(
+        &self,
+        params: LivestreamDecodeManifestParams,
+    ) -> Result<LivestreamDecodeManifestResult, String> {
+        Ok(LivestreamDecodeManifestResult {
+            site: "bili_live".to_string(),
+            room_id: "1".to_string(),
+            raw_input: params.input,
+            info: LivestreamInfo {
+                title: "t".to_string(),
+                name: Some("n".to_string()),
+                avatar: None,
+                cover: Some("https://example.com/c.jpg".to_string()),
+                is_living: true,
+            },
+            playback: LivestreamPlaybackHints {
+                referer: Some("https://live.bilibili.com/1/".to_string()),
+                user_agent: None,
+            },
+            variants: vec![LivestreamVariant {
+                id: "v".to_string(),
+                label: "原画".to_string(),
+                quality: 10000,
+                rate: None,
+                url: None,
+                backup_urls: vec![],
+            }],
+        })
     }
 
     async fn live_open(
@@ -120,7 +151,25 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v2["id"], 2);
     assert_eq!(v2["result"]["sessionId"], "sess");
 
-    // 3) notification
+    // 3) decode manifest
+    let dec = json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "livestream.decodeManifest",
+        "params": { "input": "bilibili:1" }
+    });
+    let dec_bytes = serde_json::to_vec(&dec).unwrap();
+    write_lsp_frame(&mut w, &dec_bytes).await.unwrap();
+    let resp5 = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 16 * 1024))
+        .await
+        .unwrap()
+        .unwrap();
+    let v5: serde_json::Value = serde_json::from_slice(&resp5).unwrap();
+    assert_eq!(v5["id"], 5);
+    assert_eq!(v5["result"]["site"], "bili_live");
+    assert!(v5["result"]["variants"].is_array());
+
+    // 4) notification
     svc.push_msg(DanmakuMessage {
         session_id: "sess".to_string(),
         received_at_ms: 1,
@@ -138,7 +187,7 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(vn["params"]["sessionId"], "sess");
     assert_eq!(vn["params"]["text"], "hi");
 
-    // 4) fetch image
+    // 5) fetch image
     let img = json!({
         "jsonrpc": "2.0",
         "id": 3,
@@ -155,7 +204,7 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v3["id"], 3);
     assert_eq!(v3["result"]["base64"], "AA==");
 
-    // 5) close
+    // 6) close
     let close = json!({
         "jsonrpc": "2.0",
         "id": 4,

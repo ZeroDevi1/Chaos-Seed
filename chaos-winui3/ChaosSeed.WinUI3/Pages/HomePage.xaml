@@ -5,10 +5,15 @@
     xmlns:local="using:ChaosSeed.WinUI3.Pages"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
 
-    <Grid Padding="24">
+    <Grid Padding="{StaticResource ChaosPagePadding}">
+        <Grid.Transitions>
+            <TransitionCollection>
+                <EntranceThemeTransition FromVerticalOffset="10" />
+            </TransitionCollection>
+        </Grid.Transitions>
         <StackPanel Spacing="12" MaxWidth="720">
             <TextBlock Text="Chaos-Seed" FontSize="28" FontWeight="SemiBold" />
-            <TextBlock Text="输入直播间地址（URL 或平台前缀），解析后进入直播页面。" Opacity="0.8" />
+            <TextBlock Text="输入直播间地址（URL 或平台前缀），解析后进入直播页选择清晰度播放。" Opacity="0.8" />
 
             <TextBox x:Name="InputBox" PlaceholderText="例如：https://live.bilibili.com/1 / douyu:xxx / huya:xxx" />
 

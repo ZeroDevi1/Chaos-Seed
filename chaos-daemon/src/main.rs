@@ -2,7 +2,10 @@
 mod win {
     use chaos_daemon::run_jsonrpc_over_lsp;
     use chaos_app::ChaosApp;
-    use chaos_proto::{DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams, PreferredQuality};
+    use chaos_proto::{
+        DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams, LivestreamDecodeManifestParams,
+        LivestreamDecodeManifestResult, PreferredQuality,
+    };
     use std::env;
 
     struct Svc {
@@ -12,6 +15,16 @@ mod win {
     impl chaos_daemon::ChaosService for Svc {
         fn version(&self) -> String {
             env!("CARGO_PKG_VERSION").to_string()
+        }
+
+        async fn livestream_decode_manifest(
+            &self,
+            params: LivestreamDecodeManifestParams,
+        ) -> Result<LivestreamDecodeManifestResult, String> {
+            self.app
+                .decode_manifest(&params.input)
+                .await
+                .map_err(|e| e.to_string())
         }
 
         async fn live_open(
@@ -27,7 +40,7 @@ mod win {
             let prefer = params.preferred_quality.unwrap_or_default();
             let prefer_lowest = matches!(prefer, PreferredQuality::Lowest);
             self.app
-                .open_live(&params.input, prefer_lowest)
+                .open_live(&params.input, prefer_lowest, params.variant_id.as_deref())
                 .await
                 .map_err(|e| e.to_string())
         }
