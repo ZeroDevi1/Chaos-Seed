@@ -1797,13 +1797,14 @@ public sealed partial class LivePage : Page
 		                Canvas.SetTop(playerHost, 0);
 		                playerHost.Width = targetRect.Width;
 		                playerHost.Height = targetRect.Height;
+		                TryRefreshPlayerLayoutUnsafe();
 		            }
 		        }
 		        catch
 		        {
 		            // ignore
-	        }
-	    }
+		        }
+		    }
 
     private void ExitSystemFullscreenIfNeeded()
     {
@@ -2290,6 +2291,7 @@ public sealed partial class LivePage : Page
 	                }
 	                ApplyContextLayerProgress(1);
 	                UpdateFullScreenPopupSize();
+	                TryRefreshPlayerLayoutUnsafe();
 	                UpdateFullscreenButtonIcon();
 	            }
 	            catch
