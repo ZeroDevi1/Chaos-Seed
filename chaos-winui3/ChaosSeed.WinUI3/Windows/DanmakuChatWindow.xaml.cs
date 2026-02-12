@@ -135,7 +135,7 @@ public sealed partial class DanmakuChatWindow : Window
                 return;
             }
 
-            var id = global::WinRT.Interop.Win32Interop.GetWindowIdFromWindow(hwnd);
+            var id = global::Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
             _appWindow = AppWindow.GetFromWindowId(id);
 
             if (_appWindow.Presenter is OverlappedPresenter p)
