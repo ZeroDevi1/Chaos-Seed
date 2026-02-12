@@ -1,11 +1,11 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using WinRT.Interop;
-using VirtualKey = Windows.System.VirtualKey;
 
 namespace ChaosSeed.WinUI3.Windows;
 
@@ -20,12 +20,13 @@ public sealed partial class DanmakuChatWindow : Window
     private DanmakuImageLoader? _images;
     private CancellationTokenSource? _cts;
     private AppWindow? _appWindow;
+    private IntPtr _hwnd;
 
     public DanmakuChatWindow()
     {
         InitializeComponent();
 
-        TryApplyDefaultWindowSize();
+        InitWindowStyle();
 
         _cts = new CancellationTokenSource();
         _images = new DanmakuImageLoader(_dq, maxConcurrency: 4);
@@ -70,6 +71,15 @@ public sealed partial class DanmakuChatWindow : Window
 
         try
         {
+            SaveBoundsBestEffort();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
             _cts?.Cancel();
         }
         catch
@@ -111,7 +121,7 @@ public sealed partial class DanmakuChatWindow : Window
     private void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
         _ = sender;
-        if (e.Key == VirtualKey.Escape)
+        if (e.Key == global::Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
             try
@@ -125,17 +135,17 @@ public sealed partial class DanmakuChatWindow : Window
         }
     }
 
-    private void TryApplyDefaultWindowSize()
+    private void InitWindowStyle()
     {
         try
         {
-            var hwnd = WindowNative.GetWindowHandle(this);
-            if (hwnd == IntPtr.Zero)
+            _hwnd = WindowNative.GetWindowHandle(this);
+            if (_hwnd == IntPtr.Zero)
             {
                 return;
             }
 
-            var id = global::Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+            var id = global::Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hwnd);
             _appWindow = AppWindow.GetFromWindowId(id);
 
             if (_appWindow.Presenter is OverlappedPresenter p)
@@ -150,12 +160,111 @@ public sealed partial class DanmakuChatWindow : Window
                 }
             }
 
-            // Default to a narrow chat window.
-            _appWindow.Resize(new global::Windows.Graphics.SizeInt32(380, 760));
+            try
+            {
+                _appWindow.Title = "Chat";
+            }
+            catch
+            {
+                // ignore
+            }
+
+            try
+            {
+                _appWindow.SetIcon("Assets\\icon.ico");
+            }
+            catch
+            {
+                try
+                {
+                    var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "icon.ico");
+                    _appWindow.SetIcon(iconPath);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            ApplySavedBoundsOrDefault();
         }
         catch
         {
             // ignore
         }
+    }
+
+    private void ApplySavedBoundsOrDefault()
+    {
+        if (_appWindow is null)
+        {
+            return;
+        }
+
+        var s = SettingsService.Instance.Current;
+        var x = s.DanmakuChatX;
+        var y = s.DanmakuChatY;
+        var w = s.DanmakuChatWidth;
+        var h = s.DanmakuChatHeight;
+
+        var size = new global::Windows.Graphics.SizeInt32(380, 760);
+        if (w is > 100 and < 10_000 && h is > 100 and < 10_000)
+        {
+            size = new global::Windows.Graphics.SizeInt32(w.Value, h.Value);
+        }
+
+        try
+        {
+            _appWindow.Resize(size);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        if (x is > -50_000 and < 50_000 && y is > -50_000 and < 50_000)
+        {
+            try
+            {
+                _appWindow.Move(new global::Windows.Graphics.PointInt32(x.Value, y.Value));
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    private void SaveBoundsBestEffort()
+    {
+        if (_appWindow is null)
+        {
+            return;
+        }
+
+        global::Windows.Graphics.PointInt32 pos;
+        global::Windows.Graphics.SizeInt32 size;
+        try
+        {
+            pos = _appWindow.Position;
+            size = _appWindow.Size;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (size.Width < 100 || size.Height < 100)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s =>
+        {
+            s.DanmakuChatX = pos.X;
+            s.DanmakuChatY = pos.Y;
+            s.DanmakuChatWidth = size.Width;
+            s.DanmakuChatHeight = size.Height;
+        });
     }
 }

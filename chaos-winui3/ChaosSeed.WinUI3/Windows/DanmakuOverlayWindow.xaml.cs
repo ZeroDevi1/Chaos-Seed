@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Services;
@@ -10,7 +12,6 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using WinRT.Interop;
-using VirtualKey = Windows.System.VirtualKey;
 
 namespace ChaosSeed.WinUI3.Windows;
 
@@ -27,13 +28,18 @@ public sealed partial class DanmakuOverlayWindow : Window
 
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _timer;
     private long _lastTickTs;
-    private bool _clickThrough;
+    private bool _clickThrough = true; // locked by default: click-through client area; keep a small grip area interactive
     private IntPtr _hwnd;
     private AppWindow? _appWindow;
+    private OverlappedPresenter? _presenter;
     private CancellationTokenSource? _cts;
 
+    private IntPtr _oldWndProc;
+    private WndProc? _newWndProc;
+
+    private const int DragGripHeightPx = 28;
     private const double LaneHeight = 32;
-    private const double TopPad = 44; // leave room for hint box
+    private const double TopPad = 10;
     private const double BottomPad = 10;
     private int _laneCursor;
 
@@ -49,6 +55,12 @@ public sealed partial class DanmakuOverlayWindow : Window
         Closed += (_, _) => Cleanup();
         Activated += (_, _) =>
         {
+            // WinUI3 sometimes doesn't have a valid HWND immediately after InitializeComponent.
+            if (_hwnd == IntPtr.Zero || _appWindow is null)
+            {
+                InitWindowStyle();
+            }
+
             try
             {
                 Root.Focus(FocusState.Programmatic);
@@ -65,8 +77,6 @@ public sealed partial class DanmakuOverlayWindow : Window
         _timer.Tick += (_, _) => Tick();
         _lastTickTs = Stopwatch.GetTimestamp();
         _timer.Start();
-
-        UpdateHint();
     }
 
     private void InitWindowStyle()
@@ -79,23 +89,15 @@ public sealed partial class DanmakuOverlayWindow : Window
                 return;
             }
 
-            Win32OverlayInterop.EnsureLayered(_hwnd);
+            Win32OverlayInterop.EnableTransparentBackground(_hwnd);
             Win32OverlayInterop.SetTopmost(_hwnd, true);
 
-            var id = Win32Interop.GetWindowIdFromWindow(_hwnd);
+            var id = global::Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hwnd);
             _appWindow = AppWindow.GetFromWindowId(id);
 
             if (_appWindow.Presenter is OverlappedPresenter p)
             {
-                try
-                {
-                    // Use the system title bar for move/resize (less custom code).
-                    p.SetBorderAndTitleBar(true, true);
-                }
-                catch
-                {
-                    // ignore
-                }
+                _presenter = p;
 
                 try
                 {
@@ -115,18 +117,81 @@ public sealed partial class DanmakuOverlayWindow : Window
                 {
                     // ignore
                 }
+
+                ApplyOverlayChrome(locked: _clickThrough);
             }
 
             try
             {
-                _appWindow.Title = "Chaos Seed - Overlay";
+                _appWindow.Title = "Overlay";
             }
             catch
             {
                 // ignore
             }
 
+            try
+            {
+                _appWindow.SetIcon("Assets\\icon.ico");
+            }
+            catch
+            {
+                try
+                {
+                    var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "icon.ico");
+                    _appWindow.SetIcon(iconPath);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
             ApplySavedBoundsOrDefault();
+
+            HookWndProcBestEffort();
+
+            // Chrome can be reset by style changes; apply once more at the end.
+            ApplyOverlayChrome(locked: _clickThrough);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void ApplyOverlayChrome(bool locked)
+    {
+        if (_presenter is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Locked: borderless overlay look; Edit: show system chrome for easy move/resize.
+            _presenter.SetBorderAndTitleBar(!locked, !locked);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            _presenter.IsAlwaysOnTop = true;
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            if (_hwnd != IntPtr.Zero)
+            {
+                Win32OverlayInterop.SetTopmost(_hwnd, true);
+            }
         }
         catch
         {
@@ -365,19 +430,11 @@ public sealed partial class DanmakuOverlayWindow : Window
 
     private void SpawnOne(DanmakuMessage msg, double y)
     {
-        var user = (msg.User ?? "").Trim();
-        if (user.Length == 0)
-        {
-            user = "??";
-        }
-
         var text = (msg.Text ?? "").Trim();
         if (text.Length == 0 && !string.IsNullOrWhiteSpace(msg.ImageUrl))
         {
-            text = "[表情]";
+            text = "[图片]";
         }
-
-        var display = DanmakuRowVm.IsImagePlaceholderText(text) ? $"{user}: [表情]" : $"{user}: {text}";
 
         var sp = new StackPanel
         {
@@ -385,13 +442,19 @@ public sealed partial class DanmakuOverlayWindow : Window
             Spacing = 6,
         };
 
-        var tb = new TextBlock
+        TextBlock? tb = null;
+        if (!string.IsNullOrWhiteSpace(text))
         {
-            Text = display,
-            Foreground = new SolidColorBrush(Colors.White),
-            FontSize = 20,
-        };
-        sp.Children.Add(tb);
+            var isPlaceholder = DanmakuRowVm.IsImagePlaceholderText(text);
+            tb = new TextBlock
+            {
+                Text = isPlaceholder ? "[图片]" : text,
+                Foreground = new SolidColorBrush(Colors.White),
+                FontSize = isPlaceholder ? 16 : 20,
+                Opacity = isPlaceholder ? 0.75 : 1,
+            };
+            sp.Children.Add(tb);
+        }
 
         Image? img = null;
         if (!string.IsNullOrWhiteSpace(msg.ImageUrl))
@@ -401,7 +464,8 @@ public sealed partial class DanmakuOverlayWindow : Window
                 Width = 28,
                 Height = 28,
                 Stretch = Stretch.Uniform,
-                Visibility = Visibility.Collapsed,
+                Visibility = Visibility.Visible,
+                Opacity = 0,
             };
             sp.Children.Add(img);
         }
@@ -420,11 +484,17 @@ public sealed partial class DanmakuOverlayWindow : Window
 
         if (img is not null && _cts is not null)
         {
-            _ = TryLoadOverlayImageAsync(msg.SessionId, msg.ImageUrl!, img, _cts.Token);
+            _ = TryLoadOverlayImageAsync(msg.SessionId, msg.ImageUrl!, img, tb, _cts.Token);
         }
     }
 
-    private async Task TryLoadOverlayImageAsync(string sessionId, string url, Image img, CancellationToken ct)
+    private async Task TryLoadOverlayImageAsync(
+        string sessionId,
+        string url,
+        Image img,
+        TextBlock? placeholderText,
+        CancellationToken ct
+    )
     {
         var sid = (sessionId ?? "").Trim();
         if (string.IsNullOrWhiteSpace(sid))
@@ -449,7 +519,11 @@ public sealed partial class DanmakuOverlayWindow : Window
             await bmp.SetSourceAsync(ms);
 
             img.Source = bmp;
-            img.Visibility = Visibility.Visible;
+            img.Opacity = 1;
+            if (placeholderText is not null && DanmakuRowVm.IsImagePlaceholderText(placeholderText.Text))
+            {
+                placeholderText.Visibility = Visibility.Collapsed;
+            }
         }
         catch
         {
@@ -464,7 +538,7 @@ public sealed partial class DanmakuOverlayWindow : Window
     private void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
         _ = sender;
-        if (e.Key == VirtualKey.Escape)
+        if (e.Key == global::Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
             try
@@ -478,7 +552,7 @@ public sealed partial class DanmakuOverlayWindow : Window
             return;
         }
 
-        if (e.Key == VirtualKey.F2)
+        if (e.Key == global::Windows.System.VirtualKey.F2)
         {
             e.Handled = true;
             ToggleClickThrough();
@@ -488,21 +562,114 @@ public sealed partial class DanmakuOverlayWindow : Window
     private void ToggleClickThrough()
     {
         _clickThrough = !_clickThrough;
+        ApplyOverlayChrome(locked: _clickThrough);
+    }
+
+    // WinUI overlay: make only the client area click-through so the border/title bar can still move/resize the window.
+    private void HookWndProcBestEffort()
+    {
+        if (_hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (_oldWndProc != IntPtr.Zero)
+        {
+            return;
+        }
+
         try
         {
-            Win32OverlayInterop.SetClickThrough(_hwnd, _clickThrough);
+            _newWndProc = WndProcImpl;
+            var fp = Marshal.GetFunctionPointerForDelegate(_newWndProc);
+            _oldWndProc = SetWindowLongPtr(_hwnd, GWLP_WNDPROC, fp);
         }
         catch
         {
-            // ignore
+            _oldWndProc = IntPtr.Zero;
+            _newWndProc = null;
         }
-        UpdateHint();
     }
 
-    private void UpdateHint()
+    private IntPtr WndProcImpl(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
-        var t = _clickThrough ? "ON" : "OFF";
-        HintText.Text = $"Overlay: Esc 关闭 / F2 点击穿透（{t}）";
+        // If we failed to hook, fall back to default behavior.
+        if (_oldWndProc == IntPtr.Zero)
+        {
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+
+        if (msg == WM_NCHITTEST)
+        {
+            var res = CallWindowProc(_oldWndProc, hwnd, msg, wParam, lParam);
+
+            if (_clickThrough && res == (IntPtr)HTCLIENT)
+            {
+                // Keep a small top "grip" area interactive so the user can focus/move the overlay
+                // even when we're borderless; everything else passes through to the app underneath.
+                try
+                {
+                    var y = GetYLParam(lParam);
+                    if (GetWindowRect(hwnd, out var rect))
+                    {
+                        var dy = y - rect.Top;
+                        if (dy >= 0 && dy < DragGripHeightPx)
+                        {
+                            return (IntPtr)HTCAPTION;
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+                return (IntPtr)HTTRANSPARENT;
+            }
+            return res;
+        }
+
+        return CallWindowProc(_oldWndProc, hwnd, msg, wParam, lParam);
+    }
+
+    private const int GWLP_WNDPROC = -4;
+    private const uint WM_NCHITTEST = 0x0084;
+    private const int HTCLIENT = 1;
+    private const int HTCAPTION = 2;
+    private const int HTTRANSPARENT = -1;
+
+    private delegate IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "CallWindowProcW", SetLastError = true)]
+    private static extern IntPtr CallWindowProc(
+        IntPtr lpPrevWndFunc,
+        IntPtr hWnd,
+        uint Msg,
+        IntPtr wParam,
+        IntPtr lParam
+    );
+
+    [DllImport("user32.dll", EntryPoint = "DefWindowProcW", SetLastError = true)]
+    private static extern IntPtr DefWindowProc(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    private static int GetYLParam(IntPtr lp)
+    {
+        var v = (long)lp;
+        return unchecked((short)((v >> 16) & 0xFFFF));
     }
 
     private sealed class Sprite

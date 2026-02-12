@@ -5,21 +5,5 @@
 
     <Grid x:Name="Root" Background="Transparent" KeyDown="OnKeyDown">
         <Canvas x:Name="Stage" Background="Transparent" />
-
-        <Border
-            HorizontalAlignment="Left"
-            VerticalAlignment="Top"
-            Margin="12"
-            Background="#66000000"
-            CornerRadius="6"
-            Padding="8">
-            <TextBlock
-                x:Name="HintText"
-                Text="Overlay: Esc 关闭 / F2 切换点击穿透"
-                Foreground="White"
-                Opacity="0.9"
-                FontSize="12" />
-        </Border>
     </Grid>
 </Window>
-
