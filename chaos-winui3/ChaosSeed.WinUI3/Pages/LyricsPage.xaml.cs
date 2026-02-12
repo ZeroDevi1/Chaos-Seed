@@ -112,18 +112,11 @@ public sealed partial class LyricsPage : Page
 
             ApplyProviderChecksToFlyout(s.LyricsProviders);
             UpdateProvidersSummary();
-            UpdateAutoDetectStatus();
         }
         finally
         {
             _uiInit = false;
         }
-    }
-
-    private void UpdateAutoDetectStatus()
-    {
-        var enabled = SettingsService.Instance.Current.LyricsAutoDetect;
-        AutoDetectStatusText.Text = enabled ? "自动检测：已开启（到设置中修改）" : "自动检测：已关闭（到设置中修改）";
     }
 
     private void EnsureWatchFromSettings()

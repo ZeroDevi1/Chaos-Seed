@@ -44,7 +44,6 @@
                             <StackPanel Grid.Column="1" Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <Button x:Name="RefreshBtn" Content="刷新 Now Playing" Click="OnRefreshNowPlayingClicked" />
-                                    <TextBlock x:Name="AutoDetectStatusText" Text="自动检测：-" Opacity="0.8" VerticalAlignment="Center" />
                                 </StackPanel>
 
                                 <Grid ColumnSpacing="12" RowSpacing="6">
@@ -259,4 +258,3 @@
         </Grid>
     </ScrollViewer>
 </Page>
-

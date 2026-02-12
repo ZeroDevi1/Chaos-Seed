@@ -28,7 +28,6 @@
                     </Grid.ColumnDefinitions>
                     <TextBox
                         x:Name="InputBox"
-                        PlaceholderText="例如：https://live.bilibili.com/1 / douyu:xxx / huya:xxx"
                         KeyDown="OnParseInputKeyDown" />
                     <Button x:Name="ParseBtn" Grid.Column="1" Content="解析" Click="OnParseClicked" />
                 </Grid>

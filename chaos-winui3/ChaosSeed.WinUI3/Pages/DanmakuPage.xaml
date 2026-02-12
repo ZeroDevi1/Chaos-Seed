@@ -28,7 +28,6 @@
                     </Grid.ColumnDefinitions>
                     <TextBox
                         x:Name="InputBox"
-                        PlaceholderText="例如：https://live.bilibili.com/1 / douyu:xxx / huya:xxx"
                         KeyDown="OnInputKeyDown" />
                     <Button x:Name="ConnectBtn" Grid.Column="1" Content="连接" Click="OnConnectClicked" />
                     <Button x:Name="DisconnectBtn" Grid.Column="2" Content="断开" Click="OnDisconnectClicked" IsEnabled="False" />
@@ -96,4 +95,3 @@
         </Border>
     </Grid>
 </Page>
-
