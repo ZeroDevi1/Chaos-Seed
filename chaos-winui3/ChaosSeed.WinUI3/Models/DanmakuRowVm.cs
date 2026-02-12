@@ -73,7 +73,9 @@ public sealed class DanmakuRowVm : INotifyPropertyChanged
         }
         return string.Equals(t, "[图片]", StringComparison.OrdinalIgnoreCase)
             || string.Equals(t, "[image]", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(t, "[img]", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(t, "[img]", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "[表情]", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "[emote]", StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)
@@ -81,4 +83,3 @@ public sealed class DanmakuRowVm : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 }
-

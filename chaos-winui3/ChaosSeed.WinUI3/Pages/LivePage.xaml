@@ -134,6 +134,13 @@
 	                                    HorizontalAlignment="Stretch"
 	                                    VerticalAlignment="Stretch" />
 
+	                                <Canvas
+	                                    x:Name="DanmakuOverlayStage"
+	                                    Background="Transparent"
+	                                    IsHitTestVisible="False"
+	                                    HorizontalAlignment="Stretch"
+	                                    VerticalAlignment="Stretch" />
+
 	                                <Image x:Name="HeroCover" Visibility="Collapsed" Stretch="UniformToFill" />
 
 	                                <Grid
@@ -170,6 +177,7 @@
 		                                                <ColumnDefinition Width="*" />
 		                                                <ColumnDefinition Width="Auto" />
 		                                                <ColumnDefinition Width="Auto" />
+		                                                <ColumnDefinition Width="Auto" />
 		                                            </Grid.ColumnDefinitions>
 
 	                                            <Button
@@ -199,9 +207,91 @@
 	                                                Maximum="100"
 	                                                ValueChanged="OnVolumeSliderValueChanged" />
 
+		                                            <muxc:ToggleSplitButton
+		                                                x:Name="DanmakuOverlayBtn"
+		                                                Grid.Column="4"
+		                                                Padding="10,6"
+		                                                Background="Transparent"
+		                                                Foreground="White"
+		                                                ToolTipService.ToolTip="弹幕"
+		                                                Click="OnDanmakuOverlayClicked">
+		                                                <FontIcon
+		                                                    FontFamily="Segoe MDL2 Assets"
+		                                                    Glyph="&#xE90A;"
+		                                                    FontSize="16" />
+		                                                <muxc:ToggleSplitButton.Flyout>
+		                                                    <Flyout Placement="Top">
+		                                                        <StackPanel Padding="12" Spacing="12" Width="320">
+		                                                            <TextBlock Text="弹幕" FontSize="16" FontWeight="SemiBold" />
+
+		                                                            <StackPanel Spacing="6">
+		                                                                <Grid>
+		                                                                    <Grid.ColumnDefinitions>
+		                                                                        <ColumnDefinition Width="*" />
+		                                                                        <ColumnDefinition Width="Auto" />
+		                                                                    </Grid.ColumnDefinitions>
+		                                                                    <TextBlock Text="不透明度" />
+		                                                                    <TextBlock Grid.Column="1" x:Name="DanmakuOverlayOpacityLabel" Text="100%" Opacity="0.8" />
+		                                                                </Grid>
+		                                                                <Slider
+		                                                                    x:Name="DanmakuOverlayOpacitySlider"
+		                                                                    Minimum="0"
+		                                                                    Maximum="100"
+		                                                                    ValueChanged="OnDanmakuOverlaySettingChanged" />
+		                                                            </StackPanel>
+
+		                                                            <StackPanel Spacing="6">
+		                                                                <Grid>
+		                                                                    <Grid.ColumnDefinitions>
+		                                                                        <ColumnDefinition Width="*" />
+		                                                                        <ColumnDefinition Width="Auto" />
+		                                                                    </Grid.ColumnDefinitions>
+		                                                                    <TextBlock Text="字号缩放" />
+		                                                                    <TextBlock Grid.Column="1" x:Name="DanmakuOverlayFontScaleLabel" Text="100%" Opacity="0.8" />
+		                                                                </Grid>
+		                                                                <Slider
+		                                                                    x:Name="DanmakuOverlayFontScaleSlider"
+		                                                                    Minimum="50"
+		                                                                    Maximum="200"
+		                                                                    ValueChanged="OnDanmakuOverlaySettingChanged" />
+		                                                            </StackPanel>
+
+		                                                            <StackPanel Spacing="6">
+		                                                                <Grid>
+		                                                                    <Grid.ColumnDefinitions>
+		                                                                        <ColumnDefinition Width="*" />
+		                                                                        <ColumnDefinition Width="Auto" />
+		                                                                    </Grid.ColumnDefinitions>
+		                                                                    <TextBlock Text="同屏密度" />
+		                                                                    <TextBlock Grid.Column="1" x:Name="DanmakuOverlayDensityLabel" Text="100%" Opacity="0.8" />
+		                                                                </Grid>
+		                                                                <Slider
+		                                                                    x:Name="DanmakuOverlayDensitySlider"
+		                                                                    Minimum="0"
+		                                                                    Maximum="100"
+		                                                                    ValueChanged="OnDanmakuOverlaySettingChanged" />
+		                                                            </StackPanel>
+
+		                                                            <StackPanel Spacing="6">
+		                                                                <TextBlock Text="显示区域" />
+		                                                                <muxc:RadioButtons
+		                                                                    x:Name="DanmakuOverlayAreaRadio"
+		                                                                    MaxColumns="4"
+		                                                                    SelectionChanged="OnDanmakuOverlayAreaChanged">
+		                                                                    <RadioButton Content="1/4" Tag="Quarter" />
+		                                                                    <RadioButton Content="1/2" Tag="Half" />
+		                                                                    <RadioButton Content="3/4" Tag="ThreeQuarter" />
+		                                                                    <RadioButton Content="全屏" Tag="Full" />
+		                                                                </muxc:RadioButtons>
+		                                                            </StackPanel>
+		                                                        </StackPanel>
+		                                                    </Flyout>
+		                                                </muxc:ToggleSplitButton.Flyout>
+		                                            </muxc:ToggleSplitButton>
+
 		                                            <Button
 		                                                x:Name="QualityBtn"
-		                                                Grid.Column="4"
+		                                                Grid.Column="5"
 		                                                Padding="10,6"
 		                                                Background="Transparent"
 		                                                Foreground="White">
@@ -219,7 +309,7 @@
 
 		                                            <Button
 		                                                x:Name="FullscreenBtn"
-		                                                Grid.Column="5"
+		                                                Grid.Column="6"
 		                                                Padding="10,6"
 		                                                Background="Transparent"
 		                                                Foreground="White"

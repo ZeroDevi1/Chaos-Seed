@@ -66,6 +66,7 @@ public sealed partial class LivePage : Page
     private readonly FlyleafPlayerService? _player;
     private readonly string? _playerUnavailableMsg;
     private readonly ILiveBackend _backend;
+    private readonly DanmakuOverlayEngine? _danmakuOverlayEngine;
     private readonly Queue<string> _playerLogTail = new();
     private const int PlayerLogTailMaxLines = 6;
     private CancellationTokenSource? _backBtnHideCts;
@@ -77,6 +78,8 @@ public sealed partial class LivePage : Page
     private FrameworkElement? _fullscreenRootElement;
     private bool _debugPlayerOverlay;
     private TransitionCollection? _playerPaneDefaultTransitions;
+    private bool _danmakuOverlayUiInit;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _danmakuOverlayPersistTimer;
 
     private Popup? FullScreenPopup => App.MainWindowInstance?.FullScreenPopupElement;
     private Grid? FullScreenPopupRoot => App.MainWindowInstance?.FullScreenPopupRootElement;
@@ -118,12 +121,26 @@ public sealed partial class LivePage : Page
         FlyleafHost.Loaded += OnFlyleafHostLoaded;
         _backend = LiveBackendFactory.Create();
         _backend.DanmakuMessageReceived += OnDanmakuMessage;
+        try
+        {
+            _danmakuOverlayEngine = new DanmakuOverlayEngine(_dq, DanmakuOverlayStage, _backend.FetchDanmakuImageAsync);
+        }
+        catch
+        {
+            // ignore overlay initialization failures
+        }
         _player = TryInitPlayer(out _playerUnavailableMsg);
         BindFlyleafHostPlayer(_player);
         SettingsService.Instance.SettingsChanged += OnSettingsChanged;
         ApplyDebugUiFromSettings();
+        ApplyDanmakuOverlayFromSettings();
         HideBackToSelectImmediately();
         Bindings.Update();
+        Unloaded += (_, _) =>
+        {
+            try { _danmakuOverlayEngine?.SetActive(false); } catch { }
+            try { _danmakuOverlayEngine?.Clear(); } catch { }
+        };
 
         if (!string.IsNullOrWhiteSpace(_backend.InitNotice))
         {
@@ -158,6 +175,202 @@ public sealed partial class LivePage : Page
         {
             // ignore
         }
+    }
+
+    private void ApplyDanmakuOverlayFromSettings()
+    {
+        try
+        {
+            var s = SettingsService.Instance.Current;
+
+            _danmakuOverlayUiInit = true;
+            try
+            {
+                DanmakuOverlayBtn.IsChecked = s.DanmakuOverlayEnabled;
+
+                DanmakuOverlayOpacitySlider.Value = Math.Clamp(s.DanmakuOverlayOpacity, 0.0, 1.0) * 100.0;
+                DanmakuOverlayFontScaleSlider.Value = Math.Clamp(s.DanmakuOverlayFontScale, 0.5, 2.0) * 100.0;
+                DanmakuOverlayDensitySlider.Value = Math.Clamp(s.DanmakuOverlayDensity, 0.0, 1.0) * 100.0;
+
+                DanmakuOverlayAreaRadio.SelectedIndex = s.DanmakuOverlayArea switch
+                {
+                    DanmakuOverlayAreaMode.Quarter => 0,
+                    DanmakuOverlayAreaMode.Half => 1,
+                    DanmakuOverlayAreaMode.ThreeQuarter => 2,
+                    _ => 3, // Full
+                };
+
+                UpdateDanmakuOverlaySettingLabels();
+            }
+            finally
+            {
+                _danmakuOverlayUiInit = false;
+            }
+
+            _danmakuOverlayEngine?.SetActive(_mode == LiveMode.Playing);
+            _danmakuOverlayEngine?.ApplySettings(s);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void ApplyDanmakuOverlayPreviewFromUi()
+    {
+        try
+        {
+            var tmp = new AppSettings
+            {
+                DanmakuOverlayEnabled = DanmakuOverlayBtn.IsChecked == true,
+                DanmakuOverlayOpacity = Math.Clamp(DanmakuOverlayOpacitySlider.Value / 100.0, 0.0, 1.0),
+                DanmakuOverlayFontScale = Math.Clamp(DanmakuOverlayFontScaleSlider.Value / 100.0, 0.5, 2.0),
+                DanmakuOverlayDensity = Math.Clamp(DanmakuOverlayDensitySlider.Value / 100.0, 0.0, 1.0),
+                DanmakuOverlayArea = GetDanmakuOverlayAreaFromUi(),
+            };
+
+            _danmakuOverlayEngine?.SetActive(_mode == LiveMode.Playing);
+            _danmakuOverlayEngine?.ApplySettings(tmp);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void EnsureDanmakuOverlayPersistTimer()
+    {
+        if (_danmakuOverlayPersistTimer is not null)
+        {
+            return;
+        }
+
+        _danmakuOverlayPersistTimer = _dq.CreateTimer();
+        _danmakuOverlayPersistTimer.IsRepeating = false;
+        _danmakuOverlayPersistTimer.Interval = TimeSpan.FromMilliseconds(250);
+        _danmakuOverlayPersistTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                PersistDanmakuOverlaySettingsFromUi();
+            }
+            catch
+            {
+                // ignore
+            }
+        };
+    }
+
+    private void SchedulePersistDanmakuOverlaySettings()
+    {
+        EnsureDanmakuOverlayPersistTimer();
+
+        try { _danmakuOverlayPersistTimer!.Stop(); } catch { }
+        try { _danmakuOverlayPersistTimer!.Start(); } catch { }
+    }
+
+    private void PersistDanmakuOverlaySettingsFromUi()
+    {
+        if (_danmakuOverlayUiInit)
+        {
+            return;
+        }
+
+        var enabled = DanmakuOverlayBtn.IsChecked == true;
+        var opacity = Math.Clamp(DanmakuOverlayOpacitySlider.Value / 100.0, 0.0, 1.0);
+        var fontScale = Math.Clamp(DanmakuOverlayFontScaleSlider.Value / 100.0, 0.5, 2.0);
+        var density = Math.Clamp(DanmakuOverlayDensitySlider.Value / 100.0, 0.0, 1.0);
+        var area = GetDanmakuOverlayAreaFromUi();
+
+        SettingsService.Instance.Update(s =>
+        {
+            s.DanmakuOverlayEnabled = enabled;
+            s.DanmakuOverlayOpacity = opacity;
+            s.DanmakuOverlayFontScale = fontScale;
+            s.DanmakuOverlayDensity = density;
+            s.DanmakuOverlayArea = area;
+        });
+    }
+
+    private DanmakuOverlayAreaMode GetDanmakuOverlayAreaFromUi()
+    {
+        try
+        {
+            if (DanmakuOverlayAreaRadio.SelectedItem is RadioButton rb && rb.Tag is string tag)
+            {
+                return tag switch
+                {
+                    "Quarter" => DanmakuOverlayAreaMode.Quarter,
+                    "Half" => DanmakuOverlayAreaMode.Half,
+                    "ThreeQuarter" => DanmakuOverlayAreaMode.ThreeQuarter,
+                    _ => DanmakuOverlayAreaMode.Full,
+                };
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return DanmakuOverlayAreaRadio.SelectedIndex switch
+        {
+            0 => DanmakuOverlayAreaMode.Quarter,
+            1 => DanmakuOverlayAreaMode.Half,
+            2 => DanmakuOverlayAreaMode.ThreeQuarter,
+            _ => DanmakuOverlayAreaMode.Full,
+        };
+    }
+
+    private void UpdateDanmakuOverlaySettingLabels()
+    {
+        try { DanmakuOverlayOpacityLabel.Text = $"{(int)Math.Round(DanmakuOverlayOpacitySlider.Value)}%"; } catch { }
+        try { DanmakuOverlayFontScaleLabel.Text = $"{(int)Math.Round(DanmakuOverlayFontScaleSlider.Value)}%"; } catch { }
+        try { DanmakuOverlayDensityLabel.Text = $"{(int)Math.Round(DanmakuOverlayDensitySlider.Value)}%"; } catch { }
+    }
+
+    private void OnDanmakuOverlayClicked(SplitButton sender, SplitButtonClickEventArgs args)
+    {
+        _ = sender;
+        _ = args;
+
+        if (_danmakuOverlayUiInit)
+        {
+            return;
+        }
+
+        var enabled = DanmakuOverlayBtn.IsChecked == true;
+        // Click is the only reliable event on ToggleSplitButton across WinAppSDK versions.
+        // The checked state is already updated by the time we get here.
+        SettingsService.Instance.Update(s => s.DanmakuOverlayEnabled = enabled);
+    }
+
+    private void OnDanmakuOverlaySettingChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (_danmakuOverlayUiInit)
+        {
+            return;
+        }
+
+        UpdateDanmakuOverlaySettingLabels();
+        ApplyDanmakuOverlayPreviewFromUi();
+        SchedulePersistDanmakuOverlaySettings();
+    }
+
+    private void OnDanmakuOverlayAreaChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (_danmakuOverlayUiInit)
+        {
+            return;
+        }
+
+        ApplyDanmakuOverlayPreviewFromUi();
+        SchedulePersistDanmakuOverlaySettings();
     }
 
     private Task RunOnUiAsync(Action action)
@@ -728,6 +941,7 @@ public sealed partial class LivePage : Page
                 }
                 _sessionId = res.SessionId;
                 Rows.Clear();
+                try { _danmakuOverlayEngine?.Clear(); } catch { }
                 _playingVariantId = (res.VariantId ?? "").Trim();
                 _playingVariantLabel = (res.VariantLabel ?? "").Trim();
                 SyncPlayerOverlayFromManifest(res);
@@ -1102,6 +1316,15 @@ public sealed partial class LivePage : Page
         {
             // ignore
         }
+
+        try
+        {
+            await RunOnUiAsync(() => _danmakuOverlayEngine?.Clear());
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private async void OnToggleDanmaku(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
@@ -1430,6 +1653,15 @@ public sealed partial class LivePage : Page
             ExitSystemFullscreenIfNeeded();
         }
         UpdateDanmakuPane();
+        try
+        {
+            _danmakuOverlayEngine?.SetActive(mode == LiveMode.Playing);
+            _danmakuOverlayEngine?.ApplySettings(SettingsService.Instance.Current);
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private void SetPlayUiState(PlayUiState state, string? failureMessage)
@@ -1448,6 +1680,7 @@ public sealed partial class LivePage : Page
             PlayPauseBtn.IsEnabled = canControl;
             MuteBtn.IsEnabled = canControl;
             VolumeSlider.IsEnabled = canControl;
+            DanmakuOverlayBtn.IsEnabled = state != PlayUiState.Idle;
             QualityBtn.IsEnabled = canControl && QualityFlyout.Items.Count > 0;
             FullscreenBtn.IsEnabled = state != PlayUiState.Idle;
             UpdateFullscreenButtonIcon();
@@ -1591,6 +1824,7 @@ public sealed partial class LivePage : Page
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
         ApplyDebugUiFromSettings();
+        ApplyDanmakuOverlayFromSettings();
     }
 
     private void ApplyDebugUiFromSettings()
@@ -3130,6 +3364,15 @@ public sealed partial class LivePage : Page
                     {
                         // ignore
                     }
+                }
+
+                try
+                {
+                    _danmakuOverlayEngine?.Enqueue(msg);
+                }
+                catch
+                {
+                    // ignore
                 }
 
                 if (!string.IsNullOrWhiteSpace(msg.ImageUrl))

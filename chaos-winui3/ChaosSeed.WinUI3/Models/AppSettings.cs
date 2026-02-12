@@ -40,6 +40,18 @@ public sealed class AppSettings
     public int? DanmakuOverlayWidth { get; set; }
     public int? DanmakuOverlayHeight { get; set; }
 
+    public int? DanmakuChatX { get; set; }
+    public int? DanmakuChatY { get; set; }
+    public int? DanmakuChatWidth { get; set; }
+    public int? DanmakuChatHeight { get; set; }
+
+    // Live player overlay danmaku settings (Bilibili-like overlay).
+    public bool DanmakuOverlayEnabled { get; set; } = true;
+    public double DanmakuOverlayOpacity { get; set; } = 1.0; // 0..1
+    public double DanmakuOverlayFontScale { get; set; } = 1.0; // 0.5..2
+    public double DanmakuOverlayDensity { get; set; } = 1.0; // 0..1
+    public DanmakuOverlayAreaMode DanmakuOverlayArea { get; set; } = DanmakuOverlayAreaMode.Full;
+
     public bool LiveDefaultFullscreen { get; set; } = false;
     public double LiveFullscreenAnimRate { get; set; } = 1.0;
     public bool DebugPlayerOverlay { get; set; } = false;
