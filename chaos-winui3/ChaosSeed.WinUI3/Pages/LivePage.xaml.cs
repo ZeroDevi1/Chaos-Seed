@@ -71,6 +71,7 @@ public sealed partial class LivePage : Page
     private bool _volumeSync;
     private bool _inAppFullscreen;
     private XamlRoot? _fullscreenXamlRoot;
+    private FrameworkElement? _fullscreenRootElement;
     private bool _debugPlayerOverlay;
     private TransitionCollection? _playerPaneDefaultTransitions;
 
@@ -1589,6 +1590,63 @@ public sealed partial class LivePage : Page
 	        try { UpdateFullScreenPopupSize(); } catch { }
 	    }
 
+    private void OnFullscreenRootSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_inAppFullscreen)
+        {
+            return;
+        }
+
+        try { UpdateFullScreenPopupSize(); } catch { }
+    }
+
+    private void AttachFullscreenRootElement(FrameworkElement? root)
+    {
+        if (root is null)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_fullscreenRootElement, root))
+        {
+            return;
+        }
+
+        try
+        {
+            if (_fullscreenRootElement is not null)
+            {
+                _fullscreenRootElement.SizeChanged -= OnFullscreenRootSizeChanged;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _fullscreenRootElement = root;
+        try { _fullscreenRootElement.SizeChanged += OnFullscreenRootSizeChanged; } catch { }
+    }
+
+    private void DetachFullscreenRootElement()
+    {
+        try
+        {
+            if (_fullscreenRootElement is not null)
+            {
+                _fullscreenRootElement.SizeChanged -= OnFullscreenRootSizeChanged;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _fullscreenRootElement = null;
+    }
+
 		    private void EnterInAppFullscreenIfNeeded()
 		    {
 		        var popup = FullScreenPopup;
@@ -1609,14 +1667,18 @@ public sealed partial class LivePage : Page
 	        TryCloseNavPaneForFullscreen();
 
 	        XamlRoot? root = null;
+        FrameworkElement? rootElement = null;
 	        try
 	        {
-	            root = (App.MainWindowInstance?.Content as FrameworkElement)?.XamlRoot ?? XamlRoot;
+            rootElement = App.MainWindowInstance?.Content as FrameworkElement;
+	            root = rootElement?.XamlRoot ?? XamlRoot;
 	        }
         catch
         {
             root = XamlRoot;
         }
+
+        try { AttachFullscreenRootElement(rootElement); } catch { }
 
         try
         {
@@ -1699,6 +1761,7 @@ public sealed partial class LivePage : Page
 			        // Always clear any pending fullscreen animation state, even if we already think we're not fullscreen.
 			        // Otherwise stale CTS can block resize/layout refresh after a system fullscreen toggle.
 			        CancelFullscreenAnimation();
+			        DetachFullscreenRootElement();
 
 			        if (!_inAppFullscreen)
 			        {
@@ -1749,6 +1812,7 @@ public sealed partial class LivePage : Page
         }
 
 	        _fullscreenXamlRoot = null;
+        _fullscreenRootElement = null;
 	        _inAppFullscreen = false;
 
 	        try
@@ -2143,11 +2207,13 @@ public sealed partial class LivePage : Page
             return;
         }
 
-        XamlRoot? root = null;
-        try { root = rootElement.XamlRoot ?? XamlRoot; } catch { root = XamlRoot; }
+	        XamlRoot? root = null;
+	        try { root = rootElement.XamlRoot ?? XamlRoot; } catch { root = XamlRoot; }
 
 	        await RunOnUiAsync(() =>
 	        {
+            try { AttachFullscreenRootElement(rootElement); } catch { }
+
 	            try
 	            {
 	                if (root is not null && !ReferenceEquals(_fullscreenXamlRoot, root))
