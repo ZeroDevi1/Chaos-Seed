@@ -17,6 +17,8 @@ public sealed partial class MainWindow : Window
     private AppWindow? _appWindow;
     private readonly Thickness _baseTitleBarPadding = new(12, 0, 12, 0);
     private bool _isSystemFullscreen;
+    private Models.ThemeMode? _appliedThemeMode;
+    private Models.BackdropMode? _appliedBackdropMode;
 
     public MainWindow()
     {
@@ -101,8 +103,17 @@ public sealed partial class MainWindow : Window
     private void ApplyWindowStyleFromSettings()
     {
         var s = SettingsService.Instance.Current;
-        WindowStyleService.ApplyTheme(this, s.ThemeMode);
-        WindowStyleService.ApplyBackdrop(this, s.BackdropMode);
+        if (_appliedThemeMode != s.ThemeMode)
+        {
+            WindowStyleService.ApplyTheme(this, s.ThemeMode);
+            _appliedThemeMode = s.ThemeMode;
+        }
+
+        if (_appliedBackdropMode != s.BackdropMode)
+        {
+            WindowStyleService.ApplyBackdrop(this, s.BackdropMode);
+            _appliedBackdropMode = s.BackdropMode;
+        }
     }
 
     private void OnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)

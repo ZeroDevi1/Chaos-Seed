@@ -1696,6 +1696,10 @@ public sealed partial class LivePage : Page
 			        var popup = FullScreenPopup;
 			        var playerHost = FullScreenPlayerHost;
 
+			        // Always clear any pending fullscreen animation state, even if we already think we're not fullscreen.
+			        // Otherwise stale CTS can block resize/layout refresh after a system fullscreen toggle.
+			        CancelFullscreenAnimation();
+
 			        if (!_inAppFullscreen)
 			        {
 			            try
@@ -1708,8 +1712,6 @@ public sealed partial class LivePage : Page
 			            catch { }
 			            return;
 			        }
-
-			        CancelFullscreenAnimation();
 
 			        try
 			        {
@@ -1821,11 +1823,36 @@ public sealed partial class LivePage : Page
         }
     }
 
-    private void CancelFullscreenAnimation()
+    private void CancelFullscreenAnimation(CancellationTokenSource? expected = null)
     {
-        try { _fullscreenAnimCts?.Cancel(); } catch { }
-        try { _fullscreenAnimCts?.Dispose(); } catch { }
-        _fullscreenAnimCts = null;
+        // When called without `expected`, cancels/disposes the current CTS (if any).
+        // When called with `expected`, only clears the field if it still points to `expected`,
+        // but always disposes `expected` so early-return paths don't leak CTS.
+        CancellationTokenSource? cts = null;
+        try
+        {
+            if (expected is null)
+            {
+                cts = _fullscreenAnimCts;
+                _fullscreenAnimCts = null;
+            }
+            else if (ReferenceEquals(_fullscreenAnimCts, expected))
+            {
+                cts = expected;
+                _fullscreenAnimCts = null;
+            }
+            else
+            {
+                cts = expected;
+            }
+        }
+        catch
+        {
+            cts = expected;
+        }
+
+        try { cts?.Cancel(); } catch { }
+        try { cts?.Dispose(); } catch { }
     }
 
     private static double EaseInOutCubic(double t)
@@ -2073,8 +2100,9 @@ public sealed partial class LivePage : Page
 	        }
 
 	        CancelFullscreenAnimation();
-	        _fullscreenAnimCts = new CancellationTokenSource();
-	        var ct = _fullscreenAnimCts.Token;
+	        var animCts = new CancellationTokenSource();
+	        _fullscreenAnimCts = animCts;
+	        var ct = animCts.Token;
 
 	        TryCloseNavPaneForFullscreen();
 
@@ -2085,7 +2113,10 @@ public sealed partial class LivePage : Page
             if (requestSystemFullscreen && App.MainWindowInstance?.IsSystemFullscreen != true)
             {
                 try { App.MainWindowInstance?.TrySetSystemFullscreen(true); } catch { }
+                try { await Task.Delay(32, ct); } catch { }
+                try { await RunOnUiAsync(() => { UpdateFullScreenPopupSize(); TryRefreshPlayerLayoutUnsafe(); }); } catch { }
             }
+            CancelFullscreenAnimation(animCts);
             return;
         }
 
@@ -2105,7 +2136,10 @@ public sealed partial class LivePage : Page
             if (requestSystemFullscreen && App.MainWindowInstance?.IsSystemFullscreen != true)
             {
                 try { App.MainWindowInstance?.TrySetSystemFullscreen(true); } catch { }
+                try { await Task.Delay(32, ct); } catch { }
+                try { await RunOnUiAsync(() => { UpdateFullScreenPopupSize(); TryRefreshPlayerLayoutUnsafe(); }); } catch { }
             }
+            CancelFullscreenAnimation(animCts);
             return;
         }
 
@@ -2214,8 +2248,7 @@ public sealed partial class LivePage : Page
 	                    // ignore
                 }
             });
-            try { _fullscreenAnimCts?.Dispose(); } catch { }
-            _fullscreenAnimCts = null;
+            CancelFullscreenAnimation(animCts);
             return;
         }
 
@@ -2273,8 +2306,7 @@ public sealed partial class LivePage : Page
         }
         finally
         {
-            try { _fullscreenAnimCts?.Dispose(); } catch { }
-            _fullscreenAnimCts = null;
+            CancelFullscreenAnimation(animCts);
         }
 
 	        await RunOnUiAsync(() =>
@@ -2317,8 +2349,9 @@ public sealed partial class LivePage : Page
 	        var playerHost = FullScreenPlayerHost;
 
 	        CancelFullscreenAnimation();
-	        _fullscreenAnimCts = new CancellationTokenSource();
-	        var ct = _fullscreenAnimCts.Token;
+	        var animCts = new CancellationTokenSource();
+	        _fullscreenAnimCts = animCts;
+	        var ct = animCts.Token;
 
 	        var rootElement = TryGetFullscreenRootElement();
 	        if (rootElement is null)
@@ -2326,6 +2359,7 @@ public sealed partial class LivePage : Page
 	            ExitSystemFullscreenIfNeeded();
 	            ApplyContextLayerProgress(0);
 	            ExitInAppFullscreenIfNeeded();
+	            CancelFullscreenAnimation(animCts);
 	            return;
 	        }
 
@@ -2356,6 +2390,7 @@ public sealed partial class LivePage : Page
         if (toRect.Width <= 1 || toRect.Height <= 1)
         {
             ExitInAppFullscreenIfNeeded();
+            CancelFullscreenAnimation(animCts);
             return;
         }
 
@@ -2427,8 +2462,7 @@ public sealed partial class LivePage : Page
         }
         finally
         {
-            try { _fullscreenAnimCts?.Dispose(); } catch { }
-            _fullscreenAnimCts = null;
+            CancelFullscreenAnimation(animCts);
         }
 
 		        await RunOnUiAsync(() =>
