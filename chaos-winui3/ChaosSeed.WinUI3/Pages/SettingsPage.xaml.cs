@@ -59,6 +59,8 @@ public sealed partial class SettingsPage : Page
             _ => 0, // Auto
         };
 
+        LyricsAutoDetectToggle.IsOn = s.LyricsAutoDetect;
+
         LiveDefaultFullscreenToggle.IsOn = s.LiveDefaultFullscreen;
         LiveFullscreenAnimRateBox.Value = Math.Clamp(s.LiveFullscreenAnimRate, 0.25, 2.5);
         DebugPlayerToggle.IsOn = s.DebugPlayerOverlay;
@@ -166,6 +168,18 @@ public sealed partial class SettingsPage : Page
             _ => LiveBackendMode.Auto,
         };
         SettingsService.Instance.Update(s => s.DanmakuBackendMode = mode);
+    }
+
+    private void OnLyricsAutoDetectToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s => s.LyricsAutoDetect = LyricsAutoDetectToggle.IsOn);
     }
 
     private void OnLiveDefaultFullscreenToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

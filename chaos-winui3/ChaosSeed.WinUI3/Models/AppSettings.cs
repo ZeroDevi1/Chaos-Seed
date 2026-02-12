@@ -28,6 +28,13 @@ public sealed class AppSettings
     public LiveBackendMode LiveBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode LyricsBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode DanmakuBackendMode { get; set; } = LiveBackendMode.Auto;
+
+    public bool LyricsAutoDetect { get; set; } = false;
+    public string[] LyricsProviders { get; set; } = new[] { "qq", "netease", "lrclib" };
+    public int LyricsThreshold { get; set; } = 40;
+    public int LyricsLimit { get; set; } = 10;
+    public int LyricsTimeoutMs { get; set; } = 8000;
+
     public bool LiveDefaultFullscreen { get; set; } = false;
     public double LiveFullscreenAnimRate { get; set; } = 1.0;
     public bool DebugPlayerOverlay { get; set; } = false;

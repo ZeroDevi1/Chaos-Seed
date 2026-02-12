@@ -74,6 +74,20 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="240" />
                             </Grid.ColumnDefinitions>
+                            <TextBlock Text="歌词：自动检测" VerticalAlignment="Center" />
+                            <ToggleSwitch
+                                x:Name="LyricsAutoDetectToggle"
+                                Grid.Column="1"
+                                OffContent="关闭"
+                                OnContent="开启"
+                                Toggled="OnLyricsAutoDetectToggled" />
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock Text="弹幕后端" VerticalAlignment="Center" />
                             <ComboBox x:Name="DanmakuBackendCombo" Grid.Column="1" SelectionChanged="OnDanmakuBackendChanged">
                                 <ComboBoxItem Content="自动（优先 FFI）" Tag="Auto" />

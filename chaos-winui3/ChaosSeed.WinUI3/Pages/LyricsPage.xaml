@@ -2,6 +2,7 @@
     x:Class="ChaosSeed.WinUI3.Pages.LyricsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:ChaosSeed.WinUI3.Models"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
 
     <ScrollViewer>
@@ -22,46 +23,67 @@
 
                         <muxc:InfoBar x:Name="BackendBar" IsOpen="False" />
 
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <Button x:Name="RefreshBtn" Content="刷新 Now Playing" Click="OnRefreshNowPlayingClicked" />
-                            <ToggleSwitch x:Name="AutoToggle" Header="自动检测" Toggled="OnAutoDetectToggled" />
-                        </StackPanel>
-
-                        <Grid ColumnSpacing="12" RowSpacing="6">
+                        <Grid ColumnSpacing="16">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="160" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Supported" Opacity="0.7" />
-                            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="SupportedText" Text="-" />
+                            <Border
+                                Width="104"
+                                Height="104"
+                                CornerRadius="8"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                <Image
+                                    x:Name="CoverImage"
+                                    Stretch="UniformToFill"
+                                    Width="104"
+                                    Height="104" />
+                            </Border>
 
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Status" Opacity="0.7" />
-                            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="StatusText" Text="-" />
+                            <StackPanel Grid.Column="1" Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <Button x:Name="RefreshBtn" Content="刷新 Now Playing" Click="OnRefreshNowPlayingClicked" />
+                                    <TextBlock x:Name="AutoDetectStatusText" Text="自动检测：-" Opacity="0.8" VerticalAlignment="Center" />
+                                </StackPanel>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Title" Opacity="0.7" />
-                            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="TitleText" Text="-" TextWrapping="Wrap" />
+                                <Grid ColumnSpacing="12" RowSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
 
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Artist" Opacity="0.7" />
-                            <TextBlock Grid.Row="3" Grid.Column="1" x:Name="ArtistText" Text="-" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Supported" Opacity="0.7" />
+                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="SupportedText" Text="-" />
 
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Album" Opacity="0.7" />
-                            <TextBlock Grid.Row="4" Grid.Column="1" x:Name="AlbumText" Text="-" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Status" Opacity="0.7" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="StatusText" Text="-" />
 
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Position / Duration" Opacity="0.7" />
-                            <TextBlock Grid.Row="5" Grid.Column="1" x:Name="TimelineText" Text="-" />
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Title" Opacity="0.7" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="TitleText" Text="-" TextWrapping="Wrap" />
 
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="AppId" Opacity="0.7" />
-                            <TextBlock Grid.Row="6" Grid.Column="1" x:Name="AppIdText" Text="-" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Artist" Opacity="0.7" />
+                                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="ArtistText" Text="-" TextWrapping="Wrap" />
+
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Album" Opacity="0.7" />
+                                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="AlbumText" Text="-" TextWrapping="Wrap" />
+
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Position / Duration" Opacity="0.7" />
+                                    <TextBlock Grid.Row="5" Grid.Column="1" x:Name="TimelineText" Text="-" />
+
+                                    <TextBlock Grid.Row="6" Grid.Column="0" Text="AppId" Opacity="0.7" />
+                                    <TextBlock Grid.Row="6" Grid.Column="1" x:Name="AppIdText" Text="-" TextWrapping="Wrap" />
+                                </Grid>
+                            </StackPanel>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -82,8 +104,20 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Providers CSV" Opacity="0.7" />
-                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="ProvidersBox" Text="qq,netease,lrclib" />
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="歌词源" Opacity="0.7" />
+                            <muxc:DropDownButton Grid.Row="0" Grid.Column="1" x:Name="ProvidersBtn" Content="选择歌词源">
+                                <muxc:DropDownButton.Flyout>
+                                    <MenuFlyout>
+                                        <ToggleMenuFlyoutItem Text="QQ 音乐 (qq)" Tag="qq" Click="OnProviderToggleClicked" />
+                                        <ToggleMenuFlyoutItem Text="网易云 (netease)" Tag="netease" Click="OnProviderToggleClicked" />
+                                        <ToggleMenuFlyoutItem Text="LRCLIB (lrclib)" Tag="lrclib" Click="OnProviderToggleClicked" />
+                                        <MenuFlyoutSeparator />
+                                        <ToggleMenuFlyoutItem Text="Kugou (kugou)" Tag="kugou" Click="OnProviderToggleClicked" />
+                                        <ToggleMenuFlyoutItem Text="Gecimi (gecimi)" Tag="gecimi" Click="OnProviderToggleClicked" />
+                                        <ToggleMenuFlyoutItem Text="Syair (syair)" Tag="syair" Click="OnProviderToggleClicked" />
+                                    </MenuFlyout>
+                                </muxc:DropDownButton.Flyout>
+                            </muxc:DropDownButton>
 
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Threshold (0~100)" Opacity="0.7" />
                             <muxc:NumberBox
@@ -92,8 +126,8 @@
                                 x:Name="ThresholdBox"
                                 Minimum="0"
                                 Maximum="100"
-                                Value="40"
-                                SpinButtonPlacementMode="Compact" />
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="OnThresholdChanged" />
 
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="Limit" Opacity="0.7" />
                             <muxc:NumberBox
@@ -102,8 +136,8 @@
                                 x:Name="LimitBox"
                                 Minimum="1"
                                 Maximum="50"
-                                Value="10"
-                                SpinButtonPlacementMode="Compact" />
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="OnLimitChanged" />
 
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Timeout (ms)" Opacity="0.7" />
                             <muxc:NumberBox
@@ -112,29 +146,113 @@
                                 x:Name="TimeoutBox"
                                 Minimum="1"
                                 Maximum="60000"
-                                Value="8000"
-                                SpinButtonPlacementMode="Compact" />
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="OnTimeoutChanged" />
                         </Grid>
 
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <TextBlock Text="Service:" Opacity="0.7" />
-                            <TextBlock x:Name="LyricsServiceText" Text="-" />
-                            <TextBlock Text="Match:" Opacity="0.7" Margin="12,0,0,0" />
-                            <TextBlock x:Name="LyricsMatchText" Text="-" />
-                        </StackPanel>
+                        <Border
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8"
+                            Padding="12">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="手动搜索/切换" FontWeight="SemiBold" />
 
-                        <muxc:Pivot>
-                            <muxc:PivotItem Header="原文">
-                                <ScrollViewer MaxHeight="420">
-                                    <TextBlock x:Name="LyricsOriginalText" TextWrapping="Wrap" />
-                                </ScrollViewer>
-                            </muxc:PivotItem>
-                            <muxc:PivotItem Header="翻译">
-                                <ScrollViewer MaxHeight="420">
-                                    <TextBlock x:Name="LyricsTranslationText" TextWrapping="Wrap" />
-                                </ScrollViewer>
-                            </muxc:PivotItem>
-                        </muxc:Pivot>
+                                <Grid ColumnSpacing="12" RowSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Title" Opacity="0.7" />
+                                    <TextBox Grid.Row="0" Grid.Column="1" x:Name="SearchTitleBox" PlaceholderText="歌曲名" />
+
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Artist" Opacity="0.7" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="SearchArtistBox" PlaceholderText="歌手（可选）" />
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Album" Opacity="0.7" />
+                                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="SearchAlbumBox" PlaceholderText="专辑（可选）" />
+
+                                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="12">
+                                        <Button Content="用 NowPlaying 填充" Click="OnFillFromNowPlayingClicked" />
+                                        <Button x:Name="SearchBtn" Content="搜索" Click="OnManualSearchClicked" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="候选歌词" Opacity="0.7" VerticalAlignment="Center" />
+                                    <ComboBox
+                                        Grid.Column="1"
+                                        x:Name="CandidateCombo"
+                                        ItemsSource="{x:Bind Candidates, Mode=OneWay}"
+                                        DisplayMemberPath="Display"
+                                        SelectionChanged="OnCandidateChanged" />
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TextBlock Text="当前：" Opacity="0.7" />
+                                    <TextBlock x:Name="LyricsServiceText" Text="-" />
+                                    <TextBlock Text="Match:" Opacity="0.7" Margin="12,0,0,0" />
+                                    <TextBlock x:Name="LyricsMatchText" Text="-" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8"
+                            Padding="0">
+                            <Grid>
+                                <ListView
+                                    x:Name="LyricsList"
+                                    ItemsSource="{x:Bind Lines, Mode=OneWay}"
+                                    MaxHeight="520">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:LyricsLineVm">
+                                            <Grid Padding="10" ColumnSpacing="12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="72" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <TextBlock
+                                                    Grid.Column="0"
+                                                    Text="{x:Bind TimeLabel}"
+                                                    Opacity="0.7"
+                                                    FontFamily="Consolas" />
+
+                                                <StackPanel Grid.Column="1" Spacing="2">
+                                                    <TextBlock Text="{x:Bind Original}" TextWrapping="Wrap" FontSize="14" />
+                                                    <TextBlock
+                                                        Text="{x:Bind TranslationText}"
+                                                        Visibility="{x:Bind TranslationVisibility}"
+                                                        TextWrapping="Wrap"
+                                                        Opacity="0.75"
+                                                        FontSize="13" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+
+                                <TextBlock
+                                    x:Name="LyricsEmptyText"
+                                    Text="暂无歌词"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Opacity="0.6"
+                                    IsHitTestVisible="False" />
+                            </Grid>
+                        </Border>
                     </StackPanel>
                 </Border>
             </StackPanel>
