@@ -29,7 +29,7 @@ public sealed partial class MainWindow : Window
         SettingsService.Instance.SettingsChanged += (_, _) => ApplyWindowStyleFromSettings();
 
         Nav.SelectedItem = Nav.MenuItems[0];
-        ContentFrame.Navigate(typeof(HomePage), null, new DrillInNavigationTransitionInfo());
+        ContentFrame.Navigate(typeof(LivePage), null, new DrillInNavigationTransitionInfo());
     }
 
     private void InitTitleBar()
@@ -131,11 +131,11 @@ public sealed partial class MainWindow : Window
 
         switch (item.Tag as string)
         {
-            case "home":
-                ContentFrame.Navigate(typeof(HomePage), null, new DrillInNavigationTransitionInfo());
-                break;
             case "live":
                 ContentFrame.Navigate(typeof(LivePage), null, new DrillInNavigationTransitionInfo());
+                break;
+            case "lyrics":
+                ContentFrame.Navigate(typeof(LyricsPage), null, new DrillInNavigationTransitionInfo());
                 break;
             case "settings":
                 ContentFrame.Navigate(typeof(SettingsPage), null, new DrillInNavigationTransitionInfo());
@@ -154,13 +154,32 @@ public sealed partial class MainWindow : Window
         _suppressSelectionChanged = true;
         try
         {
-            Nav.SelectedItem = Nav.MenuItems[1];
+            Nav.SelectedItem = FindNavItemByTag("live") ?? Nav.MenuItems[0];
             ContentFrame.Navigate(typeof(LivePage), input, new DrillInNavigationTransitionInfo());
         }
         finally
         {
             _suppressSelectionChanged = false;
         }
+    }
+
+    private NavigationViewItem? FindNavItemByTag(string tag)
+    {
+        foreach (var x in Nav.MenuItems)
+        {
+            if (x is NavigationViewItem nvi && string.Equals(nvi.Tag as string, tag, StringComparison.Ordinal))
+            {
+                return nvi;
+            }
+        }
+        foreach (var x in Nav.FooterMenuItems)
+        {
+            if (x is NavigationViewItem nvi && string.Equals(nvi.Tag as string, tag, StringComparison.Ordinal))
+            {
+                return nvi;
+            }
+        }
+        return null;
     }
 
     public bool TrySetSystemFullscreen(bool fullscreen)

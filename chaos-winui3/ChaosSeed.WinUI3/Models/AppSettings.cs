@@ -26,6 +26,7 @@ public sealed class AppSettings
     public ThemeMode ThemeMode { get; set; } = ThemeMode.FollowSystem;
     public BackdropMode BackdropMode { get; set; } = BackdropMode.Mica;
     public LiveBackendMode LiveBackendMode { get; set; } = LiveBackendMode.Auto;
+    public LiveBackendMode LyricsBackendMode { get; set; } = LiveBackendMode.Auto;
     public bool LiveDefaultFullscreen { get; set; } = false;
     public double LiveFullscreenAnimRate { get; set; } = 1.0;
     public bool DebugPlayerOverlay { get; set; } = false;

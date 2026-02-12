@@ -2,11 +2,14 @@
 mod win {
     use chaos_daemon::run_jsonrpc_over_lsp;
     use chaos_app::ChaosApp;
+    use chaos_core::{lyrics, now_playing};
     use chaos_proto::{
         DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams, LivestreamDecodeManifestParams,
-        LivestreamDecodeManifestResult, PreferredQuality,
+        LivestreamDecodeManifestResult, LyricsSearchParams, LyricsSearchResult, NowPlayingSession,
+        NowPlayingSnapshot, NowPlayingSnapshotParams, NowPlayingThumbnail, PreferredQuality,
     };
     use std::env;
+    use std::str::FromStr;
 
     struct Svc {
         app: std::sync::Arc<ChaosApp>,
@@ -25,6 +28,144 @@ mod win {
                 .decode_manifest(&params.input)
                 .await
                 .map_err(|e| e.to_string())
+        }
+
+        async fn now_playing_snapshot(
+            &self,
+            params: NowPlayingSnapshotParams,
+        ) -> Result<NowPlayingSnapshot, String> {
+            let include_thumbnail = params.include_thumbnail.unwrap_or(false);
+            let max_thumbnail_bytes = params
+                .max_thumbnail_bytes
+                .unwrap_or(262_144)
+                .clamp(1, 2_500_000) as usize;
+            let max_sessions = params.max_sessions.unwrap_or(32).clamp(1, 128) as usize;
+
+            let snap = tokio::task::spawn_blocking(move || {
+                now_playing::snapshot(now_playing::NowPlayingOptions {
+                    include_thumbnail,
+                    max_thumbnail_bytes,
+                    max_sessions,
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+
+            fn map_thumb(t: &now_playing::NowPlayingThumbnail) -> NowPlayingThumbnail {
+                NowPlayingThumbnail {
+                    mime: t.mime.clone(),
+                    base64: t.base64.clone(),
+                }
+            }
+
+            fn map_session(s: &now_playing::NowPlayingSession) -> NowPlayingSession {
+                NowPlayingSession {
+                    app_id: s.app_id.clone(),
+                    is_current: s.is_current,
+                    playback_status: s.playback_status.clone(),
+                    title: s.title.clone(),
+                    artist: s.artist.clone(),
+                    album_title: s.album_title.clone(),
+                    position_ms: s.position_ms,
+                    duration_ms: s.duration_ms,
+                    genres: s.genres.clone(),
+                    song_id: s.song_id.clone(),
+                    thumbnail: s.thumbnail.as_ref().map(map_thumb),
+                    error: s.error.clone(),
+                }
+            }
+
+            Ok(NowPlayingSnapshot {
+                supported: snap.supported,
+                now_playing: snap.now_playing.as_ref().map(map_session),
+                sessions: snap.sessions.iter().map(map_session).collect(),
+                picked_app_id: snap.picked_app_id.clone(),
+                retrieved_at_unix_ms: snap.retrieved_at_unix_ms,
+            })
+        }
+
+        async fn lyrics_search(
+            &self,
+            params: LyricsSearchParams,
+        ) -> Result<Vec<LyricsSearchResult>, String> {
+            let title = params.title.trim().to_string();
+            if title.is_empty() {
+                return Err("title is empty".to_string());
+            }
+
+            let artist = params
+                .artist
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let album = params
+                .album
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+
+            let term = if artist.is_empty() {
+                lyrics::model::LyricsSearchTerm::Keyword { keyword: title }
+            } else {
+                lyrics::model::LyricsSearchTerm::Info {
+                    title,
+                    artist,
+                    album: (!album.is_empty()).then_some(album),
+                }
+            };
+
+            let mut req = lyrics::model::LyricsSearchRequest::new(term);
+            req.duration_ms = params.duration_ms.filter(|v| *v > 0);
+            if let Some(limit) = params.limit {
+                req.limit = (limit as usize).clamp(1, 50);
+            }
+
+            let mut opt = lyrics::model::LyricsSearchOptions::default();
+            if let Some(v) = params.timeout_ms {
+                opt.timeout_ms = v.max(1);
+            }
+            if let Some(v) = params.strict_match {
+                opt.strict_match = v;
+            }
+
+            if let Some(services) = params.services {
+                let mut out = Vec::new();
+                for s in services {
+                    let s = s.trim().to_string();
+                    if s.is_empty() {
+                        continue;
+                    }
+                    let svc = lyrics::model::LyricsService::from_str(&s).map_err(|e| e)?;
+                    out.push(svc);
+                }
+                if !out.is_empty() {
+                    opt.services = out;
+                }
+            }
+
+            let items = lyrics::core::search(&req, opt).await.map_err(|e| e.to_string())?;
+            Ok(items
+                .into_iter()
+                .map(|x| LyricsSearchResult {
+                    service: x.service.as_str().to_string(),
+                    service_token: x.service_token,
+                    title: x.title,
+                    artist: x.artist,
+                    album: x.album,
+                    duration_ms: x.duration_ms,
+                    match_percentage: x.match_percentage,
+                    quality: x.quality,
+                    matched: x.matched,
+                    has_translation: x.has_translation,
+                    has_inline_timetags: x.has_inline_timetags,
+                    lyrics_original: x.lyrics_original,
+                    lyrics_translation: x.lyrics_translation,
+                    debug: x.debug,
+                })
+                .collect())
         }
 
         async fn live_open(

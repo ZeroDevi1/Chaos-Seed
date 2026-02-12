@@ -202,6 +202,78 @@ public sealed class DaemonClient : IDisposable
         );
     }
 
+    public async Task<NowPlayingSnapshot> NowPlayingSnapshotAsync(
+        bool includeThumbnail,
+        int maxThumbBytes,
+        int maxSessions,
+        CancellationToken ct = default
+    )
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<NowPlayingSnapshot>(
+                "nowPlaying.snapshot",
+                new
+                {
+                    includeThumbnail,
+                    maxThumbnailBytes = maxThumbBytes,
+                    maxSessions,
+                },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("nowPlaying.snapshot", ex);
+        }
+    }
+
+    public async Task<LyricsSearchResult[]> LyricsSearchAsync(LyricsSearchParams p, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        var title = (p?.Title ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            throw new ArgumentException("empty title", nameof(p));
+        }
+
+        object payload = new
+        {
+            title,
+            album = string.IsNullOrWhiteSpace(p.Album) ? null : p.Album!.Trim(),
+            artist = string.IsNullOrWhiteSpace(p.Artist) ? null : p.Artist!.Trim(),
+            durationMs = p.DurationMs,
+            limit = p.Limit,
+            strictMatch = p.StrictMatch,
+            services = p.Services,
+            timeoutMs = p.TimeoutMs,
+        };
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<LyricsSearchResult[]>(
+                "lyrics.search",
+                payload,
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("lyrics.search", ex);
+        }
+    }
+
     public async Task CloseLiveAsync(string sessionId, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct);

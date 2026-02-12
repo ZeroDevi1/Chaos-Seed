@@ -7,6 +7,8 @@ pub const METHOD_LIVE_OPEN: &str = "live.open";
 pub const METHOD_LIVE_CLOSE: &str = "live.close";
 pub const METHOD_LIVESTREAM_DECODE_MANIFEST: &str = "livestream.decodeManifest";
 pub const METHOD_DANMAKU_FETCH_IMAGE: &str = "danmaku.fetchImage";
+pub const METHOD_NOW_PLAYING_SNAPSHOT: &str = "nowPlaying.snapshot";
+pub const METHOD_LYRICS_SEARCH: &str = "lyrics.search";
 
 pub const NOTIF_DANMAKU_MESSAGE: &str = "danmaku.message";
 
@@ -139,4 +141,105 @@ pub struct DanmakuFetchImageResult {
     pub mime: String,
     pub base64: String,
     pub width: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NowPlayingSnapshotParams {
+    #[serde(default)]
+    pub include_thumbnail: Option<bool>,
+    #[serde(default)]
+    pub max_thumbnail_bytes: Option<u32>,
+    #[serde(default)]
+    pub max_sessions: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NowPlayingThumbnail {
+    pub mime: String,
+    pub base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NowPlayingSession {
+    pub app_id: String,
+    pub is_current: bool,
+    pub playback_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub song_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<NowPlayingThumbnail>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NowPlayingSnapshot {
+    pub supported: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub now_playing: Option<NowPlayingSession>,
+    pub sessions: Vec<NowPlayingSession>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picked_app_id: Option<String>,
+    pub retrieved_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsSearchParams {
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict_match: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub services: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsSearchResult {
+    pub service: String,
+    pub service_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    pub match_percentage: u8,
+    pub quality: f64,
+    pub matched: bool,
+    pub has_translation: bool,
+    pub has_inline_timetags: bool,
+    pub lyrics_original: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lyrics_translation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<serde_json::Value>,
 }

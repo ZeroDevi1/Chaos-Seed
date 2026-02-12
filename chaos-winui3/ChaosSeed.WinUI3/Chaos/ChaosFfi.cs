@@ -15,6 +15,13 @@ internal static partial class ChaosFfi
     [LibraryImport(Dll)]
     internal static partial void chaos_ffi_string_free(IntPtr s);
 
+    [LibraryImport(Dll)]
+    internal static partial IntPtr chaos_now_playing_snapshot_json(
+        byte include_thumbnail,
+        uint max_thumbnail_bytes,
+        uint max_sessions
+    );
+
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_livestream_decode_manifest_json(
         string input_utf8,
@@ -43,6 +50,18 @@ internal static partial class ChaosFfi
 
     [LibraryImport(Dll)]
     internal static partial int chaos_danmaku_disconnect(IntPtr handle);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_lyrics_search_json(
+        string title_utf8,
+        string? album_utf8_or_null,
+        string? artist_utf8_or_null,
+        uint duration_ms_or_0,
+        uint limit,
+        byte strict_match,
+        string? services_csv_utf8_or_null,
+        uint timeout_ms
+    );
 
     internal static string? TakeString(IntPtr p)
     {

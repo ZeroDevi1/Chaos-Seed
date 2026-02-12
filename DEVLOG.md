@@ -125,3 +125,11 @@
 - 弹幕表情（图片弹幕）：
   - FFI 后端的图片拉取补齐 URL 规范化、SSRF 阻断、B 站/hdslb Referer/UA 注入，并将上限对齐到 `2.5MB`。
   - Debug 播放提示增加表情加载统计（req/ok/fail + lastErr，2s 节流），便于判断是接收还是渲染问题。
+
+### 变更（WinUI 3：SMTC/歌词迁移）
+- daemon / IPC：
+  - 新增 JSON-RPC 方法：`nowPlaying.snapshot`（SMTC/GSMTC Now Playing snapshot）与 `lyrics.search`（多源在线歌词搜索）。
+- WinUI 3 UI：
+  - 移除原“主页”，默认进入“直播”页；导航新增“歌词”页。
+  - 直播页：输入框支持回车触发解析；播放打开中点击“返回”会立即恢复清晰度卡片可点击，并取消本地打开流程。
+  - 歌词页：显示 Now Playing 信息，支持“自动检测”（轮询）并按 `qq,netease,lrclib` 顺序做阈值搜索（默认阈值 `40`）；歌词后端独立设置（Auto / FFI / daemon）。

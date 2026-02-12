@@ -1095,6 +1095,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "chaos-app",
+ "chaos-core",
  "chaos-proto",
  "serde",
  "serde_json",

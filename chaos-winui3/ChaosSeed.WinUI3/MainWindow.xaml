@@ -44,14 +44,14 @@
             CompactPaneLength="40"
             SelectionChanged="OnSelectionChanged">
             <muxc:NavigationView.MenuItems>
-                <muxc:NavigationViewItem Content="主页" Tag="home">
-                    <muxc:NavigationViewItem.Icon>
-                        <muxc:SymbolIcon Symbol="Home" />
-                    </muxc:NavigationViewItem.Icon>
-                </muxc:NavigationViewItem>
                 <muxc:NavigationViewItem Content="直播" Tag="live">
                     <muxc:NavigationViewItem.Icon>
                         <muxc:SymbolIcon Symbol="Play" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="歌词" Tag="lyrics">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Document" />
                     </muxc:NavigationViewItem.Icon>
                 </muxc:NavigationViewItem>
             </muxc:NavigationView.MenuItems>

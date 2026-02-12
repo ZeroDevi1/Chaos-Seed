@@ -3,8 +3,9 @@ use crate::rpc::{JsonRpcError, JsonRpcResponse, RpcErrorCode};
 use chaos_proto::{
     DaemonPingParams, DaemonPingResult, DanmakuFetchImageParams, LiveCloseParams,
     LiveOpenParams, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult,
+    LyricsSearchParams, LyricsSearchResult, NowPlayingSnapshot, NowPlayingSnapshotParams,
     METHOD_DAEMON_PING, METHOD_DANMAKU_FETCH_IMAGE, METHOD_LIVE_CLOSE, METHOD_LIVE_OPEN,
-    METHOD_LIVESTREAM_DECODE_MANIFEST,
+    METHOD_LIVESTREAM_DECODE_MANIFEST, METHOD_LYRICS_SEARCH, METHOD_NOW_PLAYING_SNAPSHOT,
     NOTIF_DANMAKU_MESSAGE,
 };
 use serde::de::DeserializeOwned;
@@ -20,6 +21,16 @@ pub trait ChaosService: Send + Sync + 'static {
         &self,
         params: LivestreamDecodeManifestParams,
     ) -> impl Future<Output = Result<LivestreamDecodeManifestResult, String>> + Send;
+
+    fn now_playing_snapshot(
+        &self,
+        params: NowPlayingSnapshotParams,
+    ) -> impl Future<Output = Result<NowPlayingSnapshot, String>> + Send;
+
+    fn lyrics_search(
+        &self,
+        params: LyricsSearchParams,
+    ) -> impl Future<Output = Result<Vec<LyricsSearchResult>, String>> + Send;
 
     fn live_open(
         &self,
@@ -144,6 +155,52 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                         let resp = JsonRpcResponse::ok(id, serde_json::to_value(result).unwrap());
                         let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
                         let _ = write_lsp_frame(&mut w, &bytes).await;
+                    }
+                    METHOD_NOW_PLAYING_SNAPSHOT => {
+                        let params: NowPlayingSnapshotParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.now_playing_snapshot(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_LYRICS_SEARCH => {
+                        let params: LyricsSearchParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.lyrics_search(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
                     }
                     METHOD_LIVESTREAM_DECODE_MANIFEST => {
                         let params: LivestreamDecodeManifestParams = match decode_params(req.params) {

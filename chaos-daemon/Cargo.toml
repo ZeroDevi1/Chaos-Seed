@@ -9,6 +9,7 @@ description = "Windows daemon backend for chaos-seed (NamedPipe JSON-RPC)."
 [dependencies]
 anyhow = "1"
 chaos-app = { path = "../chaos-app" }
+chaos-core = { path = "../chaos-core" }
 chaos-proto = { path = "../chaos-proto" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

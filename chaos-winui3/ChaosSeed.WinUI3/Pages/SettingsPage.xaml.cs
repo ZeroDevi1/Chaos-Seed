@@ -45,6 +45,13 @@ public sealed partial class SettingsPage : Page
             _ => 0, // Auto
         };
 
+        LyricsBackendCombo.SelectedIndex = s.LyricsBackendMode switch
+        {
+            LiveBackendMode.Ffi => 1,
+            LiveBackendMode.Daemon => 2,
+            _ => 0, // Auto
+        };
+
         LiveDefaultFullscreenToggle.IsOn = s.LiveDefaultFullscreen;
         LiveFullscreenAnimRateBox.Value = Math.Clamp(s.LiveFullscreenAnimRate, 0.25, 2.5);
         DebugPlayerToggle.IsOn = s.DebugPlayerOverlay;
@@ -112,6 +119,26 @@ public sealed partial class SettingsPage : Page
             _ => LiveBackendMode.Auto,
         };
         SettingsService.Instance.Update(s => s.LiveBackendMode = mode);
+    }
+
+    private void OnLyricsBackendChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_init)
+        {
+            return;
+        }
+        if (LyricsBackendCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string tag)
+        {
+            return;
+        }
+
+        var mode = tag switch
+        {
+            "Ffi" => LiveBackendMode.Ffi,
+            "Daemon" => LiveBackendMode.Daemon,
+            _ => LiveBackendMode.Auto,
+        };
+        SettingsService.Instance.Update(s => s.LyricsBackendMode = mode);
     }
 
     private void OnLiveDefaultFullscreenToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

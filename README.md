@@ -10,7 +10,7 @@
 - 歌词（已完成增强）：对齐 BetterLyrics 三源（QQ 音乐 / 网易云 / LRCLIB），按“顺序 + 匹配阈值”自动搜索；读取系统 Now Playing（Windows SMTC snapshot 自适应轮询）并推送时间轴事件；支持主界面 + 停靠（Dock）+ 桌面悬浮（Float），暂停自动隐藏；支持轻量特效背景（fluid / fan3d / snow）；提供 Tauri 托盘开关“歌词检测”（旧 Chat/Overlay 窗口保留作调试/兼容）
 - UI（已完成初版）：直播源解析 UI（manifest/variants）+ 新窗口播放器（Master 风格；Hls.js + Libmedia AvPlayer），支持清晰度/线路切换、直连 URL 调试显示、关闭窗口自动停止播放
 - UI（后续增强）：反盗链/本地代理（Referer/UA/Cookie 注入）、播放诊断与更完善的自动重试策略、播放器观感与快捷键
-- WinUI 3（PoC 已实现）：主页输入直播间地址 → 解析 → 直播页展示清晰度/线路卡片 → 点击卡片播放（Flyleaf/FFmpeg）→ 右侧弹幕滚动（支持表情图片）
+- WinUI 3（PoC 已实现）：直播页输入直播间地址 → 解析展示清晰度/线路卡片 → 点击卡片播放（Flyleaf/FFmpeg）→ 右侧弹幕滚动（支持表情图片）；新增“歌词”页（Now Playing + 顺序多源阈值搜索，可选 daemon/FFI 后端）
 
 ## 构建前提（重要）
 
@@ -48,7 +48,7 @@ rustc -V
 
 关键点：
 - **永远不改** `chaos-core` / `chaos-ffi`（如需适配，只在 `chaos-app`/daemon/UI 层加过渡）
-- WinUI3 与 Rust **零 FFI**：仅 IPC（NamedPipe + JSON-RPC 2.0 + LSP framing）
+- WinUI3 与 Rust 默认走 **IPC**（NamedPipe + JSON-RPC 2.0 + LSP framing）；同时保留 **可选 FFI 后端**（`chaos_ffi.dll`，便于调试/对比/兜底）
 
 ```
                     (独立导出路线，不参与 IPC 主链路)

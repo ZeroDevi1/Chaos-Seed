@@ -2,7 +2,8 @@ use chaos_daemon::{read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame, ChaosS
 use chaos_proto::{
     DanmakuFetchImageParams, DanmakuFetchImageResult, DanmakuMessage, LiveCloseParams, LiveOpenParams,
     LiveOpenResult, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
-    LivestreamPlaybackHints, LivestreamVariant,
+    LivestreamPlaybackHints, LivestreamVariant, LyricsSearchParams, LyricsSearchResult,
+    NowPlayingSession, NowPlayingSnapshot, NowPlayingSnapshotParams,
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex};
@@ -61,6 +62,51 @@ impl ChaosService for FakeSvc {
                 backup_urls: vec![],
             }],
         })
+    }
+
+    async fn now_playing_snapshot(
+        &self,
+        _params: NowPlayingSnapshotParams,
+    ) -> Result<NowPlayingSnapshot, String> {
+        Ok(NowPlayingSnapshot {
+            supported: true,
+            now_playing: Some(NowPlayingSession {
+                app_id: "app".to_string(),
+                is_current: true,
+                playback_status: "Playing".to_string(),
+                title: Some("t".to_string()),
+                artist: Some("a".to_string()),
+                album_title: None,
+                position_ms: Some(1000),
+                duration_ms: Some(2000),
+                genres: vec![],
+                song_id: None,
+                thumbnail: None,
+                error: None,
+            }),
+            sessions: vec![],
+            picked_app_id: Some("app".to_string()),
+            retrieved_at_unix_ms: 1,
+        })
+    }
+
+    async fn lyrics_search(&self, params: LyricsSearchParams) -> Result<Vec<LyricsSearchResult>, String> {
+        Ok(vec![LyricsSearchResult {
+            service: "qq".to_string(),
+            service_token: "tok".to_string(),
+            title: Some(params.title),
+            artist: params.artist,
+            album: params.album,
+            duration_ms: params.duration_ms,
+            match_percentage: 80,
+            quality: 1.0,
+            matched: true,
+            has_translation: false,
+            has_inline_timetags: true,
+            lyrics_original: "[00:01.00]hello".to_string(),
+            lyrics_translation: None,
+            debug: None,
+        }])
     }
 
     async fn live_open(
@@ -134,7 +180,43 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v1["id"], 1);
     assert_eq!(v1["result"]["version"], "0.0.0-test");
 
-    // 2) live.open
+    // 2) nowPlaying.snapshot
+    let now = json!({
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "nowPlaying.snapshot",
+        "params": {}
+    });
+    let now_bytes = serde_json::to_vec(&now).unwrap();
+    write_lsp_frame(&mut w, &now_bytes).await.unwrap();
+    let resp10 = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 16 * 1024))
+        .await
+        .unwrap()
+        .unwrap();
+    let v10: serde_json::Value = serde_json::from_slice(&resp10).unwrap();
+    assert_eq!(v10["id"], 10);
+    assert_eq!(v10["result"]["supported"], true);
+    assert_eq!(v10["result"]["nowPlaying"]["title"], "t");
+
+    // 3) lyrics.search
+    let lyr = json!({
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "lyrics.search",
+        "params": { "title": "Hello", "artist": "Adele" }
+    });
+    let lyr_bytes = serde_json::to_vec(&lyr).unwrap();
+    write_lsp_frame(&mut w, &lyr_bytes).await.unwrap();
+    let resp11 = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 32 * 1024))
+        .await
+        .unwrap()
+        .unwrap();
+    let v11: serde_json::Value = serde_json::from_slice(&resp11).unwrap();
+    assert_eq!(v11["id"], 11);
+    assert!(v11["result"].is_array());
+    assert_eq!(v11["result"][0]["matchPercentage"], 80);
+
+    // 4) live.open
     let open = json!({
         "jsonrpc": "2.0",
         "id": 2,
@@ -151,7 +233,7 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v2["id"], 2);
     assert_eq!(v2["result"]["sessionId"], "sess");
 
-    // 3) decode manifest
+    // 5) decode manifest
     let dec = json!({
         "jsonrpc": "2.0",
         "id": 5,
@@ -169,7 +251,7 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v5["result"]["site"], "bili_live");
     assert!(v5["result"]["variants"].is_array());
 
-    // 4) notification
+    // 6) notification
     svc.push_msg(DanmakuMessage {
         session_id: "sess".to_string(),
         received_at_ms: 1,
@@ -187,7 +269,7 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(vn["params"]["sessionId"], "sess");
     assert_eq!(vn["params"]["text"], "hi");
 
-    // 5) fetch image
+    // 7) fetch image
     let img = json!({
         "jsonrpc": "2.0",
         "id": 3,
@@ -204,7 +286,7 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v3["id"], 3);
     assert_eq!(v3["result"]["base64"], "AA==");
 
-    // 6) close
+    // 8) close
     let close = json!({
         "jsonrpc": "2.0",
         "id": 4,

@@ -12,11 +12,13 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Media.Animation;
 using StreamJsonRpc;
 using Windows.Foundation;
 using Windows.Storage.Streams;
+using VirtualKey = Windows.System.VirtualKey;
 
 namespace ChaosSeed.WinUI3.Pages;
 
@@ -363,6 +365,36 @@ public sealed partial class LivePage : Page
 
     private async void OnParseClicked(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
+        try
+        {
+            var input = (InputBox.Text ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                ShowParseError("请输入直播间地址。");
+                return;
+            }
+
+            await DecodeAndShowAsync(input);
+        }
+        catch (Exception ex)
+        {
+            try { ShowParseError(ex.Message); } catch { }
+        }
+    }
+
+    private async void OnParseInputKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter)
+        {
+            return;
+        }
+        if (!ParseBtn.IsEnabled || !InputBox.IsEnabled)
+        {
+            return;
+        }
+
+        e.Handled = true;
+
         try
         {
             var input = (InputBox.Text ?? "").Trim();
@@ -1021,11 +1053,15 @@ public sealed partial class LivePage : Page
                 // ignore
             }
 
+            // Ensure variant cards are clickable immediately even if the open flow is still unwinding.
+            try { VariantGrid.IsEnabled = true; } catch { }
+
             var stopTask = StopCurrentAsync();
             _lastPlayRequest = null;
             _playingVariantId = null;
             _playingVariantLabel = null;
             SetMode(LiveMode.Select);
+            try { VariantGrid.IsEnabled = true; } catch { }
             await stopTask;
         }
         catch (Exception ex)
