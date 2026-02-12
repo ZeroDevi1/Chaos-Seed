@@ -35,6 +35,11 @@ public sealed class AppSettings
     public int LyricsLimit { get; set; } = 10;
     public int LyricsTimeoutMs { get; set; } = 8000;
 
+    public int? DanmakuOverlayX { get; set; }
+    public int? DanmakuOverlayY { get; set; }
+    public int? DanmakuOverlayWidth { get; set; }
+    public int? DanmakuOverlayHeight { get; set; }
+
     public bool LiveDefaultFullscreen { get; set; } = false;
     public double LiveFullscreenAnimRate { get; set; } = 1.0;
     public bool DebugPlayerOverlay { get; set; } = false;

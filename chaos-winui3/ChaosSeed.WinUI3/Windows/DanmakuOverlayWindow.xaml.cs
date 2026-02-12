@@ -89,7 +89,8 @@ public sealed partial class DanmakuOverlayWindow : Window
             {
                 try
                 {
-                    p.SetBorderAndTitleBar(false, false);
+                    // Use the system title bar for move/resize (less custom code).
+                    p.SetBorderAndTitleBar(true, true);
                 }
                 catch
                 {
@@ -125,15 +126,7 @@ public sealed partial class DanmakuOverlayWindow : Window
                 // ignore
             }
 
-            // A reasonable default size; user can later adjust in OS window manager if needed.
-            try
-            {
-                _appWindow.Resize(new global::Windows.Graphics.SizeInt32(960, 540));
-            }
-            catch
-            {
-                // ignore
-            }
+            ApplySavedBoundsOrDefault();
         }
         catch
         {
@@ -144,6 +137,15 @@ public sealed partial class DanmakuOverlayWindow : Window
     private void Cleanup()
     {
         DanmakuService.Instance.Message -= OnMsg;
+
+        try
+        {
+            SaveBoundsBestEffort();
+        }
+        catch
+        {
+            // ignore
+        }
 
         try
         {
@@ -182,6 +184,81 @@ public sealed partial class DanmakuOverlayWindow : Window
         {
             // ignore
         }
+    }
+
+    private void ApplySavedBoundsOrDefault()
+    {
+        var s = SettingsService.Instance.Current;
+        var x = s.DanmakuOverlayX;
+        var y = s.DanmakuOverlayY;
+        var w = s.DanmakuOverlayWidth;
+        var h = s.DanmakuOverlayHeight;
+
+        if (_appWindow is null)
+        {
+            return;
+        }
+
+        // Default size.
+        var size = new global::Windows.Graphics.SizeInt32(960, 540);
+        if (w is > 100 and < 10_000 && h is > 100 and < 10_000)
+        {
+            size = new global::Windows.Graphics.SizeInt32(w.Value, h.Value);
+        }
+
+        try
+        {
+            _appWindow.Resize(size);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        if (x is > -50_000 and < 50_000 && y is > -50_000 and < 50_000)
+        {
+            try
+            {
+                _appWindow.Move(new global::Windows.Graphics.PointInt32(x.Value, y.Value));
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    private void SaveBoundsBestEffort()
+    {
+        if (_appWindow is null)
+        {
+            return;
+        }
+
+        global::Windows.Graphics.PointInt32 pos;
+        global::Windows.Graphics.SizeInt32 size;
+        try
+        {
+            pos = _appWindow.Position;
+            size = _appWindow.Size;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (size.Width < 100 || size.Height < 100)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s =>
+        {
+            s.DanmakuOverlayX = pos.X;
+            s.DanmakuOverlayY = pos.Y;
+            s.DanmakuOverlayWidth = size.Width;
+            s.DanmakuOverlayHeight = size.Height;
+        });
     }
 
     private void OnMsg(object? sender, DanmakuMessage msg)
