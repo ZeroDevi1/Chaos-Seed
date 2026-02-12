@@ -25,6 +25,7 @@
 - P1-17 直播源：解析 UI + 新窗口播放器（线路/清晰度切换 + 关闭即停止）：Done @ 2026-02-09（commit: `ee0ef1d`）
 - P0-18 Now Playing：勾选“包含封面(base64)”后获取正在播放信息卡死：Done @ 2026-02-10（commit: `78d35c1`）
 - P0-22 WinUI3：新增“歌词”页（Now Playing + 多源阈值搜索，daemon/FFI 双后端）+ daemon 新增 RPC：`nowPlaying.snapshot`/`lyrics.search`；直播页回车解析 + 播放返回立即恢复卡片可点击：Done @ 2026-02-12（tag: `0.2.2`）
+- P1-23 WinUI3：直播播放器 Overlay 弹幕（B 站风格开关，支持显示区域/透明度/字号/同屏密度，图片弹幕仅显示图片）：Done @ 2026-02-12（tag: `0.2.3`）
 - P1-19 歌词（core/ffi）：移植 LyricsX/LyricsKit 行为到 chaos-core（多源并发/strict/quality/超时）+ chaos-ffi 导出 + 文档：Done @ 2026-02-10（commit: `78d35c1`）
 - P1-20 歌词（Tauri UI）：三段布局（操作区/来源列表/正文区）+ 单选切换 + Chat/Overlay 新窗口显示 + 原文-译文对应：Done @ 2026-02-10（commit: `78d35c1`）
 - P0-21 歌词系统对齐 BetterLyrics：QQ/网易云/LRCLIB + match_percentage + 顺序阈值自动搜索 + Dock/Float + 暂停自动隐藏 + 托盘开关 + Windows tag release CI：Done @ 2026-02-10（commit: `e72ab32`）
