@@ -575,11 +575,15 @@ public sealed partial class LyricsPage : Page
             if (origTimeCount == 0)
             {
                 // No timestamps on original: pair by index.
-                return BuildIndexAlignedLines(
-                    SplitNonEmptyLines(orig),
-                    SplitNonEmptyLines(tran),
-                    timeLabels: null
-                );
+                foreach (var x in BuildIndexAlignedLines(
+                             SplitNonEmptyLines(orig),
+                             SplitNonEmptyLines(tran),
+                             timeLabels: null
+                         ))
+                {
+                    yield return x;
+                }
+                yield break;
             }
 
             if (tranTimeCount == 0)
@@ -587,13 +591,12 @@ public sealed partial class LyricsPage : Page
                 // No timestamps on translation: pair by index to original time-sorted list.
                 var o = origTimed.Where(x => x.TimeMs is not null).OrderBy(x => x.TimeMs).ToList();
                 var t = SplitNonEmptyLines(tran);
-                var lines = new List<LyricsLineVm>(o.Count);
                 for (var i = 0; i < o.Count; i++)
                 {
                     var tr = i < t.Count ? t[i] : null;
-                    lines.Add(new LyricsLineVm(o[i].TimeMs, o[i].Text, tr));
+                    yield return new LyricsLineVm(o[i].TimeMs, o[i].Text, tr);
                 }
-                return lines;
+                yield break;
             }
 
             var oDict = origTimed
