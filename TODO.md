@@ -41,5 +41,6 @@
 - 配置系统（保存主题/侧边栏/常用设置）
 - chaos-ffi：导出 chaos-core 为 dll/so（跨语言稳定 ABI，供 WinUI3/Qt 等调用）
 - WinUI3（已可用）：直播页 + 播放（Flyleaf/FFmpeg）+ 弹幕；弹幕页（独立连接/断开，支持 Chat/Overlay 两窗口）；歌词页（Now Playing + 多源歌词搜索，支持 daemon/FFI）。后续再做：WinRT 真事件订阅（SMTC/GSMTC）、UI polish、更多窗口形态（Dock/Float）
+- UI 技术栈（长期）：探索替代 WinUI3 的 UI 方案，要求支持“新窗体透明背景”（Overlay/悬浮窗类窗口），并能稳定跨版本运行（候选：Avalonia / Qt / Flutter / WPF/Win32 等）
 - CI（Windows 原生构建 + WSL 交叉构建校验）
 - Release 打包（版本号、校验和、更新日志、tag 触发自动上传 Release 产物）
