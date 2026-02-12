@@ -13,8 +13,6 @@
         <Border Grid.Row="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="12">
             <StackPanel Spacing="6">
                 <TextBlock Text="Chat" FontSize="18" FontWeight="SemiBold" />
-                <TextBlock x:Name="StatusText" Text="未连接" Opacity="0.8" />
-                <TextBlock x:Name="BackendText" Text="" Opacity="0.7" />
                 <TextBlock Text="Esc 关闭窗口" Opacity="0.5" />
             </StackPanel>
         </Border>
@@ -59,4 +57,3 @@
         </Border>
     </Grid>
 </Window>
-

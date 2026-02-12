@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Services;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
+using WinRT.Interop;
 using VirtualKey = Windows.System.VirtualKey;
 
 namespace ChaosSeed.WinUI3.Windows;
@@ -17,10 +19,13 @@ public sealed partial class DanmakuChatWindow : Window
     private DanmakuListStore? _store;
     private DanmakuImageLoader? _images;
     private CancellationTokenSource? _cts;
+    private AppWindow? _appWindow;
 
     public DanmakuChatWindow()
     {
         InitializeComponent();
+
+        TryApplyDefaultWindowSize();
 
         _cts = new CancellationTokenSource();
         _images = new DanmakuImageLoader(_dq, maxConcurrency: 4);
@@ -39,7 +44,6 @@ public sealed partial class DanmakuChatWindow : Window
         );
 
         DanmakuService.Instance.Message += OnMsg;
-        DanmakuService.Instance.StatusChanged += OnStatusChanged;
         Closed += (_, _) => Cleanup();
         Activated += (_, _) =>
         {
@@ -52,8 +56,6 @@ public sealed partial class DanmakuChatWindow : Window
                 // ignore
             }
         };
-
-        UpdateHeader();
     }
 
     private void OnMsg(object? sender, DanmakuMessage msg)
@@ -62,26 +64,9 @@ public sealed partial class DanmakuChatWindow : Window
         _store?.Enqueue(msg);
     }
 
-    private void OnStatusChanged(object? sender, string status)
-    {
-        _ = sender;
-        _ = status;
-        UpdateHeader();
-    }
-
-    private void UpdateHeader()
-    {
-        _dq.TryEnqueue(() =>
-        {
-            StatusText.Text = DanmakuService.Instance.StatusText;
-            BackendText.Text = $"后端：{DanmakuService.Instance.BackendName}";
-        });
-    }
-
     private void Cleanup()
     {
         DanmakuService.Instance.Message -= OnMsg;
-        DanmakuService.Instance.StatusChanged -= OnStatusChanged;
 
         try
         {
@@ -139,5 +124,38 @@ public sealed partial class DanmakuChatWindow : Window
             }
         }
     }
-}
 
+    private void TryApplyDefaultWindowSize()
+    {
+        try
+        {
+            var hwnd = WindowNative.GetWindowHandle(this);
+            if (hwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var id = Win32Interop.GetWindowIdFromWindow(hwnd);
+            _appWindow = AppWindow.GetFromWindowId(id);
+
+            if (_appWindow.Presenter is OverlappedPresenter p)
+            {
+                try
+                {
+                    p.IsMaximizable = false;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            // Default to a narrow chat window.
+            _appWindow.Resize(new global::Windows.Graphics.SizeInt32(380, 760));
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+}
