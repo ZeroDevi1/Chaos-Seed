@@ -112,94 +112,219 @@
                             </TransitionCollection>
                         </Grid.Transitions>
 
-                        <fl:FlyleafHost
-                            x:Name="FlyleafHost"
-                            Background="Black"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Stretch" />
+                        <ContentControl
+                            x:Name="PlayerHost"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch">
+                            <Grid
+                                x:Name="PlayerSurface"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                Background="Black"
+                                PointerEntered="OnPlayerSurfacePointerEntered"
+                                PointerExited="OnPlayerSurfacePointerExited"
+                                PointerMoved="OnPlayerSurfacePointerMoved">
+	                                <fl:FlyleafHost
+	                                    x:Name="FlyleafHost"
+	                                    Background="Black"
+	                                    HorizontalAlignment="Stretch"
+	                                    VerticalAlignment="Stretch" />
 
-                        <Image x:Name="HeroCover" Visibility="Collapsed" Stretch="UniformToFill" />
+	                                <Image x:Name="HeroCover" Visibility="Collapsed" Stretch="UniformToFill" />
 
-                        <muxc:InfoBar
-                            x:Name="PlayerStatusBar"
-                            IsOpen="False"
-                            IsClosable="True"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Top"
-                            Margin="12"
-                            MaxWidth="720" />
+	                                <Grid
+	                                    x:Name="PlayerControlsRoot"
+	                                    Opacity="0"
+	                                    IsHitTestVisible="False">
+	                                    <Border
+	                                        x:Name="PlayerTitleBar"
+	                                        HorizontalAlignment="Stretch"
+	                                        VerticalAlignment="Top"
+	                                        Background="#66000000"
+	                                        Padding="12,10"
+	                                        CornerRadius="0,0,10,10">
+	                                        <TextBlock
+	                                            x:Name="PlayerTitleText"
+	                                            Foreground="White"
+	                                            FontWeight="SemiBold"
+	                                            TextTrimming="CharacterEllipsis"
+	                                            TextWrapping="NoWrap" />
+	                                    </Border>
 
-                        <Button
-                            x:Name="BackToSelectBtn"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Top"
-                            Margin="12,12,0,0"
-                            Click="OnBackToSelect">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <muxc:SymbolIcon Symbol="Back" />
-                                <TextBlock Text="返回" />
-                            </StackPanel>
-                        </Button>
+	                                    <Border
+	                                        x:Name="PlayerBottomBar"
+	                                        HorizontalAlignment="Stretch"
+	                                        VerticalAlignment="Bottom"
+	                                        Background="#66000000"
+	                                        Padding="12,10"
+	                                        CornerRadius="10,10,0,0">
+	                                        <Grid ColumnSpacing="12">
+	                                            <Grid.ColumnDefinitions>
+	                                                <ColumnDefinition Width="Auto" />
+	                                                <ColumnDefinition Width="Auto" />
+	                                                <ColumnDefinition Width="Auto" />
+	                                                <ColumnDefinition Width="*" />
+	                                                <ColumnDefinition Width="Auto" />
+	                                            </Grid.ColumnDefinitions>
 
-                        <Border
-                            x:Name="DanmakuToggleHotZone"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Stretch"
-                            Width="20"
-                            Background="Transparent"
-                            PointerEntered="OnDanmakuToggleHotZonePointerEntered"
-                            PointerExited="OnDanmakuToggleHotZonePointerExited">
-                            <Button
-                                x:Name="DanmakuToggleBtn"
-                                Style="{StaticResource ChaosDanmakuEdgeToggleStyle}"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Click="OnToggleDanmaku"
-                                Opacity="0"
-                                IsHitTestVisible="False"
-                                PointerEntered="OnDanmakuTogglePointerEntered"
-                                PointerExited="OnDanmakuTogglePointerExited">
-                                <FontIcon
-                                    x:Name="DanmakuToggleIcon"
-                                    FontFamily="Segoe MDL2 Assets"
-                                    Glyph="&#xE76B;"
-                                    FontSize="12" />
-                            </Button>
-                        </Border>
+	                                            <Button
+	                                                x:Name="PlayPauseBtn"
+	                                                Padding="10,6"
+	                                                Background="Transparent"
+	                                                Foreground="White"
+	                                                Click="OnPlayPauseClicked">
+	                                                <muxc:SymbolIcon x:Name="PlayPauseIcon" Symbol="Pause" />
+	                                            </Button>
 
-                        <Border
-                            x:Name="PlayerOpeningOverlay"
-                            Visibility="Collapsed"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Background="#88000000"
-                            CornerRadius="10"
-                            Padding="18">
-                            <StackPanel Spacing="10" Orientation="Horizontal">
-                                <ProgressRing Width="24" Height="24" IsActive="True" />
-                                <TextBlock VerticalAlignment="Center" Text="正在打开直播流..." />
-                            </StackPanel>
-                        </Border>
+	                                            <Button
+	                                                x:Name="MuteBtn"
+	                                                Grid.Column="1"
+	                                                Padding="10,6"
+	                                                Background="Transparent"
+	                                                Foreground="White"
+	                                                Click="OnMuteClicked">
+	                                                <muxc:SymbolIcon x:Name="MuteIcon" Symbol="Volume" />
+	                                            </Button>
 
-                        <Border
-                            x:Name="PlayerFailedOverlay"
-                            Visibility="Collapsed"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Background="#AA101010"
-                            CornerRadius="10"
-                            Padding="16"
-                            MaxWidth="560">
-                            <StackPanel Spacing="12">
-                                <TextBlock Text="播放打开失败" FontSize="18" FontWeight="SemiBold" />
-                                <TextBlock x:Name="PlayerFailedMessage" TextWrapping="WrapWholeWords" />
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button x:Name="RetryPlayBtn" Content="重试" Click="OnRetryPlayClicked" />
-                                    <Button x:Name="BackToSelectFailedBtn" Content="返回选择" Click="OnBackToSelectFromFailedClicked" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
+	                                            <Slider
+	                                                x:Name="VolumeSlider"
+	                                                Grid.Column="2"
+	                                                Width="120"
+	                                                Minimum="0"
+	                                                Maximum="100"
+	                                                ValueChanged="OnVolumeSliderValueChanged" />
+
+	                                            <Button
+	                                                x:Name="QualityBtn"
+	                                                Grid.Column="4"
+	                                                Padding="10,6"
+	                                                Background="Transparent"
+	                                                Foreground="White">
+	                                                <StackPanel Orientation="Horizontal" Spacing="6">
+	                                                    <TextBlock x:Name="QualityText" Text="清晰度" />
+	                                                    <FontIcon
+	                                                        FontFamily="Segoe MDL2 Assets"
+	                                                        Glyph="&#xE70D;"
+	                                                        FontSize="12" />
+	                                                </StackPanel>
+	                                                <Button.Flyout>
+	                                                    <MenuFlyout x:Name="QualityFlyout" />
+	                                                </Button.Flyout>
+	                                            </Button>
+	                                        </Grid>
+	                                    </Border>
+	                                </Grid>
+
+	                                <muxc:InfoBar
+	                                    x:Name="PlayerStatusBar"
+	                                    IsOpen="False"
+	                                    IsClosable="True"
+	                                    Visibility="Collapsed"
+	                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Top"
+                                    Margin="12"
+                                    MaxWidth="720" />
+
+	                                <Border
+	                                    x:Name="BackToSelectHotZone"
+	                                    HorizontalAlignment="Left"
+	                                    VerticalAlignment="Top"
+	                                    Margin="12"
+	                                    Padding="0"
+                                    Width="160"
+                                    Height="52"
+                                    Background="Transparent"
+                                    PointerEntered="OnBackHotZonePointerEntered"
+                                    PointerExited="OnBackHotZonePointerExited">
+                                    <Button
+                                        x:Name="BackToSelectBtn"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Top"
+                                        Click="OnBackToSelect"
+                                        Opacity="0"
+                                        IsHitTestVisible="False"
+                                        PointerEntered="OnBackBtnPointerEntered"
+                                        PointerExited="OnBackBtnPointerExited">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <muxc:SymbolIcon Symbol="Back" />
+                                            <TextBlock Text="返回" />
+                                        </StackPanel>
+                                    </Button>
+                                </Border>
+
+	                                <Border
+	                                    x:Name="DanmakuToggleHotZone"
+	                                    HorizontalAlignment="Right"
+	                                    VerticalAlignment="Stretch"
+	                                    Width="20"
+	                                    Background="Transparent"
+                                    PointerEntered="OnDanmakuToggleHotZonePointerEntered"
+                                    PointerExited="OnDanmakuToggleHotZonePointerExited">
+                                    <Button
+                                        x:Name="DanmakuToggleBtn"
+                                        Style="{StaticResource ChaosDanmakuEdgeToggleStyle}"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Click="OnToggleDanmaku"
+                                        Opacity="0"
+                                        IsHitTestVisible="False"
+                                        PointerEntered="OnDanmakuTogglePointerEntered"
+                                        PointerExited="OnDanmakuTogglePointerExited">
+                                        <FontIcon
+                                            x:Name="DanmakuToggleIcon"
+                                            FontFamily="Segoe MDL2 Assets"
+                                            Glyph="&#xE76B;"
+                                            FontSize="12" />
+                                    </Button>
+                                </Border>
+
+	                                <Border
+	                                    x:Name="PlayerOpeningOverlay"
+	                                    Visibility="Collapsed"
+	                                    HorizontalAlignment="Center"
+	                                    VerticalAlignment="Center"
+	                                    Background="#88000000"
+                                    CornerRadius="10"
+                                    Padding="18">
+                                    <StackPanel Spacing="10" Orientation="Horizontal">
+                                        <ProgressRing Width="24" Height="24" IsActive="True" />
+                                        <TextBlock VerticalAlignment="Center" Text="正在打开直播流..." />
+                                    </StackPanel>
+                                </Border>
+
+	                                <Border
+	                                    x:Name="PlayerFailedOverlay"
+	                                    Visibility="Collapsed"
+	                                    HorizontalAlignment="Center"
+	                                    VerticalAlignment="Center"
+	                                    Background="#AA101010"
+                                    CornerRadius="10"
+                                    Padding="16"
+                                    MaxWidth="560">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Text="播放打开失败" FontSize="18" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="PlayerFailedMessage" TextWrapping="WrapWholeWords" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button x:Name="RetryPlayBtn" Content="重试" Click="OnRetryPlayClicked" />
+                                            <Button x:Name="BackToSelectFailedBtn" Content="返回选择" Click="OnBackToSelectFromFailedClicked" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+	                            </Grid>
+	                        </ContentControl>
                     </Grid>
+
+                    <Popup x:Name="FullScreenPopup" IsLightDismissEnabled="False">
+                        <Grid
+                            x:Name="FullScreenPopupRoot"
+                            Background="Black">
+                            <ContentControl
+                                x:Name="FullScreenPlayerHost"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch" />
+                        </Grid>
+                    </Popup>
                 </Grid>
             </Border>
 

@@ -243,8 +243,6 @@ public sealed class FlyleafPlayerService : IDisposable
             throw new InvalidOperationException("OpenWithDefaultsOnUiAsync must run on UI thread.");
         }
 
-        // Flyleaf may raise OpenCompleted from a non-UI thread, and `OpenCompletedArgs` can be thread-affine.
-        // Always marshal args inspection back to the UI thread to avoid COM marshaling failures (0x8001010E).
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         EventHandler<OpenCompletedArgs>? handler = null;
@@ -255,33 +253,31 @@ public sealed class FlyleafPlayerService : IDisposable
                 return;
             }
 
-            var ok = _dq.TryEnqueue(() =>
+            // `OpenCompletedArgs` can be thread-affine. Do not marshal the args object across threads.
+            // Read required values on the event thread, then complete the TCS with primitives only.
+            try
             {
-                try
+                var isSubtitles = args.IsSubtitles;
+                if (isSubtitles)
                 {
-                    if (args.IsSubtitles)
-                    {
-                        return;
-                    }
-
-                    if (args.Success)
-                    {
-                        tcs.TrySetResult(true);
-                    }
-                    else
-                    {
-                        tcs.TrySetException(new Exception(args.Error ?? "open failed"));
-                    }
+                    return;
                 }
-                catch (Exception ex)
+
+                var success = args.Success;
+                var error = args.Error;
+
+                if (success)
                 {
-                    tcs.TrySetException(ex);
+                    tcs.TrySetResult(true);
                 }
-            });
-
-            if (!ok)
+                else
+                {
+                    tcs.TrySetException(new Exception(error ?? "open failed"));
+                }
+            }
+            catch (Exception ex)
             {
-                tcs.TrySetException(new InvalidOperationException("failed to enqueue OpenCompleted handler"));
+                tcs.TrySetException(ex);
             }
         };
 
@@ -297,8 +293,11 @@ public sealed class FlyleafPlayerService : IDisposable
             }
 
             _player.OpenAsync(url);
-            _player.Play();
             await tcs.Task;
+
+            // Start playback after the open pipeline reports success.
+            // This avoids racing Play() with UI host initialization/layout.
+            _player.Play();
         }
         finally
         {

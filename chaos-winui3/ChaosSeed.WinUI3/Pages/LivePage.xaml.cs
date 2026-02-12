@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -10,6 +11,7 @@ using ChaosSeed.WinUI3.Services.LiveBackends;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Media.Animation;
 using StreamJsonRpc;
@@ -60,8 +62,25 @@ public sealed partial class LivePage : Page
     private readonly FlyleafPlayerService? _player;
     private readonly string? _playerUnavailableMsg;
     private readonly ILiveBackend _backend;
+    private readonly Queue<string> _playerLogTail = new();
+    private const int PlayerLogTailMaxLines = 6;
+    private CancellationTokenSource? _backBtnHideCts;
+    private DispatcherQueueTimer? _playerControlsHideTimer;
+    private bool _playerPaused;
+    private bool _volumeSync;
+    private bool _inAppFullscreen;
+    private XamlRoot? _fullscreenXamlRoot;
+    private bool _systemFullscreenRequested;
+    private bool _debugPlayerOverlay;
 
     private string? _sessionId;
+    private string? _playingVariantId;
+    private string? _playingVariantLabel;
+    private long _emoteReq;
+    private long _emoteOk;
+    private long _emoteFail;
+    private string? _lastEmoteErr;
+    private long _lastEmoteDebugAtMs;
     private bool _danmakuExpanded = false;
     private int _danmakuWidthPx = DanmakuDefaultWidthPx;
     private CancellationTokenSource? _danmakuAnimCts;
@@ -83,11 +102,15 @@ public sealed partial class LivePage : Page
     public LivePage()
     {
         InitializeComponent();
+        InitPlayerControlsUi();
         FlyleafHost.Loaded += OnFlyleafHostLoaded;
         _backend = LiveBackendFactory.Create();
         _backend.DanmakuMessageReceived += OnDanmakuMessage;
         _player = TryInitPlayer(out _playerUnavailableMsg);
         BindFlyleafHostPlayer(_player);
+        SettingsService.Instance.SettingsChanged += OnSettingsChanged;
+        ApplyDebugUiFromSettings();
+        HideBackToSelectImmediately();
         Bindings.Update();
 
         if (!string.IsNullOrWhiteSpace(_backend.InitNotice))
@@ -100,6 +123,28 @@ public sealed partial class LivePage : Page
             {
                 ShowParseInfo(_backend.InitNotice!);
             }
+        }
+    }
+
+    private void InitPlayerControlsUi()
+    {
+        try
+        {
+            PlayerTitleText.Text = "";
+            QualityText.Text = "清晰度";
+            VolumeSlider.Value = 100;
+            _playerControlsHideTimer = _dq.CreateTimer();
+            _playerControlsHideTimer.IsRepeating = false;
+            _playerControlsHideTimer.Interval = TimeSpan.FromSeconds(10);
+            _playerControlsHideTimer.Tick += (_, _) =>
+            {
+                try { HidePlayerControlsImmediately(); } catch { }
+            };
+            HidePlayerControlsImmediately();
+        }
+        catch
+        {
+            // ignore
         }
     }
 
@@ -248,10 +293,18 @@ public sealed partial class LivePage : Page
         {
             Interlocked.Increment(ref _playSeq);
             _backend.DanmakuMessageReceived -= OnDanmakuMessage;
+            SettingsService.Instance.SettingsChanged -= OnSettingsChanged;
 
             try { _playCts?.Cancel(); } catch { }
             _playCts?.Dispose();
             _playCts = null;
+
+            _backBtnHideCts?.Cancel();
+            _backBtnHideCts?.Dispose();
+            _backBtnHideCts = null;
+
+            try { _playerControlsHideTimer?.Stop(); } catch { }
+            _playerControlsHideTimer = null;
 
             _danmakuToggleHideCts?.Cancel();
             _danmakuToggleHideCts?.Dispose();
@@ -265,6 +318,12 @@ public sealed partial class LivePage : Page
             _decodeCts?.Dispose();
             _decodeCts = null;
             _lastPlayRequest = null;
+
+            await RunOnUiAsync(() =>
+            {
+                try { ExitSystemFullscreenIfNeeded(); } catch { }
+                try { ExitInAppFullscreenIfNeeded(); } catch { }
+            });
 
             await RunOnUiAsync(() =>
             {
@@ -503,12 +562,16 @@ public sealed partial class LivePage : Page
         _playCts = new CancellationTokenSource();
         var ct = _playCts.Token;
 
+        var preferSystemFullscreen = SettingsService.Instance.Current.LiveDefaultFullscreen;
+        _systemFullscreenRequested = preferSystemFullscreen;
+
         ConnectedAnimation? anim = null;
         if (animationSourceCover?.Source is not null)
         {
             try
             {
                 anim = ConnectedAnimationService.GetForCurrentView().PrepareToAnimate("liveHeroCover", animationSourceCover);
+                try { anim.Configuration = new DirectConnectedAnimationConfiguration(); } catch { }
             }
             catch
             {
@@ -528,8 +591,26 @@ public sealed partial class LivePage : Page
         _danmakuExpanded = false;
         _danmakuWidthPx = Math.Clamp(_danmakuWidthPx, DanmakuMinWidthPx, DanmakuMaxWidthPx);
         SetMode(LiveMode.Playing);
+        if (preferSystemFullscreen)
+        {
+            EnterInAppFullscreenIfNeeded();
+        }
+        else
+        {
+            ExitInAppFullscreenIfNeeded();
+            ExitSystemFullscreenIfNeeded();
+        }
+        SyncPlayerOverlayFromManifest();
+        RebuildQualityFlyout(variantId);
         BindFlyleafHostPlayer();
+        await EnsureFlyleafHostReadyAsync(ct);
         SetPlayUiState(PlayUiState.Opening, null);
+        _playerLogTail.Clear();
+        Interlocked.Exchange(ref _emoteReq, 0);
+        Interlocked.Exchange(ref _emoteOk, 0);
+        Interlocked.Exchange(ref _emoteFail, 0);
+        Volatile.Write(ref _lastEmoteErr, null);
+        Interlocked.Exchange(ref _lastEmoteDebugAtMs, 0);
         PlayerStatusBar.IsOpen = false;
         ShowPlayerInfo("正在打开直播…");
 
@@ -555,6 +636,14 @@ public sealed partial class LivePage : Page
             {
                 // ignore
             }
+        }
+
+        if (preferSystemFullscreen)
+        {
+            var configured = SettingsService.Instance.Current.LiveFullscreenDelayMs;
+            configured = Math.Clamp(configured, 0, 2000);
+            var delay = Math.Max(configured, anim is null ? 0 : 180);
+            _ = EnterSystemFullscreenAfterDelayAsync(playSeq, delayMs: delay);
         }
 
         try
@@ -589,6 +678,10 @@ public sealed partial class LivePage : Page
                 }
                 _sessionId = res.SessionId;
                 Rows.Clear();
+                _playingVariantId = (res.VariantId ?? "").Trim();
+                _playingVariantLabel = (res.VariantLabel ?? "").Trim();
+                SyncPlayerOverlayFromManifest(res);
+                UpdateQualityUiFromPlayingVariant();
             });
 
             await _player.PlayAsync(
@@ -606,6 +699,8 @@ public sealed partial class LivePage : Page
             }
 
             SetPlayUiState(PlayUiState.Playing, null);
+            SyncAudioUiFromPlayer();
+            SetPausedUi(paused: false);
             await FadeOutHeroCoverAsync();
         }
         catch (OperationCanceledException)
@@ -670,6 +765,72 @@ public sealed partial class LivePage : Page
                     HeroCover.Opacity = 1;
                 });
             }
+        }
+    }
+
+    private async Task EnsureFlyleafHostReadyAsync(CancellationToken ct)
+    {
+        if (_dq.HasThreadAccess && FlyleafHost.ActualWidth > 1 && FlyleafHost.ActualHeight > 1)
+        {
+            return;
+        }
+
+        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        RoutedEventHandler? onLoaded = null;
+        SizeChangedEventHandler? onSizeChanged = null;
+
+        void TryComplete()
+        {
+            try
+            {
+                if (FlyleafHost.ActualWidth > 1 && FlyleafHost.ActualHeight > 1)
+                {
+                    tcs.TrySetResult(null);
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        onLoaded = (_, _) => TryComplete();
+        onSizeChanged = (_, _) => TryComplete();
+
+        try
+        {
+            FlyleafHost.Loaded += onLoaded;
+            FlyleafHost.SizeChanged += onSizeChanged;
+        }
+        catch
+        {
+            return;
+        }
+
+        CancellationTokenRegistration ctr = default;
+        if (ct.CanBeCanceled)
+        {
+            ctr = ct.Register(() => tcs.TrySetCanceled(ct));
+        }
+
+        // Kick once in case we're already ready but caller is off-thread.
+        _dq.TryEnqueue(TryComplete);
+
+        try
+        {
+            var done = await Task.WhenAny(tcs.Task, Task.Delay(800, ct));
+            if (ReferenceEquals(done, tcs.Task))
+            {
+                await tcs.Task;
+            }
+            // timeout: proceed best-effort (FlyleafHost may still render after layout completes)
+        }
+        finally
+        {
+            ctr.Dispose();
+            try { FlyleafHost.Loaded -= onLoaded; } catch { }
+            try { FlyleafHost.SizeChanged -= onSizeChanged; } catch { }
         }
     }
 
@@ -794,6 +955,9 @@ public sealed partial class LivePage : Page
         try
         {
             Interlocked.Increment(ref _playSeq);
+            ExitSystemFullscreenIfNeeded();
+            ExitInAppFullscreenIfNeeded();
+            HidePlayerControlsImmediately();
             try
             {
                 _playCts?.Cancel();
@@ -805,6 +969,9 @@ public sealed partial class LivePage : Page
 
             var stopTask = StopCurrentAsync();
             _lastPlayRequest = null;
+            _playingVariantId = null;
+            _playingVariantLabel = null;
+            _systemFullscreenRequested = false;
             SetMode(LiveMode.Select);
             await stopTask;
         }
@@ -1129,13 +1296,19 @@ public sealed partial class LivePage : Page
         PlayerPane.Visibility = mode == LiveMode.Playing ? Visibility.Visible : Visibility.Collapsed;
         if (mode == LiveMode.Playing)
         {
+            HideBackToSelectImmediately();
             HideDanmakuToggleImmediately();
             ShowDanmakuToggle();
             _ = HideDanmakuToggleWithDelayAsync(1500);
+            ShowPlayerControls();
         }
         else
         {
             SetPlayUiState(PlayUiState.Idle, null);
+            HideBackToSelectImmediately();
+            HidePlayerControlsImmediately();
+            ExitInAppFullscreenIfNeeded();
+            ExitSystemFullscreenIfNeeded();
         }
         UpdateDanmakuPane();
     }
@@ -1149,6 +1322,19 @@ public sealed partial class LivePage : Page
         PlayerFailedOverlay.Visibility = state == PlayUiState.Failed
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        var canControl = state == PlayUiState.Playing;
+        try
+        {
+            PlayPauseBtn.IsEnabled = canControl;
+            MuteBtn.IsEnabled = canControl;
+            VolumeSlider.IsEnabled = canControl;
+            QualityBtn.IsEnabled = canControl && QualityFlyout.Items.Count > 0;
+        }
+        catch
+        {
+            // ignore
+        }
 
         if (state == PlayUiState.Failed)
         {
@@ -1233,18 +1419,735 @@ public sealed partial class LivePage : Page
 
     private void ShowPlayerError(string msg)
     {
-        PlayerStatusBar.Severity = Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error;
-        PlayerStatusBar.Title = "播放失败";
-        PlayerStatusBar.Message = msg;
-        PlayerStatusBar.IsOpen = true;
+        AppendPlayerLog(Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error, "播放失败", msg);
     }
 
     private void ShowPlayerInfo(string msg)
     {
-        PlayerStatusBar.Severity = Microsoft.UI.Xaml.Controls.InfoBarSeverity.Informational;
-        PlayerStatusBar.Title = "播放器";
-        PlayerStatusBar.Message = msg;
-        PlayerStatusBar.IsOpen = true;
+        AppendPlayerLog(Microsoft.UI.Xaml.Controls.InfoBarSeverity.Informational, "播放器", msg);
+    }
+
+    private void AppendPlayerLog(
+        Microsoft.UI.Xaml.Controls.InfoBarSeverity severity,
+        string title,
+        string msg
+    )
+    {
+        try
+        {
+            if (!_debugPlayerOverlay)
+            {
+                return;
+            }
+
+            var lines = (msg ?? "").Replace("\r\n", "\n").Split('\n');
+            foreach (var line in lines)
+            {
+                var trimmed = (line ?? "").Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                _playerLogTail.Enqueue(trimmed);
+                while (_playerLogTail.Count > PlayerLogTailMaxLines)
+                {
+                    _playerLogTail.Dequeue();
+                }
+            }
+
+            PlayerStatusBar.Severity = severity;
+            PlayerStatusBar.Title = title;
+            PlayerStatusBar.Message = string.Join("\n", _playerLogTail);
+            PlayerStatusBar.IsOpen = true;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        ApplyDebugUiFromSettings();
+    }
+
+    private void ApplyDebugUiFromSettings()
+    {
+        var enabled = SettingsService.Instance.Current.DebugPlayerOverlay;
+        _debugPlayerOverlay = enabled;
+
+        _dq.TryEnqueue(() =>
+        {
+            try
+            {
+                PlayerStatusBar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+                if (!enabled)
+                {
+                    PlayerStatusBar.IsOpen = false;
+                    _playerLogTail.Clear();
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        });
+    }
+
+    private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args)
+    {
+        _ = args;
+        if (!_inAppFullscreen)
+        {
+            return;
+        }
+
+        try { UpdateFullScreenPopupSize(); } catch { }
+    }
+
+    private void EnterInAppFullscreenIfNeeded()
+    {
+        if (_inAppFullscreen)
+        {
+            UpdateFullScreenPopupSize();
+            return;
+        }
+
+        XamlRoot? root = null;
+        try
+        {
+            root = (App.MainWindowInstance?.Content as FrameworkElement)?.XamlRoot ?? XamlRoot;
+        }
+        catch
+        {
+            root = XamlRoot;
+        }
+
+        try
+        {
+            if (root is not null && !ReferenceEquals(_fullscreenXamlRoot, root))
+            {
+                if (_fullscreenXamlRoot is not null)
+                {
+                    try { _fullscreenXamlRoot.Changed -= OnXamlRootChanged; } catch { }
+                }
+                _fullscreenXamlRoot = root;
+                _fullscreenXamlRoot.Changed += OnXamlRootChanged;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            if (root is not null && !ReferenceEquals(FullScreenPopup.XamlRoot, root))
+            {
+                FullScreenPopup.XamlRoot = root;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        UpdateFullScreenPopupSize();
+
+        try
+        {
+            if (ReferenceEquals(PlayerHost.Content, PlayerSurface))
+            {
+                PlayerHost.Content = null;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try { FullScreenPlayerHost.Content = PlayerSurface; } catch { }
+        try { FullScreenPopup.IsOpen = true; } catch { }
+        _inAppFullscreen = true;
+    }
+
+    private void ExitInAppFullscreenIfNeeded()
+    {
+        if (!_inAppFullscreen)
+        {
+            try { FullScreenPopup.IsOpen = false; } catch { }
+            return;
+        }
+
+        try { FullScreenPopup.IsOpen = false; } catch { }
+
+        try
+        {
+            if (ReferenceEquals(FullScreenPlayerHost.Content, PlayerSurface))
+            {
+                FullScreenPlayerHost.Content = null;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try { PlayerHost.Content = PlayerSurface; } catch { }
+
+        try
+        {
+            if (_fullscreenXamlRoot is not null)
+            {
+                _fullscreenXamlRoot.Changed -= OnXamlRootChanged;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        _fullscreenXamlRoot = null;
+        _inAppFullscreen = false;
+    }
+
+    private void UpdateFullScreenPopupSize()
+    {
+        try
+        {
+            var xr = _fullscreenXamlRoot ?? FullScreenPopupRoot.XamlRoot ?? XamlRoot;
+            if (xr is null)
+            {
+                return;
+            }
+
+            FullScreenPopupRoot.Width = xr.Size.Width;
+            FullScreenPopupRoot.Height = xr.Size.Height;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task EnterSystemFullscreenAfterDelayAsync(int playSeq, int delayMs)
+    {
+        try
+        {
+            if (delayMs > 0)
+            {
+                await Task.Delay(delayMs);
+            }
+
+            if (playSeq != _playSeq || _mode != LiveMode.Playing || !_systemFullscreenRequested)
+            {
+                return;
+            }
+
+            await RunOnUiAsync(() =>
+            {
+                if (playSeq != _playSeq || _mode != LiveMode.Playing || !_systemFullscreenRequested)
+                {
+                    return;
+                }
+
+                try
+                {
+                    if (App.MainWindowInstance?.IsSystemFullscreen != true)
+                    {
+                        App.MainWindowInstance?.TrySetSystemFullscreen(true);
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+            });
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void ExitSystemFullscreenIfNeeded()
+    {
+        _systemFullscreenRequested = false;
+        try
+        {
+            if (App.MainWindowInstance?.IsSystemFullscreen == true)
+            {
+                App.MainWindowInstance.TrySetSystemFullscreen(false);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void OnPlayerSurfacePointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        ShowPlayerControls();
+    }
+
+    private void OnPlayerSurfacePointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+
+        try { RestartPlayerControlsHideTimer(TimeSpan.FromMilliseconds(350)); } catch { }
+    }
+
+    private void OnPlayerSurfacePointerMoved(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        ShowPlayerControls();
+    }
+
+    private void ShowPlayerControls()
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+
+        try
+        {
+            PlayerControlsRoot.Opacity = 1;
+            PlayerControlsRoot.IsHitTestVisible = true;
+            RestartPlayerControlsHideTimer(TimeSpan.FromSeconds(10));
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void HidePlayerControlsImmediately()
+    {
+        try { _playerControlsHideTimer?.Stop(); } catch { }
+
+        try
+        {
+            PlayerControlsRoot.Opacity = 0;
+            PlayerControlsRoot.IsHitTestVisible = false;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void RestartPlayerControlsHideTimer(TimeSpan delay)
+    {
+        if (_playerControlsHideTimer is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _playerControlsHideTimer.Stop();
+            _playerControlsHideTimer.Interval = delay;
+            _playerControlsHideTimer.Start();
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void OnPlayPauseClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        ShowPlayerControls();
+
+        if (_playUiState != PlayUiState.Playing || _player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_playerPaused)
+            {
+                _player.Player.Play();
+                SetPausedUi(paused: false);
+            }
+            else
+            {
+                _player.Player.Pause();
+                SetPausedUi(paused: true);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void SetPausedUi(bool paused)
+    {
+        _playerPaused = paused;
+        try { PlayPauseIcon.Symbol = paused ? Symbol.Play : Symbol.Pause; } catch { }
+    }
+
+    private void OnMuteClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        ShowPlayerControls();
+
+        if (_player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var muted = _player.Player.Audio.Mute;
+            _player.Player.Audio.Mute = !muted;
+            SetMuteUi(!muted);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void SetMuteUi(bool muted)
+    {
+        try { MuteIcon.Symbol = muted ? Symbol.Mute : Symbol.Volume; } catch { }
+    }
+
+    private void OnVolumeSliderValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        _ = sender;
+        ShowPlayerControls();
+
+        if (_volumeSync || _player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _player.Player.Audio.Volume = (int)Math.Round(e.NewValue);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void SyncAudioUiFromPlayer()
+    {
+        if (_player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var max = 100.0;
+            try
+            {
+                max = Convert.ToDouble(_player.Player.Config.Audio.VolumeMax);
+                if (double.IsNaN(max) || max <= 0)
+                {
+                    max = 100.0;
+                }
+            }
+            catch
+            {
+                max = 100.0;
+            }
+
+            var vol = Convert.ToDouble(_player.Player.Audio.Volume);
+            _volumeSync = true;
+            VolumeSlider.Maximum = max;
+            VolumeSlider.Value = Math.Clamp(vol, VolumeSlider.Minimum, VolumeSlider.Maximum);
+            _volumeSync = false;
+
+            SetMuteUi(_player.Player.Audio.Mute);
+        }
+        catch
+        {
+            _volumeSync = false;
+        }
+    }
+
+    private void SyncPlayerOverlayFromManifest(LiveOpenResult? res = null)
+    {
+        try
+        {
+            var title = (res?.Title ?? _manifest?.Info?.Title ?? "").Trim();
+            PlayerTitleText.Text = string.IsNullOrWhiteSpace(title) ? "-" : title;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void UpdateQualityUiFromPlayingVariant()
+    {
+        try
+        {
+            var id = (_playingVariantId ?? "").Trim();
+            var label = (_playingVariantLabel ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                var vars = _manifest?.Variants ?? Array.Empty<StreamVariant>();
+                foreach (var v in vars)
+                {
+                    if (string.Equals((v.Id ?? "").Trim(), id, StringComparison.Ordinal))
+                    {
+                        label = (v.Label ?? "").Trim();
+                        break;
+                    }
+                }
+            }
+
+            QualityText.Text = string.IsNullOrWhiteSpace(label) ? "清晰度" : label;
+
+            foreach (var raw in QualityFlyout.Items)
+            {
+                if (raw is ToggleMenuFlyoutItem item && item.Tag is string tag)
+                {
+                    item.IsChecked = string.Equals(tag.Trim(), id, StringComparison.Ordinal);
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void RebuildQualityFlyout(string? selectedVariantId)
+    {
+        try
+        {
+            QualityFlyout.Items.Clear();
+
+            var vars = new List<StreamVariant>(_manifest?.Variants ?? Array.Empty<StreamVariant>());
+            vars.Sort((a, b) =>
+            {
+                var qa = a.Quality;
+                var qb = b.Quality;
+                var cmp = qb.CompareTo(qa);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+                return string.CompareOrdinal(a.Label ?? "", b.Label ?? "");
+            });
+
+            var target = (selectedVariantId ?? _playingVariantId ?? "").Trim();
+
+            foreach (var v in vars)
+            {
+                var id = (v.Id ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                var label = (v.Label ?? "").Trim();
+                var text = string.IsNullOrWhiteSpace(label) ? id : label;
+                if (v.Quality != 0)
+                {
+                    text += $"（{v.Quality}）";
+                }
+
+                var item = new ToggleMenuFlyoutItem
+                {
+                    Text = text,
+                    Tag = id,
+                    IsChecked = string.Equals(id, target, StringComparison.Ordinal),
+                };
+                item.Click += OnQualityFlyoutItemClick;
+                QualityFlyout.Items.Add(item);
+            }
+
+            QualityBtn.IsEnabled = QualityFlyout.Items.Count > 0;
+            foreach (var raw in QualityFlyout.Items)
+            {
+                if (raw is ToggleMenuFlyoutItem item && item.IsChecked)
+                {
+                    QualityText.Text = item.Text;
+                    break;
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async void OnQualityFlyoutItemClick(object sender, RoutedEventArgs e)
+    {
+        _ = e;
+        ShowPlayerControls();
+
+        if (_mode != LiveMode.Playing || _player is null)
+        {
+            return;
+        }
+
+        if (sender is not ToggleMenuFlyoutItem item || item.Tag is not string variantId)
+        {
+            return;
+        }
+
+        if (string.Equals(variantId.Trim(), (_playingVariantId ?? _lastPlayRequest?.VariantId ?? "").Trim(), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var input = (_lastPlayRequest?.Input ?? _lastInput ?? (InputBox.Text ?? "")).Trim();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return;
+        }
+
+        try
+        {
+            await BeginPlayAsync(input, variantId.Trim(), coverRef: null, animationSourceCover: null);
+        }
+        catch (Exception ex)
+        {
+            try { ShowPlayerError($"切换清晰度失败：{ex.Message}"); } catch { }
+        }
+    }
+
+    private void ShowBackToSelect()
+    {
+        _backBtnHideCts?.Cancel();
+        _backBtnHideCts?.Dispose();
+        _backBtnHideCts = null;
+
+        try
+        {
+            BackToSelectBtn.Opacity = 1;
+            BackToSelectBtn.IsHitTestVisible = true;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void HideBackToSelectImmediately()
+    {
+        _backBtnHideCts?.Cancel();
+        _backBtnHideCts?.Dispose();
+        _backBtnHideCts = null;
+
+        try
+        {
+            BackToSelectBtn.Opacity = 0;
+            BackToSelectBtn.IsHitTestVisible = false;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task HideBackToSelectWithDelayAsync(int delayMs = 350)
+    {
+        try
+        {
+            _backBtnHideCts?.Cancel();
+            _backBtnHideCts?.Dispose();
+            _backBtnHideCts = new CancellationTokenSource();
+            var ct = _backBtnHideCts.Token;
+
+            await Task.Delay(delayMs, ct);
+            if (ct.IsCancellationRequested || _mode != LiveMode.Playing)
+            {
+                return;
+            }
+
+            _dq.TryEnqueue(() =>
+            {
+                try
+                {
+                    if (_mode != LiveMode.Playing)
+                    {
+                        return;
+                    }
+                    BackToSelectBtn.Opacity = 0;
+                    BackToSelectBtn.IsHitTestVisible = false;
+                }
+                catch
+                {
+                    // ignore
+                }
+            });
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void OnBackHotZonePointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        ShowBackToSelect();
+    }
+
+    private void OnBackHotZonePointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        _ = HideBackToSelectWithDelayAsync();
+    }
+
+    private void OnBackBtnPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        ShowBackToSelect();
+    }
+
+    private void OnBackBtnPointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_mode != LiveMode.Playing)
+        {
+            return;
+        }
+        _ = HideBackToSelectWithDelayAsync();
     }
 
     private void OnDanmakuMessage(object? sender, DanmakuMessage msg)
@@ -1284,6 +2187,8 @@ public sealed partial class LivePage : Page
 
                 if (!string.IsNullOrWhiteSpace(msg.ImageUrl))
                 {
+                    Interlocked.Increment(ref _emoteReq);
+                    EmitEmoteDebugIfDue();
                     _ = TryLoadEmoteAsync(sid, row, msg.ImageUrl!);
                 }
             }
@@ -1312,6 +2217,9 @@ public sealed partial class LivePage : Page
             var res = await _backend.FetchDanmakuImageAsync(sid, url, CancellationToken.None);
             if (string.IsNullOrWhiteSpace(res.Base64))
             {
+                Interlocked.Increment(ref _emoteFail);
+                Volatile.Write(ref _lastEmoteErr, "empty image reply");
+                EmitEmoteDebugIfDue();
                 return;
             }
 
@@ -1331,14 +2239,76 @@ public sealed partial class LivePage : Page
                 await bmp.SetSourceAsync(ms);
                 row.Emote = bmp;
             });
+
+            Interlocked.Increment(ref _emoteOk);
+            EmitEmoteDebugIfDue();
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            Interlocked.Increment(ref _emoteFail);
+            var host = "";
+            try
+            {
+                if (Uri.TryCreate(url?.Trim() ?? "", UriKind.Absolute, out var u) && !string.IsNullOrWhiteSpace(u.Host))
+                {
+                    host = u.Host.Trim();
+                }
+            }
+            catch
+            {
+                host = "";
+            }
+
+            var msg = string.IsNullOrWhiteSpace(host) ? ex.Message : $"{host}: {ex.Message}";
+            Volatile.Write(ref _lastEmoteErr, msg);
+            EmitEmoteDebugIfDue();
         }
         finally
         {
             _imageSem.Release();
+        }
+    }
+
+    private void EmitEmoteDebugIfDue()
+    {
+        try
+        {
+            if (!_debugPlayerOverlay)
+            {
+                return;
+            }
+
+            var now = Environment.TickCount64;
+            var last = Interlocked.Read(ref _lastEmoteDebugAtMs);
+            if (now - last < 2000)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _lastEmoteDebugAtMs, now, last) != last)
+            {
+                return;
+            }
+
+            var req = Interlocked.Read(ref _emoteReq);
+            var ok = Interlocked.Read(ref _emoteOk);
+            var fail = Interlocked.Read(ref _emoteFail);
+            var err = Volatile.Read(ref _lastEmoteErr);
+
+            var msg = $"[emote] req={req} ok={ok} fail={fail}";
+            if (!string.IsNullOrWhiteSpace(err))
+            {
+                msg += $"\nlastErr={err}";
+            }
+
+            _dq.TryEnqueue(() =>
+            {
+                try { ShowPlayerInfo(msg); } catch { }
+            });
+        }
+        catch
+        {
+            // ignore
         }
     }
 

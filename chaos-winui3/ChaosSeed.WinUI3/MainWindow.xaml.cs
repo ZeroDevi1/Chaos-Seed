@@ -15,6 +15,7 @@ public sealed partial class MainWindow : Window
     private bool _suppressSelectionChanged;
     private AppWindow? _appWindow;
     private readonly Thickness _baseTitleBarPadding = new(12, 0, 12, 0);
+    private bool _isSystemFullscreen;
 
     public MainWindow()
     {
@@ -149,4 +150,33 @@ public sealed partial class MainWindow : Window
             _suppressSelectionChanged = false;
         }
     }
+
+    public bool TrySetSystemFullscreen(bool fullscreen)
+    {
+        if (_appWindow is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (fullscreen)
+            {
+                _appWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+            }
+            else
+            {
+                _appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
+            }
+
+            _isSystemFullscreen = fullscreen;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool IsSystemFullscreen => _isSystemFullscreen;
 }

@@ -1,4 +1,6 @@
+using System.Threading;
 using System.Runtime.InteropServices;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using WinRT;
 
@@ -17,6 +19,12 @@ public static class Program
         // For WinUI 3 unpackaged apps: validate Windows App Runtime and dependencies before starting XAML.
         XamlCheckProcessRequirements();
 
-        Application.Start(_ => new App());
+        Application.Start(p =>
+        {
+            var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
+            SynchronizationContext.SetSynchronizationContext(context);
+            _ = p;
+            new App();
+        });
     }
 }

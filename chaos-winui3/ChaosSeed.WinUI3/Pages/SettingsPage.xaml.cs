@@ -45,6 +45,10 @@ public sealed partial class SettingsPage : Page
             _ => 0, // Auto
         };
 
+        LiveDefaultFullscreenToggle.IsOn = s.LiveDefaultFullscreen;
+        LiveFullscreenDelayBox.Value = Math.Clamp(s.LiveFullscreenDelayMs, 0, 2000);
+        DebugPlayerToggle.IsOn = s.DebugPlayerOverlay;
+
         var win11 = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
         BackdropCombo.IsEnabled = win11;
         BackdropHint.IsOpen = !win11;
@@ -108,5 +112,44 @@ public sealed partial class SettingsPage : Page
             _ => LiveBackendMode.Auto,
         };
         SettingsService.Instance.Update(s => s.LiveBackendMode = mode);
+    }
+
+    private void OnLiveDefaultFullscreenToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s => s.LiveDefaultFullscreen = LiveDefaultFullscreenToggle.IsOn);
+    }
+
+    private void OnLiveFullscreenDelayChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        _ = args;
+        if (!_init)
+        {
+            return;
+        }
+
+        var v = sender.Value;
+        if (double.IsNaN(v) || double.IsInfinity(v))
+        {
+            return;
+        }
+
+        var ms = (int)Math.Round(v);
+        ms = Math.Clamp(ms, 0, 2000);
+        SettingsService.Instance.Update(s => s.LiveFullscreenDelayMs = ms);
+    }
+
+    private void OnDebugPlayerToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s => s.DebugPlayerOverlay = DebugPlayerToggle.IsOn);
     }
 }

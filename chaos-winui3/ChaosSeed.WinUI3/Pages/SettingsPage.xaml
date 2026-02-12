@@ -56,6 +56,50 @@
                             </ComboBox>
                         </Grid>
 
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="直播：默认全屏播放" VerticalAlignment="Center" />
+                            <ToggleSwitch
+                                x:Name="LiveDefaultFullscreenToggle"
+                                Grid.Column="1"
+                                OffContent="关闭"
+                                OnContent="开启"
+                                Toggled="OnLiveDefaultFullscreenToggled" />
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="直播：全屏切换延迟(ms)（调试）" VerticalAlignment="Center" />
+                            <muxc:NumberBox
+                                x:Name="LiveFullscreenDelayBox"
+                                Grid.Column="1"
+                                Minimum="0"
+                                Maximum="2000"
+                                SmallChange="50"
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="OnLiveFullscreenDelayChanged" />
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="调试：显示播放提示" VerticalAlignment="Center" />
+                            <ToggleSwitch
+                                x:Name="DebugPlayerToggle"
+                                Grid.Column="1"
+                                OffContent="关闭"
+                                OnContent="开启"
+                                Toggled="OnDebugPlayerToggled" />
+                        </Grid>
+
                         <muxc:InfoBar
                             x:Name="BackdropHint"
                             IsOpen="False"

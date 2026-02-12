@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Runtime.InteropServices;
+using System.Net;
+using System.Net.Sockets;
 using ChaosSeed.WinUI3.Chaos;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Models.Ffi;
@@ -244,18 +246,45 @@ public sealed class FfiLiveBackend : ILiveBackend
             return new DanmakuFetchImageResult();
         }
 
-        if (string.IsNullOrWhiteSpace(url))
+        var raw = (url ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(raw))
         {
             return new DanmakuFetchImageResult();
         }
 
-        const int maxBytes = 512 * 1024;
+        if (raw.StartsWith("//", StringComparison.Ordinal))
+        {
+            raw = "https:" + raw;
+        }
 
-        using var req = new HttpRequestMessage(HttpMethod.Get, url.Trim());
-        ApplyPlaybackHeaders(req);
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var u))
+        {
+            return new DanmakuFetchImageResult();
+        }
+
+        if (!string.Equals(u.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(u.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DanmakuFetchImageResult();
+        }
+
+        if (IsLocalOrPrivateHost(u))
+        {
+            return new DanmakuFetchImageResult();
+        }
+
+        const int maxBytes = 2_500_000;
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, u);
+        ApplyImageHeaders(req, u);
 
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
         resp.EnsureSuccessStatusCode();
+
+        if (resp.Content.Headers.ContentLength is long len && len > maxBytes)
+        {
+            return new DanmakuFetchImageResult();
+        }
 
         var contentType = resp.Content.Headers.ContentType?.MediaType;
         using var stream = await resp.Content.ReadAsStreamAsync(ct);
@@ -321,6 +350,143 @@ public sealed class FfiLiveBackend : ILiveBackend
         {
             req.Headers.TryAddWithoutValidation("User-Agent", playback.UserAgent.Trim());
         }
+    }
+
+    private void ApplyImageHeaders(HttpRequestMessage req, Uri u)
+    {
+        try
+        {
+            var host = (u.Host ?? "").Trim().ToLowerInvariant();
+            var site = (_lastManifest?.Site ?? "").Trim().ToLowerInvariant();
+            var roomId = (_lastManifest?.RoomId ?? "").Trim();
+            var playback = _lastManifest?.Playback;
+
+            string? referer = null;
+            if (site.Contains("bili") || host.Contains("bilibili.com") || host.Contains("hdslb.com"))
+            {
+                referer = string.IsNullOrWhiteSpace(roomId)
+                    ? "https://live.bilibili.com/"
+                    : $"https://live.bilibili.com/{roomId}/";
+            }
+            else if (!string.IsNullOrWhiteSpace(playback?.Referer))
+            {
+                referer = playback!.Referer!.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(referer))
+            {
+                try { req.Headers.Remove("Referer"); } catch { }
+                if (Uri.TryCreate(referer.Trim(), UriKind.Absolute, out var uri))
+                {
+                    req.Headers.Referrer = uri;
+                }
+                req.Headers.TryAddWithoutValidation("Referer", referer.Trim());
+            }
+
+            var ua = !string.IsNullOrWhiteSpace(playback?.UserAgent)
+                ? playback!.UserAgent!.Trim()
+                : "chaos-seed/winui3";
+            if (!string.IsNullOrWhiteSpace(ua))
+            {
+                try { req.Headers.Remove("User-Agent"); } catch { }
+                req.Headers.TryAddWithoutValidation("User-Agent", ua);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private static bool IsLocalOrPrivateHost(Uri u)
+    {
+        var host = (u.Host ?? "").Trim();
+        if (host.Length == 0)
+        {
+            return true;
+        }
+
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!IPAddress.TryParse(host, out var ip))
+        {
+            return false;
+        }
+
+        if (IPAddress.IsLoopback(ip))
+        {
+            return true;
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            return IsPrivateOrLinkLocalIpv4(ip);
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (ip.IsIPv4MappedToIPv6)
+            {
+                return IsPrivateOrLinkLocalIpv4(ip.MapToIPv4());
+            }
+            if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal)
+            {
+                return true;
+            }
+            return IsUniqueLocalIpv6(ip);
+        }
+
+        return true;
+    }
+
+    private static bool IsPrivateOrLinkLocalIpv4(IPAddress ip)
+    {
+        var b = ip.GetAddressBytes();
+        if (b.Length != 4)
+        {
+            return true;
+        }
+
+        // 10.0.0.0/8
+        if (b[0] == 10)
+        {
+            return true;
+        }
+
+        // 172.16.0.0/12
+        if (b[0] == 172 && b[1] >= 16 && b[1] <= 31)
+        {
+            return true;
+        }
+
+        // 192.168.0.0/16
+        if (b[0] == 192 && b[1] == 168)
+        {
+            return true;
+        }
+
+        // 169.254.0.0/16 (link-local)
+        if (b[0] == 169 && b[1] == 254)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsUniqueLocalIpv6(IPAddress ip)
+    {
+        var b = ip.GetAddressBytes();
+        if (b.Length != 16)
+        {
+            return true;
+        }
+
+        // fc00::/7
+        return (b[0] & 0xFE) == 0xFC;
     }
 
     private async Task DisconnectDanmakuUnsafeAsync()
@@ -390,8 +556,9 @@ public sealed class FfiLiveBackend : ILiveBackend
             }
 
             var dm0 = ev.Dms?.FirstOrDefault();
+            var imageUrl = string.IsNullOrWhiteSpace(dm0?.ImageUrl) ? null : dm0!.ImageUrl!.Trim();
             var text = (dm0?.Text ?? ev.Text ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(text))
+            if (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(imageUrl))
             {
                 return;
             }
@@ -401,8 +568,8 @@ public sealed class FfiLiveBackend : ILiveBackend
                 SessionId = sid!,
                 ReceivedAtMs = ev.ReceivedAtMs,
                 User = (ev.User ?? "").Trim(),
-                Text = text,
-                ImageUrl = string.IsNullOrWhiteSpace(dm0?.ImageUrl) ? null : dm0!.ImageUrl!.Trim(),
+                Text = string.IsNullOrWhiteSpace(text) ? "[图片]" : text,
+                ImageUrl = imageUrl,
                 ImageWidth = dm0?.ImageWidth,
             });
         }
@@ -506,12 +673,7 @@ public sealed class FfiLiveBackend : ILiveBackend
 
             if (ms.Length + n > maxBytes)
             {
-                var remain = maxBytes - (int)ms.Length;
-                if (remain > 0)
-                {
-                    ms.Write(buf, 0, remain);
-                }
-                break;
+                return Array.Empty<byte>();
             }
 
             ms.Write(buf, 0, n);
