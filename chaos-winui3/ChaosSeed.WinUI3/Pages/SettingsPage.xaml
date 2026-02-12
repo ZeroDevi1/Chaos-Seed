@@ -75,15 +75,15 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="240" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="直播：全屏切换延迟(ms)（调试）" VerticalAlignment="Center" />
+                            <TextBlock Text="直播：全屏动画速率(x)" VerticalAlignment="Center" />
                             <muxc:NumberBox
-                                x:Name="LiveFullscreenDelayBox"
+                                x:Name="LiveFullscreenAnimRateBox"
                                 Grid.Column="1"
-                                Minimum="0"
-                                Maximum="2000"
-                                SmallChange="50"
+                                Minimum="0.25"
+                                Maximum="2.5"
+                                SmallChange="0.1"
                                 SpinButtonPlacementMode="Compact"
-                                ValueChanged="OnLiveFullscreenDelayChanged" />
+                                ValueChanged="OnLiveFullscreenAnimRateChanged" />
                         </Grid>
 
                         <Grid>

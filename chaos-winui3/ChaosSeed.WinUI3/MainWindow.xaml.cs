@@ -179,4 +179,7 @@ public sealed partial class MainWindow : Window
     }
 
     public bool IsSystemFullscreen => _isSystemFullscreen;
+
+    public FrameworkElement TitleBarElement => AppTitleBar;
+    public NavigationView NavigationElement => Nav;
 }

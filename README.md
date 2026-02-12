@@ -193,7 +193,11 @@ cargo run -p chaos-core --example lyrics_search -- --title "Hello" --artist "Ade
 
 ## Windows Tag Release（GitHub Actions）
 
-仓库包含 tag 触发的 Windows Release 构建工作流：push `v*` tag 后自动构建并将 `chaos-ffi` 与 `chaos-tauri` 产物打包上传到对应 Release。
+仓库包含 tag 触发的 Windows Release 构建工作流：push 一个 semver tag（例如 `0.2.0` / `v0.2.0`）后自动构建并上传 Release 产物：
+
+- `chaos-ffi-windows-x86_64.zip`
+- `chaos-winui3-windows-x86_64.zip`
+- `chaos-tauri-windows-x86_64.zip`
 
 ## Tauri（当前 UI）
 

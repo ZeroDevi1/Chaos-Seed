@@ -113,7 +113,7 @@
   - 暂停自动隐藏、恢复播放自动恢复显示（仅恢复因自动隐藏导致的隐藏）
   - 轻量特效系统：fluid 背景 / fan3d 布局 / snow 粒子（可在设置切换）
 - 工程化：
-  - 新增 tag 触发 Windows Release 工作流：构建 `chaos-ffi` + `chaos-tauri` 并上传到对应 GitHub Release
+  - 新增 tag 触发 Windows Release 工作流：构建 `chaos-ffi` / `chaos-winui3` / `chaos-tauri` 并上传到对应 GitHub Release
 
 ## 2026-02-12
 

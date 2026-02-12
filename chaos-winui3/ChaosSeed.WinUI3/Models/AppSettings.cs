@@ -27,6 +27,6 @@ public sealed class AppSettings
     public BackdropMode BackdropMode { get; set; } = BackdropMode.Mica;
     public LiveBackendMode LiveBackendMode { get; set; } = LiveBackendMode.Auto;
     public bool LiveDefaultFullscreen { get; set; } = false;
-    public int LiveFullscreenDelayMs { get; set; } = 350;
+    public double LiveFullscreenAnimRate { get; set; } = 1.0;
     public bool DebugPlayerOverlay { get; set; } = false;
 }

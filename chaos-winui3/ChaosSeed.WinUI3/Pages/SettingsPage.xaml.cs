@@ -46,7 +46,7 @@ public sealed partial class SettingsPage : Page
         };
 
         LiveDefaultFullscreenToggle.IsOn = s.LiveDefaultFullscreen;
-        LiveFullscreenDelayBox.Value = Math.Clamp(s.LiveFullscreenDelayMs, 0, 2000);
+        LiveFullscreenAnimRateBox.Value = Math.Clamp(s.LiveFullscreenAnimRate, 0.25, 2.5);
         DebugPlayerToggle.IsOn = s.DebugPlayerOverlay;
 
         var win11 = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
@@ -124,7 +124,7 @@ public sealed partial class SettingsPage : Page
         SettingsService.Instance.Update(s => s.LiveDefaultFullscreen = LiveDefaultFullscreenToggle.IsOn);
     }
 
-    private void OnLiveFullscreenDelayChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    private void OnLiveFullscreenAnimRateChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         _ = args;
         if (!_init)
@@ -138,9 +138,9 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        var ms = (int)Math.Round(v);
-        ms = Math.Clamp(ms, 0, 2000);
-        SettingsService.Instance.Update(s => s.LiveFullscreenDelayMs = ms);
+        v = Math.Round(v, 2);
+        v = Math.Clamp(v, 0.25, 2.5);
+        SettingsService.Instance.Update(s => s.LiveFullscreenAnimRate = v);
     }
 
     private void OnDebugPlayerToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
