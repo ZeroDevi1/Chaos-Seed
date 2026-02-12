@@ -128,7 +128,7 @@ public sealed partial class DanmakuOverlayWindow : Window
             // A reasonable default size; user can later adjust in OS window manager if needed.
             try
             {
-                _appWindow.Resize(new Windows.Graphics.SizeInt32(960, 540));
+                _appWindow.Resize(new global::Windows.Graphics.SizeInt32(960, 540));
             }
             catch
             {
@@ -330,7 +330,7 @@ public sealed partial class DanmakuOverlayWindow : Window
         }
 
         // Measure before adding to canvas so we can remove it when off-screen.
-        sp.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        sp.Measure(new global::Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
         var width = Math.Max(60, sp.DesiredSize.Width);
 
         var x = Stage.ActualWidth + 10;
@@ -366,7 +366,7 @@ public sealed partial class DanmakuOverlayWindow : Window
 
             var bytes = Convert.FromBase64String(res.Base64);
             var bmp = new BitmapImage();
-            using var ms = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            using var ms = new global::Windows.Storage.Streams.InMemoryRandomAccessStream();
             await ms.WriteAsync(bytes.AsBuffer());
             ms.Seek(0);
             await bmp.SetSourceAsync(ms);
