@@ -7,6 +7,8 @@ pub const METHOD_LIVE_OPEN: &str = "live.open";
 pub const METHOD_LIVE_CLOSE: &str = "live.close";
 pub const METHOD_LIVESTREAM_DECODE_MANIFEST: &str = "livestream.decodeManifest";
 pub const METHOD_DANMAKU_FETCH_IMAGE: &str = "danmaku.fetchImage";
+pub const METHOD_DANMAKU_CONNECT: &str = "danmaku.connect";
+pub const METHOD_DANMAKU_DISCONNECT: &str = "danmaku.disconnect";
 pub const METHOD_NOW_PLAYING_SNAPSHOT: &str = "nowPlaying.snapshot";
 pub const METHOD_LYRICS_SEARCH: &str = "lyrics.search";
 
@@ -141,6 +143,26 @@ pub struct DanmakuFetchImageResult {
     pub mime: String,
     pub base64: String,
     pub width: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DanmakuConnectParams {
+    pub input: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DanmakuConnectResult {
+    pub session_id: String,
+    pub site: String,
+    pub room_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DanmakuDisconnectParams {
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

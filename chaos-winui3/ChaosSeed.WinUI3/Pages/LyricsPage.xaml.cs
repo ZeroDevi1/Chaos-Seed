@@ -10,7 +10,7 @@ namespace ChaosSeed.WinUI3.Pages;
 
 public sealed partial class LyricsPage : Page
 {
-    private readonly DispatcherQueue _dq;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue _dq;
 
     private ILyricsBackend? _backend;
     private CancellationTokenSource? _watchCts;
@@ -24,7 +24,7 @@ public sealed partial class LyricsPage : Page
     public LyricsPage()
     {
         InitializeComponent();
-        _dq = DispatcherQueue.GetForCurrentThread();
+        _dq = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
         Loaded += (_, _) => InitBackend();
         Unloaded += (_, _) => Shutdown();

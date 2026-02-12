@@ -74,6 +74,19 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="240" />
                             </Grid.ColumnDefinitions>
+                            <TextBlock Text="弹幕后端" VerticalAlignment="Center" />
+                            <ComboBox x:Name="DanmakuBackendCombo" Grid.Column="1" SelectionChanged="OnDanmakuBackendChanged">
+                                <ComboBoxItem Content="自动（优先 FFI）" Tag="Auto" />
+                                <ComboBoxItem Content="FFI（chaos_ffi.dll）" Tag="Ffi" />
+                                <ComboBoxItem Content="Daemon（chaos-daemon.exe）" Tag="Daemon" />
+                            </ComboBox>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock Text="直播：默认全屏播放" VerticalAlignment="Center" />
                             <ToggleSwitch
                                 x:Name="LiveDefaultFullscreenToggle"

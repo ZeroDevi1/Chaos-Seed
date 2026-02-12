@@ -285,6 +285,62 @@ public sealed class DaemonClient : IDisposable
         await _rpc.InvokeWithParameterObjectAsync<object>("live.close", new { sessionId }, ct);
     }
 
+    public async Task<DanmakuConnectResult> DanmakuConnectAsync(string input, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        var s = (input ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(s))
+        {
+            throw new ArgumentException("empty input", nameof(input));
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<DanmakuConnectResult>(
+                "danmaku.connect",
+                new { input = s },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("danmaku.connect", ex);
+        }
+    }
+
+    public async Task DanmakuDisconnectAsync(string sessionId, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            return;
+        }
+
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            return;
+        }
+
+        try
+        {
+            await _rpc.InvokeWithParameterObjectAsync<object>(
+                "danmaku.disconnect",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("danmaku.disconnect", ex);
+        }
+    }
+
     public async Task<DanmakuFetchImageResult> FetchDanmakuImageAsync(
         string sessionId,
         string url,

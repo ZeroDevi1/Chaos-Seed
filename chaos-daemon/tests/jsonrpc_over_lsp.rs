@@ -1,29 +1,37 @@
-use chaos_daemon::{read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame, ChaosService};
+use chaos_daemon::{ChaosService, read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame};
 use chaos_proto::{
-    DanmakuFetchImageParams, DanmakuFetchImageResult, DanmakuMessage, LiveCloseParams, LiveOpenParams,
-    LiveOpenResult, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
+    DanmakuConnectParams, DanmakuConnectResult, DanmakuDisconnectParams, DanmakuFetchImageParams,
+    DanmakuFetchImageResult, DanmakuMessage, LiveCloseParams, LiveOpenParams, LiveOpenResult,
+    LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
     LivestreamPlaybackHints, LivestreamVariant, LyricsSearchParams, LyricsSearchResult,
     NowPlayingSession, NowPlayingSnapshot, NowPlayingSnapshotParams,
 };
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 struct FakeSvc {
-    tx: Arc<Mutex<Option<mpsc::UnboundedSender<DanmakuMessage>>>>,
+    tx: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<DanmakuMessage>>>>,
 }
 
 impl FakeSvc {
     fn new() -> Self {
         Self {
-            tx: Arc::new(Mutex::new(None)),
+            tx: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     fn push_msg(&self, msg: DanmakuMessage) {
-        if let Some(tx) = self.tx.lock().expect("tx mutex").as_ref() {
+        let tx = self
+            .tx
+            .lock()
+            .expect("tx mutex")
+            .get(&msg.session_id)
+            .cloned();
+        if let Some(tx) = tx {
             let _ = tx.send(msg);
         }
     }
@@ -90,7 +98,10 @@ impl ChaosService for FakeSvc {
         })
     }
 
-    async fn lyrics_search(&self, params: LyricsSearchParams) -> Result<Vec<LyricsSearchResult>, String> {
+    async fn lyrics_search(
+        &self,
+        params: LyricsSearchParams,
+    ) -> Result<Vec<LyricsSearchResult>, String> {
         Ok(vec![LyricsSearchResult {
             service: "qq".to_string(),
             service_token: "tok".to_string(),
@@ -114,7 +125,10 @@ impl ChaosService for FakeSvc {
         _params: LiveOpenParams,
     ) -> Result<(LiveOpenResult, mpsc::UnboundedReceiver<DanmakuMessage>), String> {
         let (tx, rx) = mpsc::unbounded_channel::<DanmakuMessage>();
-        *self.tx.lock().expect("tx mutex") = Some(tx);
+        self.tx
+            .lock()
+            .expect("tx mutex")
+            .insert("sess".to_string(), tx);
         Ok((
             LiveOpenResult {
                 session_id: "sess".to_string(),
@@ -133,6 +147,35 @@ impl ChaosService for FakeSvc {
     }
 
     async fn live_close(&self, _params: LiveCloseParams) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn danmaku_connect(
+        &self,
+        _params: DanmakuConnectParams,
+    ) -> Result<
+        (
+            DanmakuConnectResult,
+            mpsc::UnboundedReceiver<DanmakuMessage>,
+        ),
+        String,
+    > {
+        let (tx, rx) = mpsc::unbounded_channel::<DanmakuMessage>();
+        self.tx
+            .lock()
+            .expect("tx mutex")
+            .insert("dmsess".to_string(), tx);
+        Ok((
+            DanmakuConnectResult {
+                session_id: "dmsess".to_string(),
+                site: "bili_live".to_string(),
+                room_id: "2".to_string(),
+            },
+            rx,
+        ))
+    }
+
+    async fn danmaku_disconnect(&self, _params: DanmakuDisconnectParams) -> Result<(), String> {
         Ok(())
     }
 
@@ -216,7 +259,42 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert!(v11["result"].is_array());
     assert_eq!(v11["result"][0]["matchPercentage"], 80);
 
-    // 4) live.open
+    // 4) danmaku.connect
+    let dm = json!({
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "danmaku.connect",
+        "params": { "input": "bilibili:2" }
+    });
+    let dm_bytes = serde_json::to_vec(&dm).unwrap();
+    write_lsp_frame(&mut w, &dm_bytes).await.unwrap();
+    let resp12 = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 4096))
+        .await
+        .unwrap()
+        .unwrap();
+    let v12: serde_json::Value = serde_json::from_slice(&resp12).unwrap();
+    assert_eq!(v12["id"], 12);
+    assert_eq!(v12["result"]["sessionId"], "dmsess");
+
+    // 5) notification (danmaku session)
+    svc.push_msg(DanmakuMessage {
+        session_id: "dmsess".to_string(),
+        received_at_ms: 1,
+        user: "u".to_string(),
+        text: "dm".to_string(),
+        image_url: None,
+        image_width: None,
+    });
+    let notif_dm = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 4096))
+        .await
+        .unwrap()
+        .unwrap();
+    let vndm: serde_json::Value = serde_json::from_slice(&notif_dm).unwrap();
+    assert_eq!(vndm["method"], "danmaku.message");
+    assert_eq!(vndm["params"]["sessionId"], "dmsess");
+    assert_eq!(vndm["params"]["text"], "dm");
+
+    // 6) live.open (should not disconnect danmaku)
     let open = json!({
         "jsonrpc": "2.0",
         "id": 2,
@@ -233,7 +311,25 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v2["id"], 2);
     assert_eq!(v2["result"]["sessionId"], "sess");
 
-    // 5) decode manifest
+    // 7) notification (live session)
+    svc.push_msg(DanmakuMessage {
+        session_id: "sess".to_string(),
+        received_at_ms: 1,
+        user: "u".to_string(),
+        text: "hi".to_string(),
+        image_url: None,
+        image_width: None,
+    });
+    let notif_live = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 4096))
+        .await
+        .unwrap()
+        .unwrap();
+    let vnl: serde_json::Value = serde_json::from_slice(&notif_live).unwrap();
+    assert_eq!(vnl["method"], "danmaku.message");
+    assert_eq!(vnl["params"]["sessionId"], "sess");
+    assert_eq!(vnl["params"]["text"], "hi");
+
+    // 8) decode manifest
     let dec = json!({
         "jsonrpc": "2.0",
         "id": 5,
@@ -251,25 +347,25 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v5["result"]["site"], "bili_live");
     assert!(v5["result"]["variants"].is_array());
 
-    // 6) notification
+    // 9) danmaku session is still active after live.open
     svc.push_msg(DanmakuMessage {
-        session_id: "sess".to_string(),
-        received_at_ms: 1,
-        user: "u".to_string(),
-        text: "hi".to_string(),
+        session_id: "dmsess".to_string(),
+        received_at_ms: 2,
+        user: "u2".to_string(),
+        text: "dm2".to_string(),
         image_url: None,
         image_width: None,
     });
-    let notif = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 4096))
+    let notif_dm2 = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 4096))
         .await
         .unwrap()
         .unwrap();
-    let vn: serde_json::Value = serde_json::from_slice(&notif).unwrap();
-    assert_eq!(vn["method"], "danmaku.message");
-    assert_eq!(vn["params"]["sessionId"], "sess");
-    assert_eq!(vn["params"]["text"], "hi");
+    let vndm2: serde_json::Value = serde_json::from_slice(&notif_dm2).unwrap();
+    assert_eq!(vndm2["method"], "danmaku.message");
+    assert_eq!(vndm2["params"]["sessionId"], "dmsess");
+    assert_eq!(vndm2["params"]["text"], "dm2");
 
-    // 7) fetch image
+    // 10) fetch image
     let img = json!({
         "jsonrpc": "2.0",
         "id": 3,
@@ -286,7 +382,7 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v3["id"], 3);
     assert_eq!(v3["result"]["base64"], "AA==");
 
-    // 8) close
+    // 11) close live
     let close = json!({
         "jsonrpc": "2.0",
         "id": 4,
@@ -302,6 +398,23 @@ async fn jsonrpc_request_response_and_notification_flow() {
     let v4: serde_json::Value = serde_json::from_slice(&resp4).unwrap();
     assert_eq!(v4["id"], 4);
     assert_eq!(v4["result"]["ok"], true);
+
+    // 12) danmaku.disconnect
+    let dm_close = json!({
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "danmaku.disconnect",
+        "params": { "sessionId": "dmsess" }
+    });
+    let dm_close_bytes = serde_json::to_vec(&dm_close).unwrap();
+    write_lsp_frame(&mut w, &dm_close_bytes).await.unwrap();
+    let resp13 = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 4096))
+        .await
+        .unwrap()
+        .unwrap();
+    let v13: serde_json::Value = serde_json::from_slice(&resp13).unwrap();
+    assert_eq!(v13["id"], 13);
+    assert_eq!(v13["result"]["ok"], true);
 
     drop(w);
     drop(br);

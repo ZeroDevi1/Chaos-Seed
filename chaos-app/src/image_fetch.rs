@@ -6,9 +6,16 @@ use crate::ChaosAppError;
 
 use base64::Engine;
 
-pub fn image_referer(site: Option<Site>, room_id: Option<String>, url: &url::Url) -> Option<String> {
+pub fn image_referer(
+    site: Option<Site>,
+    room_id: Option<String>,
+    url: &url::Url,
+) -> Option<String> {
     let host = url.host_str().unwrap_or_default().to_lowercase();
-    let site = site.map(|s| s.as_str().to_string()).unwrap_or_default().to_lowercase();
+    let site = site
+        .map(|s| s.as_str().to_string())
+        .unwrap_or_default()
+        .to_lowercase();
     let room_id = room_id.unwrap_or_default();
 
     if site.contains("bili") || host.contains("bilibili.com") || host.contains("hdslb.com") {
@@ -66,7 +73,9 @@ mod tests {
             "http://localhost:8080/a.png"
         )));
         assert!(is_local_or_private_host(&parse("http://127.0.0.1/a.png")));
-        assert!(is_local_or_private_host(&parse("http://192.168.1.10/a.png")));
+        assert!(is_local_or_private_host(&parse(
+            "http://192.168.1.10/a.png"
+        )));
         assert!(is_local_or_private_host(&parse("http://10.0.0.5/a.png")));
     }
 

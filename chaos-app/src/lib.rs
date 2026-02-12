@@ -96,7 +96,8 @@ impl ChaosApp {
     }
 
     pub fn with_config(cfg: ChaosAppConfig) -> Result<Self, ChaosAppError> {
-        let livestream = LivestreamClient::new().map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+        let livestream =
+            LivestreamClient::new().map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
         let image_http = reqwest::Client::builder()
             .user_agent("chaos-seed/0.1 (daemon)")
             .timeout(cfg.image_timeout)
@@ -225,6 +226,73 @@ impl ChaosApp {
         ))
     }
 
+    pub async fn danmaku_connect(
+        &self,
+        input: &str,
+    ) -> Result<
+        (
+            String,
+            String,
+            String,
+            mpsc::UnboundedReceiver<DanmakuMessage>,
+        ),
+        ChaosAppError,
+    > {
+        let raw = input.trim();
+        if raw.is_empty() {
+            return Err(ChaosAppError::InvalidInput("empty input".to_string()));
+        }
+
+        let session_id = uuid_string();
+        let (msg_tx, msg_rx) = mpsc::unbounded_channel::<DanmakuMessage>();
+
+        let session_id2 = session_id.clone();
+        let connect_input = raw.to_string();
+
+        let danmaku = DanmakuClient::new().map_err(|e| ChaosAppError::Danmaku(e.to_string()))?;
+        let target = danmaku
+            .resolve(&connect_input)
+            .await
+            .map_err(|e| ChaosAppError::Danmaku(e.to_string()))?;
+
+        let site = target.site;
+        let room_id = target.room_id.clone();
+
+        let (danmaku_session, mut rx) = danmaku
+            .connect_resolved(target, ConnectOptions::default())
+            .await
+            .map_err(|e| ChaosAppError::Danmaku(e.to_string()))?;
+
+        let reader_task = tokio::spawn(async move {
+            while let Some(ev) = rx.recv().await {
+                for msg in crate::danmaku_map::map_event_to_proto(session_id2.clone(), ev) {
+                    let _ = msg_tx.send(msg);
+                }
+            }
+        });
+
+        {
+            let mut sessions = self.sessions.lock().expect("sessions mutex");
+            sessions.insert(
+                session_id.clone(),
+                LiveSession {
+                    meta: LiveSessionMeta {
+                        site,
+                        room_id: room_id.clone(),
+                    },
+                    danmaku_session,
+                    reader_task,
+                },
+            );
+        }
+
+        Ok((session_id, site.as_str().to_string(), room_id, msg_rx))
+    }
+
+    pub async fn danmaku_disconnect(&self, session_id: &str) -> Result<(), ChaosAppError> {
+        self.close_live(session_id).await
+    }
+
     async fn select_and_resolve_variant(
         &self,
         site: Site,
@@ -314,7 +382,8 @@ impl ChaosApp {
         if url_str.is_empty() {
             return Err(ChaosAppError::InvalidInput("empty url".to_string()));
         }
-        let u = url::Url::parse(&url_str).map_err(|e| ChaosAppError::InvalidInput(e.to_string()))?;
+        let u =
+            url::Url::parse(&url_str).map_err(|e| ChaosAppError::InvalidInput(e.to_string()))?;
         match u.scheme() {
             "http" | "https" => {}
             other => return Err(ChaosAppError::UnsupportedUrlScheme(other.to_string())),
@@ -344,19 +413,20 @@ impl ChaosApp {
                 .expect("cache mutex")
                 .get(&cache_key)
                 .unwrap_or_else(|| "image/png".to_string());
-            return Ok(crate::image_fetch::encode_image_reply(
-                &bytes,
-                &mime,
-                None,
-            )?);
+            return Ok(crate::image_fetch::encode_image_reply(&bytes, &mime, None)?);
         }
 
         let mut req = self.image_http.get(u.clone());
-        if let Some(r) = crate::image_fetch::image_referer(Some(meta.site), Some(meta.room_id.clone()), &u) {
+        if let Some(r) =
+            crate::image_fetch::image_referer(Some(meta.site), Some(meta.room_id.clone()), &u)
+        {
             req = req.header(reqwest::header::REFERER, r);
         }
 
-        let resp = req.send().await.map_err(|e| ChaosAppError::Http(e.to_string()))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ChaosAppError::Http(e.to_string()))?;
         if !resp.status().is_success() {
             return Err(ChaosAppError::Http(format!(
                 "http {} when fetching image",
@@ -387,14 +457,16 @@ impl ChaosApp {
             return Err(ChaosAppError::ImageTooLarge(bytes.len()));
         }
 
-        self.image_cache
-            .lock()
-            .expect("cache mutex")
-            .insert(cache_key.clone(), bytes.clone(), bytes.len());
-        self.image_mime_cache
-            .lock()
-            .expect("cache mutex")
-            .insert(cache_key, mime.clone(), mime.len());
+        self.image_cache.lock().expect("cache mutex").insert(
+            cache_key.clone(),
+            bytes.clone(),
+            bytes.len(),
+        );
+        self.image_mime_cache.lock().expect("cache mutex").insert(
+            cache_key,
+            mime.clone(),
+            mime.len(),
+        );
 
         crate::image_fetch::encode_image_reply(&bytes, &mime, None)
     }
@@ -409,7 +481,9 @@ fn uuid_string() -> String {
     format!("{:x}{:x}", t, fastrand::u64(..))
 }
 
-fn map_manifest_to_proto(man: chaos_core::livestream::model::LiveManifest) -> LivestreamDecodeManifestResult {
+fn map_manifest_to_proto(
+    man: chaos_core::livestream::model::LiveManifest,
+) -> LivestreamDecodeManifestResult {
     LivestreamDecodeManifestResult {
         site: man.site.as_str().to_string(),
         room_id: man.room_id,

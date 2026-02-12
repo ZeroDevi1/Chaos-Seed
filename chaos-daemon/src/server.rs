@@ -1,15 +1,17 @@
 use crate::lsp::{read_lsp_frame, write_lsp_frame};
 use crate::rpc::{JsonRpcError, JsonRpcResponse, RpcErrorCode};
 use chaos_proto::{
-    DaemonPingParams, DaemonPingResult, DanmakuFetchImageParams, LiveCloseParams,
-    LiveOpenParams, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult,
-    LyricsSearchParams, LyricsSearchResult, NowPlayingSnapshot, NowPlayingSnapshotParams,
-    METHOD_DAEMON_PING, METHOD_DANMAKU_FETCH_IMAGE, METHOD_LIVE_CLOSE, METHOD_LIVE_OPEN,
+    DaemonPingParams, DaemonPingResult, DanmakuConnectParams, DanmakuConnectResult,
+    DanmakuDisconnectParams, DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams,
+    LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LyricsSearchParams,
+    LyricsSearchResult, METHOD_DAEMON_PING, METHOD_DANMAKU_CONNECT, METHOD_DANMAKU_DISCONNECT,
+    METHOD_DANMAKU_FETCH_IMAGE, METHOD_LIVE_CLOSE, METHOD_LIVE_OPEN,
     METHOD_LIVESTREAM_DECODE_MANIFEST, METHOD_LYRICS_SEARCH, METHOD_NOW_PLAYING_SNAPSHOT,
-    NOTIF_DANMAKU_MESSAGE,
+    NOTIF_DANMAKU_MESSAGE, NowPlayingSnapshot, NowPlayingSnapshotParams,
 };
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::future::Future;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::mpsc;
@@ -45,7 +47,28 @@ pub trait ChaosService: Send + Sync + 'static {
         >,
     > + Send;
 
-    fn live_close(&self, params: LiveCloseParams) -> impl Future<Output = Result<(), String>> + Send;
+    fn live_close(
+        &self,
+        params: LiveCloseParams,
+    ) -> impl Future<Output = Result<(), String>> + Send;
+
+    fn danmaku_connect(
+        &self,
+        params: DanmakuConnectParams,
+    ) -> impl Future<
+        Output = Result<
+            (
+                DanmakuConnectResult,
+                mpsc::UnboundedReceiver<chaos_proto::DanmakuMessage>,
+            ),
+            String,
+        >,
+    > + Send;
+
+    fn danmaku_disconnect(
+        &self,
+        params: DanmakuDisconnectParams,
+    ) -> impl Future<Output = Result<(), String>> + Send;
 
     fn danmaku_fetch_image(
         &self,
@@ -72,20 +95,26 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
     let mut br = BufReader::new(r);
 
     let mut authed = false;
-    let mut active_session_id: Option<String> = None;
-    let mut notif_rx: Option<mpsc::UnboundedReceiver<chaos_proto::DanmakuMessage>> = None;
+    let mut active_live_session_id: Option<String> = None;
+    let mut active_danmaku_session_id: Option<String> = None;
+
+    let (notif_tx, mut notif_rx) = mpsc::unbounded_channel::<chaos_proto::DanmakuMessage>();
+    let mut forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
+
+    fn abort_forwarder(
+        forwarders: &mut HashMap<String, tokio::task::JoinHandle<()>>,
+        session_id: &str,
+    ) {
+        if let Some(h) = forwarders.remove(session_id) {
+            h.abort();
+        }
+    }
 
     loop {
         tokio::select! {
             biased;
 
-            Some(msg) = async {
-                if let Some(rx) = notif_rx.as_mut() {
-                    rx.recv().await
-                } else {
-                    None
-                }
-            }, if notif_rx.is_some() => {
+            Some(msg) = notif_rx.recv() => {
                 let payload = json!({
                     "jsonrpc": "2.0",
                     "method": NOTIF_DANMAKU_MESSAGE,
@@ -227,9 +256,13 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                         }
                     }
                     METHOD_LIVE_OPEN => {
-                        if let Some(prev) = active_session_id.take() {
-                            let _ = svc.live_close(LiveCloseParams { session_id: prev }).await;
-                            notif_rx = None;
+                        if let Some(prev) = active_live_session_id.take() {
+                            abort_forwarder(&mut forwarders, &prev);
+                            let _ = svc
+                                .live_close(LiveCloseParams {
+                                    session_id: prev.clone(),
+                                })
+                                .await;
                         }
                         let params: LiveOpenParams = match decode_params(req.params) {
                             Ok(v) => v,
@@ -242,8 +275,16 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                         };
                         match svc.live_open(params).await {
                             Ok((res, rx)) => {
-                                active_session_id = Some(res.session_id.clone());
-                                notif_rx = Some(rx);
+                                let session_id = res.session_id.clone();
+                                active_live_session_id = Some(session_id.clone());
+                                let tx = notif_tx.clone();
+                                let h = tokio::spawn(async move {
+                                    let mut rx = rx;
+                                    while let Some(msg) = rx.recv().await {
+                                        let _ = tx.send(msg);
+                                    }
+                                });
+                                forwarders.insert(session_id, h);
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
                                 let _ = write_lsp_frame(&mut w, &bytes).await;
@@ -268,9 +309,78 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                         let sid = params.session_id.clone();
                         match svc.live_close(params).await {
                             Ok(()) => {
-                                if active_session_id.as_deref() == Some(&sid) {
-                                    active_session_id = None;
-                                    notif_rx = None;
+                                abort_forwarder(&mut forwarders, &sid);
+                                if active_live_session_id.as_deref() == Some(&sid) {
+                                    active_live_session_id = None;
+                                }
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(chaos_proto::OkReply { ok: true }).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_DANMAKU_CONNECT => {
+                        if let Some(prev) = active_danmaku_session_id.take() {
+                            abort_forwarder(&mut forwarders, &prev);
+                            let _ = svc
+                                .danmaku_disconnect(DanmakuDisconnectParams {
+                                    session_id: prev.clone(),
+                                })
+                                .await;
+                        }
+                        let params: DanmakuConnectParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.danmaku_connect(params).await {
+                            Ok((res, rx)) => {
+                                let session_id = res.session_id.clone();
+                                active_danmaku_session_id = Some(session_id.clone());
+                                let tx = notif_tx.clone();
+                                let h = tokio::spawn(async move {
+                                    let mut rx = rx;
+                                    while let Some(msg) = rx.recv().await {
+                                        let _ = tx.send(msg);
+                                    }
+                                });
+                                forwarders.insert(session_id, h);
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_DANMAKU_DISCONNECT => {
+                        let params: DanmakuDisconnectParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        let sid = params.session_id.clone();
+                        match svc.danmaku_disconnect(params).await {
+                            Ok(()) => {
+                                abort_forwarder(&mut forwarders, &sid);
+                                if active_danmaku_session_id.as_deref() == Some(&sid) {
+                                    active_danmaku_session_id = None;
                                 }
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(chaos_proto::OkReply { ok: true }).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
@@ -321,7 +431,10 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
 
 fn decode_params<T: DeserializeOwned>(params: Option<Value>) -> Result<T, JsonRpcError> {
     let Some(p) = params else {
-        return Err(JsonRpcError::new(RpcErrorCode::InvalidParams, "missing params"));
+        return Err(JsonRpcError::new(
+            RpcErrorCode::InvalidParams,
+            "missing params",
+        ));
     };
     serde_json::from_value::<T>(p)
         .map_err(|_| JsonRpcError::new(RpcErrorCode::InvalidParams, "invalid params"))

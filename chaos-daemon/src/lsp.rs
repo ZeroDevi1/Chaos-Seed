@@ -61,8 +61,8 @@ pub async fn write_lsp_frame<W: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::{read_lsp_frame, write_lsp_frame};
-    use tokio::io::{duplex, BufReader};
     use tokio::io::AsyncWriteExt;
+    use tokio::io::{BufReader, duplex};
 
     #[tokio::test]
     async fn parses_frame_when_split() {

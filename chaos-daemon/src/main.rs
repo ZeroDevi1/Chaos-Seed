@@ -1,15 +1,17 @@
 #[cfg(windows)]
 mod win {
-    use chaos_daemon::run_jsonrpc_over_lsp;
     use chaos_app::ChaosApp;
     use chaos_core::{lyrics, now_playing};
+    use chaos_daemon::run_jsonrpc_over_lsp;
     use chaos_proto::{
+        DanmakuConnectParams, DanmakuConnectResult, DanmakuDisconnectParams,
         DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams, LivestreamDecodeManifestParams,
         LivestreamDecodeManifestResult, LyricsSearchParams, LyricsSearchResult, NowPlayingSession,
         NowPlayingSnapshot, NowPlayingSnapshotParams, NowPlayingThumbnail, PreferredQuality,
     };
     use std::env;
     use std::str::FromStr;
+    use tokio::sync::mpsc;
 
     struct Svc {
         app: std::sync::Arc<ChaosApp>,
@@ -94,18 +96,8 @@ mod win {
                 return Err("title is empty".to_string());
             }
 
-            let artist = params
-                .artist
-                .as_deref()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let album = params
-                .album
-                .as_deref()
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let artist = params.artist.as_deref().unwrap_or("").trim().to_string();
+            let album = params.album.as_deref().unwrap_or("").trim().to_string();
 
             let term = if artist.is_empty() {
                 lyrics::model::LyricsSearchTerm::Keyword { keyword: title }
@@ -146,7 +138,9 @@ mod win {
                 }
             }
 
-            let items = lyrics::core::search(&req, opt).await.map_err(|e| e.to_string())?;
+            let items = lyrics::core::search(&req, opt)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(items
                 .into_iter()
                 .map(|x| LyricsSearchResult {
@@ -193,11 +187,46 @@ mod win {
                 .map_err(|e| e.to_string())
         }
 
+        async fn danmaku_connect(
+            &self,
+            params: DanmakuConnectParams,
+        ) -> Result<
+            (
+                DanmakuConnectResult,
+                mpsc::UnboundedReceiver<chaos_proto::DanmakuMessage>,
+            ),
+            String,
+        > {
+            let (session_id, site, room_id, rx) = self
+                .app
+                .danmaku_connect(&params.input)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok((
+                DanmakuConnectResult {
+                    session_id,
+                    site,
+                    room_id,
+                },
+                rx,
+            ))
+        }
+
+        async fn danmaku_disconnect(&self, params: DanmakuDisconnectParams) -> Result<(), String> {
+            self.app
+                .danmaku_disconnect(&params.session_id)
+                .await
+                .map_err(|e| e.to_string())
+        }
+
         async fn danmaku_fetch_image(
             &self,
             params: DanmakuFetchImageParams,
         ) -> Result<chaos_proto::DanmakuFetchImageResult, String> {
-            self.app.fetch_image(params).await.map_err(|e| e.to_string())
+            self.app
+                .fetch_image(params)
+                .await
+                .map_err(|e| e.to_string())
         }
     }
 

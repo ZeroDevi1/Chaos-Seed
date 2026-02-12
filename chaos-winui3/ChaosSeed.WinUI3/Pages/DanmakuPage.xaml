@@ -1,0 +1,99 @@
+<Page
+    x:Class="ChaosSeed.WinUI3.Pages.DanmakuPage"
+    NavigationCacheMode="Enabled"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:ChaosSeed.WinUI3.Models"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
+
+    <Grid Padding="{StaticResource ChaosPagePadding}" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+            <StackPanel Spacing="10">
+                <TextBlock Text="弹幕" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock
+                    Text="输入直播间 URL/前缀，连接后即可在本页 / Chat 窗口 / Overlay 悬浮窗查看弹幕。"
+                    Opacity="0.8" />
+
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox
+                        x:Name="InputBox"
+                        PlaceholderText="例如：https://live.bilibili.com/1 / douyu:xxx / huya:xxx"
+                        KeyDown="OnInputKeyDown" />
+                    <Button x:Name="ConnectBtn" Grid.Column="1" Content="连接" Click="OnConnectClicked" />
+                    <Button x:Name="DisconnectBtn" Grid.Column="2" Content="断开" Click="OnDisconnectClicked" IsEnabled="False" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+            <StackPanel Spacing="10">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Content="打开 Chat 窗口" Click="OnOpenChatClicked" />
+                    <Button Grid.Column="1" Content="打开 Overlay 悬浮窗" Click="OnOpenOverlayClicked" />
+                    <TextBlock Grid.Column="2" x:Name="BackendLabel" HorizontalAlignment="Right" Opacity="0.8" />
+                </Grid>
+
+                <muxc:InfoBar x:Name="StatusBar" IsOpen="True" Severity="Informational" Title="状态" Message="未连接" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource ChaosCardBorderStyle}" Padding="0">
+            <ListView
+                x:Name="DanmakuList"
+                ItemsSource="{x:Bind Rows, Mode=OneTime}"
+                RenderTransformOrigin="0.5,0.5">
+                <ListView.RenderTransform>
+                    <!-- Flip the list so items render bottom -> top (newest at bottom). -->
+                    <ScaleTransform ScaleY="-1" />
+                </ListView.RenderTransform>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:DanmakuRowVm">
+                        <Grid Padding="8" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <!-- Flip each item back so text/images are readable. -->
+                                <ScaleTransform ScaleY="-1" />
+                            </Grid.RenderTransform>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Text="{x:Bind UserLabel, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" />
+                            <Image
+                                Grid.Column="1"
+                                Width="24"
+                                Height="24"
+                                Margin="6,0,0,0"
+                                Visibility="{x:Bind EmoteVisibility, Mode=OneWay}"
+                                Source="{x:Bind Emote, Mode=OneWay}" />
+                            <TextBlock
+                                Grid.Column="2"
+                                Margin="6,0,0,0"
+                                Text="{x:Bind MessageText, Mode=OneWay}"
+                                FontSize="12"
+                                TextWrapping="Wrap" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Border>
+    </Grid>
+</Page>
+

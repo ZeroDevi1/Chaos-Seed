@@ -134,6 +134,9 @@ public sealed partial class MainWindow : Window
             case "live":
                 ContentFrame.Navigate(typeof(LivePage), null, new DrillInNavigationTransitionInfo());
                 break;
+            case "danmaku":
+                ContentFrame.Navigate(typeof(DanmakuPage), null, new DrillInNavigationTransitionInfo());
+                break;
             case "lyrics":
                 ContentFrame.Navigate(typeof(LyricsPage), null, new DrillInNavigationTransitionInfo());
                 break;
@@ -145,7 +148,8 @@ public sealed partial class MainWindow : Window
         if (wasPaneOpen)
         {
             // In some display modes NavigationView auto-collapses after selection; keep it open until user closes it.
-            DispatcherQueue.GetForCurrentThread().TryEnqueue(() => sender.IsPaneOpen = true);
+            Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread()
+                .TryEnqueue(() => sender.IsPaneOpen = true);
         }
     }
 

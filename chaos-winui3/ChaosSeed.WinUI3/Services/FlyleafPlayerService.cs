@@ -14,12 +14,12 @@ public sealed class PlayOpenOptions
 
 public sealed class FlyleafPlayerService : IDisposable
 {
-    private readonly DispatcherQueue _dq;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue _dq;
     private readonly Config _config;
     private readonly Player _player;
     private readonly SemaphoreSlim _openGate = new(1, 1);
 
-    public FlyleafPlayerService(DispatcherQueue dispatcherQueue)
+    public FlyleafPlayerService(Microsoft.UI.Dispatching.DispatcherQueue dispatcherQueue)
     {
         _dq = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
 

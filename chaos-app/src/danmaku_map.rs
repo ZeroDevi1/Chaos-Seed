@@ -110,4 +110,3 @@ mod tests {
         assert!(out[0].image_url.as_deref().unwrap().contains("example.com"));
     }
 }
-

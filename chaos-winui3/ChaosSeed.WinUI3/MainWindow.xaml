@@ -49,6 +49,11 @@
                         <muxc:SymbolIcon Symbol="Play" />
                     </muxc:NavigationViewItem.Icon>
                 </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="弹幕" Tag="danmaku">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Comment" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
                 <muxc:NavigationViewItem Content="歌词" Tag="lyrics">
                     <muxc:NavigationViewItem.Icon>
                         <muxc:SymbolIcon Symbol="Document" />
