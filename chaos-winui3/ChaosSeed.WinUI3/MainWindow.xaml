@@ -66,5 +66,19 @@
 
             <Frame x:Name="ContentFrame" />
         </muxc:NavigationView>
+
+        <Popup x:Name="FullScreenPopup" IsLightDismissEnabled="False">
+            <Grid
+                x:Name="FullScreenPopupRoot"
+                Background="Black">
+                <Grid x:Name="FullScreenBackdrop" Background="Black" Opacity="1" />
+                <Canvas x:Name="FullScreenCanvas">
+                    <ContentControl
+                        x:Name="FullScreenPlayerHost"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch" />
+                </Canvas>
+            </Grid>
+        </Popup>
     </Grid>
 </Window>

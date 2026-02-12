@@ -5,6 +5,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Animation;
 using WinRT.Interop;
 
@@ -182,4 +183,9 @@ public sealed partial class MainWindow : Window
 
     public FrameworkElement TitleBarElement => AppTitleBar;
     public NavigationView NavigationElement => Nav;
+
+    public Popup FullScreenPopupElement => FullScreenPopup;
+    public Grid FullScreenPopupRootElement => FullScreenPopupRoot;
+    public Grid FullScreenBackdropElement => FullScreenBackdrop;
+    public ContentControl FullScreenPlayerHostElement => FullScreenPlayerHost;
 }

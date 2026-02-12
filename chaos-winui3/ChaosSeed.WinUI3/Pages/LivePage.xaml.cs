@@ -74,6 +74,11 @@ public sealed partial class LivePage : Page
     private bool _debugPlayerOverlay;
     private TransitionCollection? _playerPaneDefaultTransitions;
 
+    private Popup? FullScreenPopup => App.MainWindowInstance?.FullScreenPopupElement;
+    private Grid? FullScreenPopupRoot => App.MainWindowInstance?.FullScreenPopupRootElement;
+    private Grid? FullScreenBackdrop => App.MainWindowInstance?.FullScreenBackdropElement;
+    private ContentControl? FullScreenPlayerHost => App.MainWindowInstance?.FullScreenPlayerHostElement;
+
     private string? _sessionId;
     private string? _playingVariantId;
     private string? _playingVariantLabel;
@@ -1573,24 +1578,33 @@ public sealed partial class LivePage : Page
         });
     }
 
-    private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args)
-    {
-        _ = args;
-        if (!_inAppFullscreen)
-        {
-            return;
-        }
-
-        try { UpdateFullScreenPopupSize(); } catch { }
-    }
-
-	    private void EnterInAppFullscreenIfNeeded()
+	    private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args)
 	    {
-	        if (_inAppFullscreen)
+	        _ = args;
+	        if (!_inAppFullscreen)
 	        {
-	            UpdateFullScreenPopupSize();
 	            return;
 	        }
+
+	        try { UpdateFullScreenPopupSize(); } catch { }
+	    }
+
+		    private void EnterInAppFullscreenIfNeeded()
+		    {
+		        var popup = FullScreenPopup;
+		        var popupRoot = FullScreenPopupRoot;
+		        var playerHost = FullScreenPlayerHost;
+		        var backdrop = FullScreenBackdrop;
+		        if (popup is null || popupRoot is null || playerHost is null)
+		        {
+		            return;
+		        }
+
+		        if (_inAppFullscreen)
+		        {
+		            UpdateFullScreenPopupSize();
+		            return;
+		        }
 
 	        TryCloseNavPaneForFullscreen();
 
@@ -1621,19 +1635,19 @@ public sealed partial class LivePage : Page
             // ignore
         }
 
-        try
-        {
-            if (root is not null && !ReferenceEquals(FullScreenPopup.XamlRoot, root))
-            {
-                FullScreenPopup.XamlRoot = root;
-            }
-        }
-        catch
-        {
-            // ignore
-        }
+	        try
+	        {
+	            if (root is not null && !ReferenceEquals(popup.XamlRoot, root))
+	            {
+	                popup.XamlRoot = root;
+	            }
+	        }
+	        catch
+	        {
+	            // ignore
+	        }
 
-        UpdateFullScreenPopupSize();
+	        UpdateFullScreenPopupSize();
 
         try
         {
@@ -1647,25 +1661,28 @@ public sealed partial class LivePage : Page
             // ignore
         }
 
-        try
-        {
-            FullScreenBackdrop.Opacity = 1;
-            Canvas.SetLeft(FullScreenPlayerHost, 0);
-            Canvas.SetTop(FullScreenPlayerHost, 0);
-            FullScreenPlayerHost.Width = FullScreenPopupRoot.Width;
-            FullScreenPlayerHost.Height = FullScreenPopupRoot.Height;
-        }
-        catch
-        {
-            // ignore
-        }
-
-        try { FullScreenPlayerHost.Content = PlayerSurface; } catch { }
-        try { FullScreenPopup.IsOpen = true; } catch { }
-	        _inAppFullscreen = true;
 	        try
 	        {
-	            ApplyContextLayerProgress(1);
+	            if (backdrop is not null)
+	            {
+	                backdrop.Opacity = 1;
+	            }
+	            Canvas.SetLeft(playerHost, 0);
+	            Canvas.SetTop(playerHost, 0);
+	            playerHost.Width = popupRoot.Width;
+	            playerHost.Height = popupRoot.Height;
+	        }
+	        catch
+	        {
+	            // ignore
+	        }
+
+	        try { playerHost.Content = PlayerSurface; } catch { }
+	        try { popup.IsOpen = true; } catch { }
+		        _inAppFullscreen = true;
+		        try
+		        {
+		            ApplyContextLayerProgress(1);
 	            UpdateFullscreenButtonIcon();
 	        }
 	        catch
@@ -1674,28 +1691,45 @@ public sealed partial class LivePage : Page
 	        }
 	    }
 
-	    private void ExitInAppFullscreenIfNeeded()
-	    {
-	        if (!_inAppFullscreen)
+			    private void ExitInAppFullscreenIfNeeded()
+			    {
+			        var popup = FullScreenPopup;
+			        var playerHost = FullScreenPlayerHost;
+
+			        if (!_inAppFullscreen)
+			        {
+			            try
+			            {
+			                if (popup is not null)
+			                {
+			                    popup.IsOpen = false;
+			                }
+			            }
+			            catch { }
+			            return;
+			        }
+
+			        CancelFullscreenAnimation();
+
+			        try
+			        {
+			            if (popup is not null)
+			            {
+			                popup.IsOpen = false;
+			            }
+			        }
+			        catch { }
+
+	        try
 	        {
-	            try { FullScreenPopup.IsOpen = false; } catch { }
-	            return;
+	            if (playerHost is not null && ReferenceEquals(playerHost.Content, PlayerSurface))
+	            {
+	                playerHost.Content = null;
+	            }
 	        }
-
-	        CancelFullscreenAnimation();
-
-	        try { FullScreenPopup.IsOpen = false; } catch { }
-
-        try
-        {
-            if (ReferenceEquals(FullScreenPlayerHost.Content, PlayerSurface))
-            {
-                FullScreenPlayerHost.Content = null;
-            }
-        }
-        catch
-        {
-            // ignore
+	        catch
+	        {
+	            // ignore
         }
 
         try { PlayerHost.Content = PlayerSurface; } catch { }
@@ -1726,40 +1760,48 @@ public sealed partial class LivePage : Page
 	        }
     }
 
-	    private void UpdateFullScreenPopupSize()
-	    {
-	        try
-	        {
-	            var targetRect = GetFullscreenTargetRect();
-	            if (targetRect.Width <= 1 || targetRect.Height <= 1)
+		    private void UpdateFullScreenPopupSize()
+		    {
+		        var popup = FullScreenPopup;
+		        var popupRoot = FullScreenPopupRoot;
+		        var playerHost = FullScreenPlayerHost;
+		        if (popup is null || popupRoot is null || playerHost is null)
+		        {
+		            return;
+		        }
+
+		        try
+		        {
+		            var targetRect = GetFullscreenTargetRect();
+		            if (targetRect.Width <= 1 || targetRect.Height <= 1)
 	            {
 	                return;
 	            }
 
-	            try
-	            {
-	                FullScreenPopup.HorizontalOffset = 0;
-	                FullScreenPopup.VerticalOffset = 0;
-	            }
-	            catch
-	            {
-	                // ignore
-	            }
+		            try
+		            {
+		                popup.HorizontalOffset = 0;
+		                popup.VerticalOffset = 0;
+		            }
+		            catch
+		            {
+		                // ignore
+		            }
 
-	            FullScreenPopupRoot.Width = targetRect.Width;
-	            FullScreenPopupRoot.Height = targetRect.Height;
+		            popupRoot.Width = targetRect.Width;
+		            popupRoot.Height = targetRect.Height;
 
-	            if (_inAppFullscreen && _fullscreenAnimCts is null)
-	            {
-	                Canvas.SetLeft(FullScreenPlayerHost, 0);
-	                Canvas.SetTop(FullScreenPlayerHost, 0);
-	                FullScreenPlayerHost.Width = targetRect.Width;
-	                FullScreenPlayerHost.Height = targetRect.Height;
-	            }
-	        }
-	        catch
-	        {
-	            // ignore
+		            if (_inAppFullscreen && _fullscreenAnimCts is null)
+		            {
+		                Canvas.SetLeft(playerHost, 0);
+		                Canvas.SetTop(playerHost, 0);
+		                playerHost.Width = targetRect.Width;
+		                playerHost.Height = targetRect.Height;
+		            }
+		        }
+		        catch
+		        {
+		            // ignore
 	        }
 	    }
 
@@ -1855,42 +1897,42 @@ public sealed partial class LivePage : Page
         return default;
     }
 
-    private Rect GetFullscreenTargetRect()
-    {
-        var b = TryGetMainWindowBounds();
-        if (b.Width > 1 && b.Height > 1)
-        {
-            return new Rect(0, 0, b.Width, b.Height);
-        }
+	    private Rect GetFullscreenTargetRect()
+	    {
+	        try
+	        {
+	            var xr = _fullscreenXamlRoot ?? FullScreenPopupRoot?.XamlRoot ?? XamlRoot;
+	            if (xr is not null && xr.Size.Width > 1 && xr.Size.Height > 1)
+	            {
+	                return new Rect(0, 0, xr.Size.Width, xr.Size.Height);
+	            }
+	        }
+	        catch
+	        {
+	            // ignore
+	        }
 
-        try
-        {
-            var xr = _fullscreenXamlRoot ?? FullScreenPopupRoot.XamlRoot ?? XamlRoot;
-            if (xr is not null && xr.Size.Width > 1 && xr.Size.Height > 1)
-            {
-                return new Rect(0, 0, xr.Size.Width, xr.Size.Height);
-            }
-        }
-        catch
-        {
-            // ignore
-        }
+	        var b = TryGetMainWindowBounds();
+	        if (b.Width > 1 && b.Height > 1)
+	        {
+	            return new Rect(0, 0, b.Width, b.Height);
+	        }
 
-        double w;
-        double h;
-        try { w = FullScreenPopupRoot.Width; } catch { w = 0; }
-        try { h = FullScreenPopupRoot.Height; } catch { h = 0; }
-        if (double.IsNaN(w) || double.IsInfinity(w) || w <= 0)
-        {
-            try { w = FullScreenPopupRoot.ActualWidth; } catch { w = 0; }
-        }
-        if (double.IsNaN(h) || double.IsInfinity(h) || h <= 0)
-        {
-            try { h = FullScreenPopupRoot.ActualHeight; } catch { h = 0; }
-        }
+	        double w;
+	        double h;
+	        try { w = FullScreenPopupRoot?.Width ?? 0; } catch { w = 0; }
+	        try { h = FullScreenPopupRoot?.Height ?? 0; } catch { h = 0; }
+	        if (double.IsNaN(w) || double.IsInfinity(w) || w <= 0)
+	        {
+	            try { w = FullScreenPopupRoot?.ActualWidth ?? 0; } catch { w = 0; }
+	        }
+	        if (double.IsNaN(h) || double.IsInfinity(h) || h <= 0)
+	        {
+	            try { h = FullScreenPopupRoot?.ActualHeight ?? 0; } catch { h = 0; }
+	        }
 
-        return new Rect(0, 0, w, h);
-    }
+	        return new Rect(0, 0, w, h);
+	    }
 
     private static void TryCloseNavPaneForFullscreen()
     {
@@ -1909,34 +1951,40 @@ public sealed partial class LivePage : Page
         }
     }
 
-    private Rect GetCurrentFullscreenHostRect()
-    {
-        double x;
-        double y;
-        try { x = Canvas.GetLeft(FullScreenPlayerHost); } catch { x = 0; }
-        try { y = Canvas.GetTop(FullScreenPlayerHost); } catch { y = 0; }
-        if (double.IsNaN(x) || double.IsInfinity(x))
-        {
-            x = 0;
-        }
-        if (double.IsNaN(y) || double.IsInfinity(y))
-        {
-            y = 0;
-        }
+	    private Rect GetCurrentFullscreenHostRect()
+	    {
+	        var playerHost = FullScreenPlayerHost;
+	        if (playerHost is null)
+	        {
+	            return default;
+	        }
 
-        var w = FullScreenPlayerHost.Width;
-        var h = FullScreenPlayerHost.Height;
-        if (double.IsNaN(w) || double.IsInfinity(w) || w <= 0)
-        {
-            w = FullScreenPlayerHost.ActualWidth;
-        }
-        if (double.IsNaN(h) || double.IsInfinity(h) || h <= 0)
-        {
-            h = FullScreenPlayerHost.ActualHeight;
-        }
+	        double x;
+	        double y;
+	        try { x = Canvas.GetLeft(playerHost); } catch { x = 0; }
+	        try { y = Canvas.GetTop(playerHost); } catch { y = 0; }
+	        if (double.IsNaN(x) || double.IsInfinity(x))
+	        {
+	            x = 0;
+	        }
+	        if (double.IsNaN(y) || double.IsInfinity(y))
+	        {
+	            y = 0;
+	        }
 
-        return new Rect(x, y, w, h);
-    }
+	        var w = playerHost.Width;
+	        var h = playerHost.Height;
+	        if (double.IsNaN(w) || double.IsInfinity(w) || w <= 0)
+	        {
+	            w = playerHost.ActualWidth;
+	        }
+	        if (double.IsNaN(h) || double.IsInfinity(h) || h <= 0)
+	        {
+	            h = playerHost.ActualHeight;
+	        }
+
+	        return new Rect(x, y, w, h);
+	    }
 
     private void ApplyContextLayerProgress(double progress)
     {
@@ -1998,6 +2046,19 @@ public sealed partial class LivePage : Page
             return;
         }
 
+        var popup = FullScreenPopup;
+        var popupRoot = FullScreenPopupRoot;
+        var backdrop = FullScreenBackdrop;
+        var playerHost = FullScreenPlayerHost;
+        if (popup is null || popupRoot is null || playerHost is null)
+        {
+            if (requestSystemFullscreen && App.MainWindowInstance?.IsSystemFullscreen != true)
+            {
+                try { App.MainWindowInstance?.TrySetSystemFullscreen(true); } catch { }
+            }
+            return;
+        }
+
 	        if (_inAppFullscreen)
 	        {
 	            if (requestSystemFullscreen && App.MainWindowInstance?.IsSystemFullscreen != true)
@@ -2050,11 +2111,11 @@ public sealed partial class LivePage : Page
         XamlRoot? root = null;
         try { root = rootElement.XamlRoot ?? XamlRoot; } catch { root = XamlRoot; }
 
-        await RunOnUiAsync(() =>
-        {
-            try
-            {
-                if (root is not null && !ReferenceEquals(_fullscreenXamlRoot, root))
+	        await RunOnUiAsync(() =>
+	        {
+	            try
+	            {
+	                if (root is not null && !ReferenceEquals(_fullscreenXamlRoot, root))
                 {
                     if (_fullscreenXamlRoot is not null)
                     {
@@ -2069,44 +2130,47 @@ public sealed partial class LivePage : Page
                 // ignore
             }
 
-            try
-            {
-                if (root is not null && !ReferenceEquals(FullScreenPopup.XamlRoot, root))
-                {
-                    FullScreenPopup.XamlRoot = root;
-                }
-            }
-            catch
-            {
-                // ignore
-            }
+	            try
+	            {
+	                if (root is not null && !ReferenceEquals(popup.XamlRoot, root))
+	                {
+	                    popup.XamlRoot = root;
+	                }
+	            }
+	            catch
+	            {
+	                // ignore
+	            }
 
-            UpdateFullScreenPopupSize();
+	            UpdateFullScreenPopupSize();
 
 		            try
 		            {
 		                // Make fullscreen background opaque immediately to avoid showing the "hole" left behind
 		                // when the player is temporarily removed from the normal layout during reparenting.
-		                FullScreenBackdrop.Opacity = 1;
+		                if (backdrop is not null)
+		                {
+		                    backdrop.Opacity = 1;
+		                }
 		                ApplyContextLayerProgress(0);
 
-	                if (ReferenceEquals(PlayerHost.Content, PlayerSurface))
-	                {
-	                    PlayerHost.Content = null;
-	                }
-                FullScreenPlayerHost.Content = PlayerSurface;
+		                if (ReferenceEquals(PlayerHost.Content, PlayerSurface))
+		                {
+		                    PlayerHost.Content = null;
+		                }
+	                playerHost.Content = PlayerSurface;
 
-                Canvas.SetLeft(FullScreenPlayerHost, fromRect.X);
-                Canvas.SetTop(FullScreenPlayerHost, fromRect.Y);
-	                FullScreenPlayerHost.Width = fromRect.Width;
-	                FullScreenPlayerHost.Height = fromRect.Height;
+	                Canvas.SetLeft(playerHost, fromRect.X);
+	                Canvas.SetTop(playerHost, fromRect.Y);
+		                playerHost.Width = fromRect.Width;
+		                playerHost.Height = fromRect.Height;
 
-	                FullScreenPopup.IsOpen = true;
-	                _inAppFullscreen = true;
-	                UpdateFullscreenButtonIcon();
-	            }
-            catch
-            {
+		                popup.IsOpen = true;
+		                _inAppFullscreen = true;
+		                UpdateFullscreenButtonIcon();
+		            }
+	            catch
+	            {
                 // ignore
             }
         });
@@ -2125,25 +2189,28 @@ public sealed partial class LivePage : Page
 	        }
 	        catch
 	        {
-	            toRect = new Rect(0, 0, FullScreenPopupRoot.Width, FullScreenPopupRoot.Height);
+	            toRect = new Rect(0, 0, popupRoot.Width, popupRoot.Height);
 	        }
 
 	        if (toRect.Width <= 1 || toRect.Height <= 1)
 	        {
 	            await RunOnUiAsync(() =>
 	            {
-	                try
-	                {
-		                    FullScreenBackdrop.Opacity = 1;
+		                try
+		                {
+		                    if (backdrop is not null)
+		                    {
+		                        backdrop.Opacity = 1;
+		                    }
 		                    ApplyContextLayerProgress(1);
-		                    Canvas.SetLeft(FullScreenPlayerHost, 0);
-		                    Canvas.SetTop(FullScreenPlayerHost, 0);
-		                    FullScreenPlayerHost.Width = FullScreenPopupRoot.Width;
-		                    FullScreenPlayerHost.Height = FullScreenPopupRoot.Height;
-	                }
-                catch
-                {
-                    // ignore
+		                    Canvas.SetLeft(playerHost, 0);
+		                    Canvas.SetTop(playerHost, 0);
+		                    playerHost.Width = popupRoot.Width;
+		                    playerHost.Height = popupRoot.Height;
+		                }
+	                catch
+	                {
+	                    // ignore
                 }
             });
             try { _fullscreenAnimCts?.Dispose(); } catch { }
@@ -2175,17 +2242,20 @@ public sealed partial class LivePage : Page
 
 	                await RunOnUiAsync(() =>
 	                {
-	                    try
-	                    {
-	                        Canvas.SetLeft(FullScreenPlayerHost, x);
-	                        Canvas.SetTop(FullScreenPlayerHost, y);
-	                        FullScreenPlayerHost.Width = w;
-	                        FullScreenPlayerHost.Height = h;
-	                        // Keep the backdrop fully opaque during the expansion so the app chrome / layout
-	                        // never peeks through as "white space" around the player.
-	                        FullScreenBackdrop.Opacity = 1;
-	                        ApplyContextLayerProgress(e);
-	                    }
+		                    try
+		                    {
+		                        Canvas.SetLeft(playerHost, x);
+		                        Canvas.SetTop(playerHost, y);
+		                        playerHost.Width = w;
+		                        playerHost.Height = h;
+		                        // Keep the backdrop fully opaque during the expansion so the app chrome / layout
+		                        // never peeks through as "white space" around the player.
+		                        if (backdrop is not null)
+		                        {
+		                            backdrop.Opacity = 1;
+		                        }
+		                        ApplyContextLayerProgress(e);
+		                    }
 	                    catch
 	                    {
 	                        // ignore
@@ -2206,24 +2276,28 @@ public sealed partial class LivePage : Page
             _fullscreenAnimCts = null;
         }
 
-		        await RunOnUiAsync(() =>
-		        {
-		            try
-		            {
-		                Canvas.SetLeft(FullScreenPlayerHost, 0);
-		                Canvas.SetTop(FullScreenPlayerHost, 0);
-		                FullScreenPlayerHost.Width = toRect.Width;
-		                FullScreenPlayerHost.Height = toRect.Height;
-		                FullScreenBackdrop.Opacity = 1;
-		                ApplyContextLayerProgress(1);
-		                UpdateFullscreenButtonIcon();
-		            }
+	        await RunOnUiAsync(() =>
+	        {
+	            try
+	            {
+	                Canvas.SetLeft(playerHost, 0);
+	                Canvas.SetTop(playerHost, 0);
+	                playerHost.Width = toRect.Width;
+	                playerHost.Height = toRect.Height;
+	                if (backdrop is not null)
+	                {
+	                    backdrop.Opacity = 1;
+	                }
+	                ApplyContextLayerProgress(1);
+	                UpdateFullScreenPopupSize();
+	                UpdateFullscreenButtonIcon();
+	            }
 	            catch
 	            {
 	                // ignore
-            }
-        });
-    }
+	            }
+	        });
+	    }
 
 	    private async Task ExitFullscreenCompositeAsync()
 	    {
@@ -2235,9 +2309,14 @@ public sealed partial class LivePage : Page
 	            return;
 	        }
 
-        CancelFullscreenAnimation();
-        _fullscreenAnimCts = new CancellationTokenSource();
-        var ct = _fullscreenAnimCts.Token;
+	        var popup = FullScreenPopup;
+	        var popupRoot = FullScreenPopupRoot;
+	        var backdrop = FullScreenBackdrop;
+	        var playerHost = FullScreenPlayerHost;
+
+	        CancelFullscreenAnimation();
+	        _fullscreenAnimCts = new CancellationTokenSource();
+	        var ct = _fullscreenAnimCts.Token;
 
 	        var rootElement = TryGetFullscreenRootElement();
 	        if (rootElement is null)
@@ -2287,7 +2366,7 @@ public sealed partial class LivePage : Page
 	            }
 	            catch
 	            {
-	                fromRect = new Rect(0, 0, FullScreenPopupRoot.Width, FullScreenPopupRoot.Height);
+	                fromRect = new Rect(0, 0, popupRoot?.Width ?? 0, popupRoot?.Height ?? 0);
 	            }
 	        }
 
@@ -2315,20 +2394,24 @@ public sealed partial class LivePage : Page
 
                 var p = 1.0 - e;
 
-                await RunOnUiAsync(() =>
-                {
-                    try
-                    {
-                        Canvas.SetLeft(FullScreenPlayerHost, x);
-                        Canvas.SetTop(FullScreenPlayerHost, y);
-                        FullScreenPlayerHost.Width = w;
-                        FullScreenPlayerHost.Height = h;
-                        FullScreenBackdrop.Opacity = p;
-                        ApplyContextLayerProgress(p);
-                    }
-                    catch
-                    {
-                        // ignore
+	                await RunOnUiAsync(() =>
+	                {
+	                    try
+	                    {
+	                        if (playerHost is null || backdrop is null)
+	                        {
+	                            return;
+	                        }
+	                        Canvas.SetLeft(playerHost, x);
+	                        Canvas.SetTop(playerHost, y);
+	                        playerHost.Width = w;
+	                        playerHost.Height = h;
+	                        backdrop.Opacity = p;
+	                        ApplyContextLayerProgress(p);
+	                    }
+	                    catch
+	                    {
+	                        // ignore
                     }
                 });
 
@@ -2351,20 +2434,26 @@ public sealed partial class LivePage : Page
 		            try
 		            {
 		                ApplyContextLayerProgress(0);
-		                FullScreenBackdrop.Opacity = 0;
-
-	                if (ReferenceEquals(FullScreenPlayerHost.Content, PlayerSurface))
+	                if (backdrop is not null)
 	                {
-                    FullScreenPlayerHost.Content = null;
-                }
-                PlayerHost.Content = PlayerSurface;
+	                    backdrop.Opacity = 0;
+	                }
 
-                FullScreenPopup.IsOpen = false;
+		                if (playerHost is not null && ReferenceEquals(playerHost.Content, PlayerSurface))
+		                {
+		                    playerHost.Content = null;
+		                }
+		                PlayerHost.Content = PlayerSurface;
 
-                if (_fullscreenXamlRoot is not null)
-                {
-                    try { _fullscreenXamlRoot.Changed -= OnXamlRootChanged; } catch { }
-                }
+		                if (popup is not null)
+		                {
+		                    popup.IsOpen = false;
+		                }
+
+		                if (_fullscreenXamlRoot is not null)
+		                {
+		                    try { _fullscreenXamlRoot.Changed -= OnXamlRootChanged; } catch { }
+		                }
 	                _fullscreenXamlRoot = null;
 	                _inAppFullscreen = false;
 
