@@ -362,32 +362,45 @@
                 Margin="6,0,0,0"
                 Style="{StaticResource ChaosCardBorderStyle}"
                 Padding="0">
-                <ListView
-                    x:Name="DanmakuList"
-                    ItemsSource="{x:Bind Rows, Mode=OneTime}"
-                    RenderTransformOrigin="0.5,0.5">
-                    <ListView.RenderTransform>
-                        <!-- Flip the list so items render bottom -> top (newest at bottom). -->
-                        <ScaleTransform ScaleY="-1" />
-                    </ListView.RenderTransform>
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="local:DanmakuRowVm">
-                            <Grid Padding="8" RenderTransformOrigin="0.5,0.5">
-                                <Grid.RenderTransform>
-                                    <!-- Flip each item back so text/images are readable. -->
-                                    <ScaleTransform ScaleY="-1" />
-                                </Grid.RenderTransform>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
+	                <ListView
+	                    x:Name="DanmakuList"
+	                    ItemsSource="{x:Bind Rows, Mode=OneTime}"
+	                    RenderTransformOrigin="0.5,0.5">
+	                    <ListView.RenderTransform>
+	                        <!-- Flip the list so items render bottom -> top (newest at bottom). -->
+	                        <ScaleTransform ScaleY="-1" />
+	                    </ListView.RenderTransform>
+	                    <ListView.ItemTemplate>
+	                        <DataTemplate x:DataType="local:DanmakuRowVm">
+	                            <Grid Padding="8" RenderTransformOrigin="0.5,0.5">
+	                                <Grid.RenderTransform>
+	                                    <!-- Flip each item back so text/images are readable. -->
+	                                    <ScaleTransform ScaleY="-1" />
+	                                </Grid.RenderTransform>
+	                                <Grid.ColumnDefinitions>
+	                                    <ColumnDefinition Width="Auto" />
+	                                    <ColumnDefinition Width="Auto" />
+	                                    <ColumnDefinition Width="*" />
+	                                </Grid.ColumnDefinitions>
 
-                                <TextBlock Text="{x:Bind DisplayText}" FontSize="12" TextWrapping="Wrap" />
-                                <Image Grid.Column="1" Width="24" Height="24" Margin="8,0,0,0" Source="{x:Bind Emote, Mode=OneWay}" />
-                            </Grid>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
+	                                <TextBlock Text="{x:Bind UserLabel, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" />
+	                                <Image
+	                                    Grid.Column="1"
+	                                    Width="24"
+	                                    Height="24"
+	                                    Margin="6,0,0,0"
+	                                    Visibility="{x:Bind EmoteVisibility, Mode=OneWay}"
+	                                    Source="{x:Bind Emote, Mode=OneWay}" />
+	                                <TextBlock
+	                                    Grid.Column="2"
+	                                    Margin="6,0,0,0"
+	                                    Text="{x:Bind MessageText, Mode=OneWay}"
+	                                    FontSize="12"
+	                                    TextWrapping="Wrap" />
+	                            </Grid>
+	                        </DataTemplate>
+	                    </ListView.ItemTemplate>
+	                </ListView>
             </Border>
         </Grid>
     </Grid>

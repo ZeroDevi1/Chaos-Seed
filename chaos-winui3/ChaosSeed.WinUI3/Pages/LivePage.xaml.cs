@@ -529,12 +529,12 @@ public sealed partial class LivePage : Page
         await BeginPlayAsync(input, vm.VariantId, sourceCover?.Source, sourceCover);
     }
 
-    private async Task BeginPlayAsync(
-        string input,
-        string variantId,
-        object? coverRef,
-        Image? animationSourceCover
-    )
+	    private async Task BeginPlayAsync(
+	        string input,
+	        string variantId,
+	        object? coverRef,
+	        Image? animationSourceCover
+	    )
     {
         if (_player is null)
         {
@@ -568,21 +568,39 @@ public sealed partial class LivePage : Page
             }
         }
 
-        _lastPlayRequest = new LastPlayRequest
-        {
-            Input = input,
-            VariantId = variantId,
-            CoverRef = coverRef,
-            PlaySeq = playSeq,
-        };
+	        _lastPlayRequest = new LastPlayRequest
+	        {
+	            Input = input,
+	            VariantId = variantId,
+	            CoverRef = coverRef,
+	            PlaySeq = playSeq,
+	        };
 
-        VariantGrid.IsEnabled = false;
-        _danmakuExpanded = false;
-        _danmakuWidthPx = Math.Clamp(_danmakuWidthPx, DanmakuMinWidthPx, DanmakuMaxWidthPx);
-        if (!keepFullscreen)
-        {
-            ExitInAppFullscreenIfNeeded();
-            ExitSystemFullscreenIfNeeded();
+	        VariantGrid.IsEnabled = false;
+	        if (wasPlaying && _danmakuExpanded)
+	        {
+	            // Best-effort: persist current splitter width before reopening so a quality switch doesn't
+	            // reset user layout.
+	            try
+	            {
+	                var w = (int)Math.Round(DanmakuCol.ActualWidth);
+	                _danmakuWidthPx = Math.Clamp(w, DanmakuMinWidthPx, DanmakuMaxWidthPx);
+	            }
+	            catch
+	            {
+	                // ignore
+	            }
+	        }
+
+	        if (!wasPlaying)
+	        {
+	            _danmakuExpanded = false;
+	        }
+	        _danmakuWidthPx = Math.Clamp(_danmakuWidthPx, DanmakuMinWidthPx, DanmakuMaxWidthPx);
+	        if (!keepFullscreen)
+	        {
+	            ExitInAppFullscreenIfNeeded();
+	            ExitSystemFullscreenIfNeeded();
         }
 
         // When we have a hero animation, avoid stacking a separate entrance transition that can make the
@@ -631,16 +649,17 @@ public sealed partial class LivePage : Page
             }
         }
 
-        if (useHeroAnim)
-        {
-            try { PlayerPane.Transitions = _playerPaneDefaultTransitions; } catch { }
-        }
+	        if (useHeroAnim)
+	        {
+	            try { PlayerPane.Transitions = _playerPaneDefaultTransitions; } catch { }
+	        }
 
-        await EnsureFlyleafHostReadyAsync(ct);
+	        try { await RunOnUiAsync(TryRefreshPlayerLayoutUnsafe); } catch { }
+	        await EnsureFlyleafHostReadyAsync(ct);
 
-        try
-        {
-            await StopCurrentAsync();
+	        try
+	        {
+	            await StopCurrentAsync();
 
             var res = await OpenLiveWithRetryAsync(input, variantId, ct);
             if (playSeq != _playSeq || ct.IsCancellationRequested)
@@ -765,12 +784,12 @@ public sealed partial class LivePage : Page
         }
     }
 
-    private async Task EnsureFlyleafHostReadyAsync(CancellationToken ct)
-    {
-        if (_dq.HasThreadAccess && FlyleafHost.ActualWidth > 1 && FlyleafHost.ActualHeight > 1)
-        {
-            return;
-        }
+	    private async Task EnsureFlyleafHostReadyAsync(CancellationToken ct)
+	    {
+	        if (_dq.HasThreadAccess && FlyleafHost.ActualWidth > 1 && FlyleafHost.ActualHeight > 1)
+	        {
+	            return;
+	        }
 
         var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -1203,6 +1222,32 @@ public sealed partial class LivePage : Page
 	        {
 	            // ignore
 	        }
+	    }
+
+	    private void TryRefreshPlayerLayoutUnsafe()
+	    {
+	        try
+	        {
+	            PlayerSurface.InvalidateMeasure();
+	            PlayerSurface.InvalidateArrange();
+	        }
+	        catch
+	        {
+	            // ignore
+	        }
+
+	        try
+	        {
+	            FlyleafHost.InvalidateMeasure();
+	            FlyleafHost.InvalidateArrange();
+	        }
+	        catch
+	        {
+	            // ignore
+	        }
+
+	        try { PlayerSurface.UpdateLayout(); } catch { }
+	        try { FlyleafHost.UpdateLayout(); } catch { }
 	    }
 
     private void UpdateDanmakuPane()
@@ -3065,6 +3110,20 @@ public sealed class DanmakuRowVm : INotifyPropertyChanged
     public string User { get; }
     public string Text { get; }
 
+    public string UserLabel => $"{User}:";
+
+    public string MessageText
+    {
+        get
+        {
+            if (_emote is not null && IsImagePlaceholderText(Text))
+            {
+                return "";
+            }
+            return Text;
+        }
+    }
+
     public string DisplayText
     {
         get
@@ -3076,6 +3135,8 @@ public sealed class DanmakuRowVm : INotifyPropertyChanged
             return $"{User}: {Text}";
         }
     }
+
+    public Visibility EmoteVisibility => _emote is null ? Visibility.Collapsed : Visibility.Visible;
 
     private BitmapImage? _emote;
     public BitmapImage? Emote
@@ -3090,6 +3151,8 @@ public sealed class DanmakuRowVm : INotifyPropertyChanged
             _emote = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(DisplayText));
+            OnPropertyChanged(nameof(MessageText));
+            OnPropertyChanged(nameof(EmoteVisibility));
         }
     }
 
