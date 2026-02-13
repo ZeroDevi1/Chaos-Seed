@@ -266,7 +266,9 @@ jobs:
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: "26.3.11579264"
+          # nttld/setup-ndk expects NDK release labels like r26d.
+          # Using a numeric revision here can 404 depending on the action's download mapping.
+          ndk-version: r26d
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@v2
