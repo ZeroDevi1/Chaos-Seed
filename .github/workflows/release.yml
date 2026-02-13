@@ -9,7 +9,51 @@ permissions:
   contents: write
 
 jobs:
+  create_release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub Release (if missing)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+
+      - name: Generate release notes and update body (existing release too)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = context.ref.replace('refs/tags/', '');
+
+            // Ask GitHub to generate release notes for this tag (based on commits/PRs since previous tag).
+            const notes = await github.request('POST /repos/{owner}/{repo}/releases/generate-notes', {
+              owner,
+              repo,
+              tag_name: tag,
+            });
+            const body = (notes.data && notes.data.body) ? String(notes.data.body) : '';
+
+            // Upsert the release body. We only override when it's empty to avoid clobbering manual edits.
+            const rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            const current = (rel.data.body || '').trim();
+            if (current.length === 0) {
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: rel.data.id,
+                tag_name: tag,
+                name: rel.data.name || tag,
+                body,
+              });
+              core.info(`Updated release body for ${tag}`);
+            } else {
+              core.info(`Release body already set for ${tag}; skipping overwrite`);
+            }
+
   windows:
+    needs: create_release
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -19,6 +63,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.93.0"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
@@ -123,3 +170,144 @@ jobs:
             dist/chaos-ffi-windows-x86_64.zip
             dist/chaos-winui3-windows-x86_64.zip
             dist/chaos-tauri-windows-x86_64.zip
+
+  ffi_linux:
+    needs: create_release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (1.93.0)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.0"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build chaos-ffi (release)
+        run: cargo build -p chaos-ffi --release
+
+      - name: Package chaos-ffi
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          pkg="dist/pkg-linux-x86_64"
+          rm -rf "$pkg"
+          mkdir -p "$pkg/include"
+          cp -f target/release/libchaos_ffi.so "$pkg/"
+          cp -f chaos-ffi/include/chaos_ffi_bindings.h "$pkg/include/"
+          tar -czf dist/chaos-ffi-linux-x86_64.tar.gz -C "$pkg" .
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/chaos-ffi-linux-x86_64.tar.gz
+
+  ffi_macos:
+    needs: create_release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (1.93.0)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.0"
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build chaos-ffi (release, aarch64)
+        run: cargo build -p chaos-ffi --release --target aarch64-apple-darwin
+
+      - name: Build chaos-ffi (release, x86_64)
+        run: cargo build -p chaos-ffi --release --target x86_64-apple-darwin
+
+      - name: Package chaos-ffi (universal2)
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          dylib_a="target/aarch64-apple-darwin/release/libchaos_ffi.dylib"
+          dylib_x="target/x86_64-apple-darwin/release/libchaos_ffi.dylib"
+          test -f "$dylib_a"
+          test -f "$dylib_x"
+          pkg="dist/pkg-macos-universal2"
+          rm -rf "$pkg"
+          mkdir -p "$pkg/include"
+          lipo -create -output "$pkg/libchaos_ffi.dylib" "$dylib_a" "$dylib_x"
+          cp -f chaos-ffi/include/chaos_ffi_bindings.h "$pkg/include/"
+          tar -czf dist/chaos-ffi-macos-universal2.tar.gz -C "$pkg" .
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/chaos-ffi-macos-universal2.tar.gz
+
+  ffi_android:
+    needs: create_release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (1.93.0)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.93.0"
+          targets: aarch64-linux-android,x86_64-linux-android,armv7-linux-androideabi
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: "26.3.11579264"
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Build chaos-ffi (release, arm64-v8a)
+        run: cargo ndk -t arm64-v8a build -p chaos-ffi --release
+
+      - name: Build chaos-ffi (release, x86_64)
+        run: cargo ndk -t x86_64 build -p chaos-ffi --release
+
+      - name: Build chaos-ffi (release, armeabi-v7a)
+        run: cargo ndk -t armeabi-v7a build -p chaos-ffi --release
+
+      - name: Package chaos-ffi (Android)
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          hdr="chaos-ffi/include/chaos_ffi_bindings.h"
+          test -f "$hdr"
+
+          mkpkg() {
+            local abi="$1"
+            local so_path="$2"
+            local out="dist/pkg-android-$abi"
+            rm -rf "$out"
+            mkdir -p "$out/include"
+            cp -f "$so_path" "$out/libchaos_ffi.so"
+            cp -f "$hdr" "$out/include/"
+            tar -czf "dist/chaos-ffi-android-$abi.tar.gz" -C "$out" .
+          }
+
+          mkpkg "arm64-v8a" "target/aarch64-linux-android/release/libchaos_ffi.so"
+          mkpkg "x86_64" "target/x86_64-linux-android/release/libchaos_ffi.so"
+          mkpkg "armeabi-v7a" "target/armv7-linux-androideabi/release/libchaos_ffi.so"
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/chaos-ffi-android-arm64-v8a.tar.gz
+            dist/chaos-ffi-android-x86_64.tar.gz
+            dist/chaos-ffi-android-armeabi-v7a.tar.gz
