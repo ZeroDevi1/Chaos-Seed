@@ -8,7 +8,8 @@ description = "Core business logic for chaos-seed (subtitle + danmaku)."
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Enable gzip/brotli decoding: some upstream APIs (e.g. Huya) may return compressed bodies even when we don't request it.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli", "deflate"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
