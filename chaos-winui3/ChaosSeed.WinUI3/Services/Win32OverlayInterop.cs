@@ -19,6 +19,11 @@ public static class Win32OverlayInterop
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_FRAMECHANGED = 0x0020;
 
+    // DWM attributes (Win11+).
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
     public static void EnsureLayered(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero)
@@ -71,6 +76,50 @@ public static class Win32OverlayInterop
             cyBottomHeight = -1,
         };
         _ = DwmExtendFrameIntoClientArea(hwnd, ref m);
+    }
+
+    public static void TryEnableWin11WindowChrome(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // Win11+ only; on older versions the attributes are ignored or fail.
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            return;
+        }
+
+        try
+        {
+            var round = DWMWCP_ROUND;
+            _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                ref round,
+                Marshal.SizeOf<int>()
+            );
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            var dark = 1;
+            _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ref dark,
+                Marshal.SizeOf<int>()
+            );
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     public static void SetClickThrough(IntPtr hwnd, bool enabled)
@@ -149,4 +198,12 @@ public static class Win32OverlayInterop
 
     [DllImport("dwmapi.dll", SetLastError = true)]
     private static extern int DwmExtendFrameIntoClientArea(IntPtr hWnd, ref MARGINS pMarInset);
+
+    [DllImport("dwmapi.dll", SetLastError = true)]
+    private static extern int DwmSetWindowAttribute(
+        IntPtr hwnd,
+        int dwAttribute,
+        ref int pvAttribute,
+        int cbAttribute
+    );
 }

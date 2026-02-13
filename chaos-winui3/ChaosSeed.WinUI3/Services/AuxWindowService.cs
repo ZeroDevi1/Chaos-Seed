@@ -8,7 +8,7 @@ public sealed class AuxWindowService
     public static AuxWindowService Instance { get; } = new();
 
     private DanmakuChatWindow? _chat;
-    private DanmakuOverlayWindow? _overlay;
+    private NativeDanmakuOverlayWindow? _overlay;
 
     private AuxWindowService()
     {
@@ -43,7 +43,7 @@ public sealed class AuxWindowService
         {
             try
             {
-                _overlay.Activate();
+                _overlay.Show();
                 return;
             }
             catch
@@ -52,11 +52,12 @@ public sealed class AuxWindowService
             }
         }
 
-        var w = new DanmakuOverlayWindow();
+        // Use a Win32 layered window for "true" transparency on Windows 11.
+        // The old WinUI3 overlay window is kept for reference/debugging but isn't the default.
+        var w = new NativeDanmakuOverlayWindow();
         _overlay = w;
         w.Closed += (_, _) => { if (ReferenceEquals(_overlay, w)) _overlay = null; };
-        ApplyStyle(w, allowBackdrop: false);
-        w.Activate();
+        w.Show();
     }
 
     private void ApplyStyleToOpenWindows()
@@ -68,7 +69,7 @@ public sealed class AuxWindowService
 
         if (_overlay is not null)
         {
-            ApplyStyle(_overlay, allowBackdrop: false);
+            // Native overlay doesn't support theme/backdrop.
         }
     }
 
@@ -79,4 +80,3 @@ public sealed class AuxWindowService
         WindowStyleService.ApplyBackdrop(w, allowBackdrop ? s.BackdropMode : BackdropMode.None);
     }
 }
-

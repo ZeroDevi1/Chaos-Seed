@@ -43,6 +43,22 @@ cargo xtask build-winui3 --release
    - 先解析并展示清晰度/线路卡片（含缩略图/标题/主播/状态等）
    - 点击卡片进入播放（Flyleaf）并连接右侧弹幕滚动（`用户名: 内容`；带表情的弹幕会尝试拉取图片并显示）
 
+## 弹幕 Overlay 透明悬浮窗（Win11）
+
+弹幕页提供 “打开 Overlay 悬浮窗”，默认使用 **Win32 layered window**（逐像素 alpha）实现真透明：只绘制弹幕文字/表情图，背景透出桌面/游戏画面。
+
+交互：
+- `Esc`：关闭 Overlay
+- `F2`：切换 `LOCK/EDIT`
+  - `LOCK`：内容区域鼠标穿透；窗口不移动；边缘/角落仍可 resize
+  - `EDIT`：拖动顶栏移动；边缘/角落 resize
+- 顶栏右上角 `X`：关闭
+- 双击顶栏：切换 `LOCK/EDIT`
+
+说明：
+- 表情图常见为 WebP：Overlay 使用 WinRT `BitmapDecoder` 解码（Win11 支持）。
+- 独占全屏游戏通常无法被普通 topmost 窗口覆盖；建议无边框窗口化/窗口化。
+
 ## 运行时依赖（FFmpeg / Flyleaf）
 
 WinUI3 播放内核切换为 Flyleaf（基于 FFmpeg/DirectX），需要在可执行文件同目录下提供 `FFmpeg/` 目录（包含 `avcodec-*.dll` 等共享库）。本仓库在 Windows 侧执行 `cargo xtask build-winui3` 时会自动运行脚本拉取并放置到 `chaos-winui3/ChaosSeed.WinUI3/FFmpeg/`，并由 `csproj` 复制到输出目录（当前默认拉取 `BtbN/FFmpeg-Builds` 的 `n8.0` win64 lgpl shared）。

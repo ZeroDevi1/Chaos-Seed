@@ -106,6 +106,22 @@ Windows 上一键构建：
 cargo xtask build-winui3 --release
 ```
 
+### 弹幕 Overlay 透明悬浮窗（Win11）
+
+WinUI3 的 XAML `Transparent` 在 Win11 上通常无法做到“桌面真透”，所以本项目的弹幕页 “打开 Overlay 悬浮窗” 默认使用 **Win32 layered window** 实现真透明（只绘制文字/表情图，背景透出桌面/游戏画面）。
+
+交互：
+- `Esc`：关闭 Overlay
+- `F2`：切换模式（`LOCK`/`EDIT`）
+  - `LOCK`：不移动（除顶栏按钮），内容区域鼠标穿透；边缘/角落仍可 resize
+  - `EDIT`：可拖动顶栏移动窗口；可 resize
+- 顶栏右上角 `X`：关闭 Overlay
+- 双击顶栏：切换 `LOCK/EDIT`
+
+备注：
+- 表情图可能是 WebP：Overlay 内部使用 WinRT `BitmapDecoder` 解码（Win11 支持）。
+- 独占全屏游戏通常无法被普通 topmost 窗口覆盖；建议使用无边框窗口化/窗口化。
+
 ### 渲染器切换（手动）
 
 - Skia renderer：
