@@ -5,6 +5,30 @@ use crate::danmaku::model::Site;
 use super::super::client::{LiveDirectoryClient, LiveDirectoryError};
 use super::super::model::{LiveCategory, LiveRoomCard, LiveRoomList, LiveSubCategory};
 
+fn as_id_string(v: Option<&Value>) -> String {
+    let Some(v) = v else {
+        return String::new();
+    };
+    if let Some(n) = v.as_i64() {
+        return n.to_string();
+    }
+    if let Some(n) = v.as_u64() {
+        return n.to_string();
+    }
+    if let Some(n) = v.as_f64() {
+        if n.is_finite() {
+            return (n as i64).to_string();
+        }
+    }
+    if let Some(s) = v.as_str() {
+        let t = s.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    String::new()
+}
+
 fn parse_bili_code(err: &LiveDirectoryError) -> Option<i64> {
     let LiveDirectoryError::Parse(s) = err else {
         return None;
@@ -99,11 +123,7 @@ pub async fn get_categories(
 
     let mut out = Vec::new();
     for item in arr {
-        let id = item
-            .get("id")
-            .and_then(|x| x.as_i64())
-            .map(|n| n.to_string())
-            .unwrap_or_default();
+        let id = as_id_string(item.get("id"));
         let name = item
             .get("name")
             .and_then(|x| x.as_str())
@@ -116,21 +136,13 @@ pub async fn get_categories(
             .unwrap_or_default();
         let mut subs = Vec::new();
         for sub in list {
-            let sid = sub
-                .get("id")
-                .and_then(|x| x.as_i64())
-                .map(|n| n.to_string())
-                .unwrap_or_default();
+            let sid = as_id_string(sub.get("id"));
             let sname = sub
                 .get("name")
                 .and_then(|x| x.as_str())
                 .unwrap_or("")
                 .to_string();
-            let parent_id = sub
-                .get("parent_id")
-                .and_then(|x| x.as_i64())
-                .map(|n| n.to_string())
-                .unwrap_or_default();
+            let parent_id = as_id_string(sub.get("parent_id"));
             let pic = sub
                 .get("pic")
                 .and_then(|x| x.as_str())

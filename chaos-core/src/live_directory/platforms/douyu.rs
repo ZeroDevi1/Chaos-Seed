@@ -9,6 +9,27 @@ fn make_input(room_id: &str) -> String {
     format!("douyu:{room_id}")
 }
 
+fn as_i64(v: Option<&Value>) -> i64 {
+    let Some(v) = v else {
+        return 0;
+    };
+    if let Some(n) = v.as_i64() {
+        return n;
+    }
+    if let Some(n) = v.as_u64() {
+        return n as i64;
+    }
+    if let Some(n) = v.as_f64() {
+        if n.is_finite() {
+            return n as i64;
+        }
+    }
+    if let Some(s) = v.as_str() {
+        return s.trim().parse::<i64>().unwrap_or(0);
+    }
+    0
+}
+
 async fn get_json(
     client: &LiveDirectoryClient,
     url: &str,
@@ -172,11 +193,12 @@ pub async fn get_recommend_rooms(
         });
     }
 
-    let has_more = (v
-        .pointer("/data/pgcnt")
-        .and_then(|x| x.as_i64())
-        .unwrap_or(0) as u32)
-        > page.max(1);
+    let pgcnt = as_i64(v.pointer("/data/pgcnt"));
+    let has_more = if pgcnt > 0 {
+        (page.max(1) as i64) < pgcnt
+    } else {
+        !items.is_empty()
+    };
     Ok(LiveRoomList { has_more, items })
 }
 
@@ -234,11 +256,12 @@ pub async fn get_category_rooms(
             online,
         });
     }
-    let pgcnt = v
-        .pointer("/data/pgcnt")
-        .and_then(|x| x.as_i64())
-        .unwrap_or(0);
-    let has_more = (page.max(1) as i64) < pgcnt;
+    let pgcnt = as_i64(v.pointer("/data/pgcnt"));
+    let has_more = if pgcnt > 0 {
+        (page.max(1) as i64) < pgcnt
+    } else {
+        !items.is_empty()
+    };
     Ok(LiveRoomList { has_more, items })
 }
 
