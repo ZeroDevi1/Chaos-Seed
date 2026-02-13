@@ -389,6 +389,10 @@ params：
 
 result：`LiveDirRoomListResult`（同上）。
 
+说明（BiliLive 风控）：
+- 若遇到 `error.code = -32603` 且 `error.message` 中包含 B 站 `code = -352/-412`，通常表示请求被拦截/设备校验。
+- core 会做 best-effort 的自动重试/回退；如果仍失败，请稍后重试或更换网络环境。
+
 ### `liveDir.searchRooms`
 
 params：

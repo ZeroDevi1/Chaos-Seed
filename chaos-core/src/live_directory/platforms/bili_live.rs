@@ -325,6 +325,94 @@ pub async fn get_category_rooms(
         .trim_end_matches('/');
     let url = format!("{base}/xlive/web-interface/v1/second/getList");
 
+    async fn fallback_v3(
+        client: &LiveDirectoryClient,
+        base: &str,
+        pid: &str,
+        cid: &str,
+        page: u32,
+    ) -> Result<LiveRoomList, LiveDirectoryError> {
+        // More stable (and currently less strict) endpoint for area listings.
+        // This avoids WBI/w_webid interception issues that some users hit on `second/getList`.
+        let url = format!("{base}/room/v3/area/getRoomList");
+        let page_size: i64 = 30;
+        let v = get_json(
+            client,
+            &url,
+            &[
+                ("platform".to_string(), "web".to_string()),
+                ("parent_area_id".to_string(), pid.to_string()),
+                ("area_id".to_string(), cid.to_string()),
+                ("sort_type".to_string(), "online".to_string()),
+                ("page".to_string(), page.max(1).to_string()),
+                ("page_size".to_string(), page_size.to_string()),
+            ],
+        )
+        .await?;
+
+        let count = v
+            .pointer("/data/count")
+            .and_then(|x| x.as_i64())
+            .unwrap_or(0)
+            .max(0);
+        let list = v
+            .pointer("/data/list")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut items = Vec::new();
+        for x in list {
+            let rid = x
+                .get("roomid")
+                .and_then(|y| y.as_i64())
+                .map(|n| n.to_string())
+                .unwrap_or_default();
+            if rid.is_empty() {
+                continue;
+            }
+            let title = x
+                .get("title")
+                .and_then(|y| y.as_str())
+                .unwrap_or("")
+                .to_string();
+            let cover = x
+                .get("user_cover")
+                .or_else(|| x.get("cover"))
+                .or_else(|| x.get("system_cover"))
+                .and_then(|y| y.as_str())
+                .and_then(abs_cover)
+                .map(|u| {
+                    if u.contains('@') {
+                        u
+                    } else {
+                        format!("{u}@400w.jpg")
+                    }
+                });
+            let user_name = x
+                .get("uname")
+                .and_then(|y| y.as_str())
+                .map(|s| s.to_string());
+            let online = x.get("online").and_then(|y| y.as_i64());
+            items.push(LiveRoomCard {
+                site: Site::BiliLive,
+                room_id: rid.clone(),
+                input: make_input(&rid),
+                title,
+                cover,
+                user_name,
+                online,
+            });
+        }
+
+        let has_more = if count > 0 {
+            (page.max(1) as i64) * page_size < count
+        } else {
+            !items.is_empty()
+        };
+        Ok(LiveRoomList { has_more, items })
+    }
+
     let mut last_err: Option<LiveDirectoryError> = None;
     let v = 'outer: loop {
         for attempt in 0..2 {
@@ -397,8 +485,15 @@ pub async fn get_category_rooms(
                 }
             }
         }
-        return Err(last_err
-            .unwrap_or_else(|| LiveDirectoryError::Parse("bilibili request failed".to_string())));
+        // If the signed endpoint gets intercepted, fall back to a more stable one.
+        if let Some(e) = last_err.as_ref() {
+            if parse_bili_code(e).is_some_and(is_retryable_bili_code) {
+                return fallback_v3(client, base, pid, cid, page).await;
+            }
+        }
+        return Err(last_err.unwrap_or_else(|| {
+            LiveDirectoryError::Parse("bilibili request failed".to_string())
+        }));
     };
     let has_more = v
         .pointer("/data/has_more")
@@ -453,6 +548,58 @@ pub async fn get_category_rooms(
     }
 
     Ok(LiveRoomList { has_more, items })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bili_area_room_list_has_more_from_count() {
+        // Mirrors the shape returned by `/room/v3/area/getRoomList`.
+        let v: Value = serde_json::from_str(
+            r#"{
+                "code": 0,
+                "data": {
+                    "count": 31,
+                    "list": [
+                        {
+                            "roomid": 1,
+                            "title": "t",
+                            "uname": "u",
+                            "online": 3,
+                            "user_cover": "//i0.hdslb.com/a.jpg"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        // Inline a minimal version of the fallback parsing for a deterministic unit test.
+        let page = 1u32;
+        let page_size: i64 = 30;
+        let count = v
+            .pointer("/data/count")
+            .and_then(|x| x.as_i64())
+            .unwrap_or(0)
+            .max(0);
+        assert_eq!(count, 31);
+        assert!((page as i64) * page_size < count);
+
+        let list = v
+            .pointer("/data/list")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let x = &list[0];
+        let cover = x
+            .get("user_cover")
+            .and_then(|y| y.as_str())
+            .and_then(abs_cover)
+            .unwrap();
+        assert!(cover.starts_with("https://"));
+    }
 }
 
 pub async fn search_rooms(

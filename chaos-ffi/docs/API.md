@@ -430,6 +430,14 @@ char* err = chaos_ffi_last_error_json();
 
 返回：同 `LiveDirRoomListResult`。
 
+#### B 站风控/拦截说明（-352 / -412）
+
+在部分网络环境下，B 站接口可能返回 `code = -352` 或 `code = -412`（常见于请求被拦截/签名或设备校验）。
+
+`chaos-core` 在实现上会做 best-effort 的自动处理（例如刷新 buvid / wbi key，并在必要时回退到更稳定的接口）；如果仍然失败：
+- 请稍后重试（可能是临时风控/频控）。
+- 尝试更换网络环境（公司代理/透明代理有时会触发拦截）。
+
 ### `char* chaos_live_dir_search_rooms_json(const char* site_utf8, const char* keyword_utf8, uint32_t page)`
 
 站内搜索（仅当前平台）。
