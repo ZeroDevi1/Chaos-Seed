@@ -34,6 +34,11 @@ public sealed class SettingsService
                 try
                 {
                     Current = JsonSerializer.Deserialize<AppSettings>(json!) ?? new AppSettings();
+                    var changed = ApplyDefaultsLocked();
+                    if (changed)
+                    {
+                        PersistLocked();
+                    }
                     return;
                 }
                 catch
@@ -43,6 +48,7 @@ public sealed class SettingsService
             }
 
             Current = new AppSettings();
+            _ = ApplyDefaultsLocked();
             PersistLocked();
         }
     }
@@ -62,6 +68,25 @@ public sealed class SettingsService
     {
         var json = JsonSerializer.Serialize(Current);
         _store.Save(SettingsKey, json);
+    }
+
+    private bool ApplyDefaultsLocked()
+    {
+        var changed = false;
+
+        // If user has an old settings payload where these are empty strings, normalize to defaults.
+        if (string.IsNullOrWhiteSpace(Current.NeteaseBaseUrls))
+        {
+            Current.NeteaseBaseUrls = new AppSettings().NeteaseBaseUrls;
+            changed = true;
+        }
+        if (string.IsNullOrWhiteSpace(Current.NeteaseAnonymousCookieUrl))
+        {
+            Current.NeteaseAnonymousCookieUrl = "/register/anonimous";
+            changed = true;
+        }
+
+        return changed;
     }
 
     private static ISettingsStore? TryCreateApplicationDataStore()

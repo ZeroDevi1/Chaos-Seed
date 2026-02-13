@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
 use std::path::PathBuf;
 use std::ptr;
@@ -13,10 +13,18 @@ use std::time::Duration;
 use libc::{c_char, c_void};
 
 use chaos_core::live_directory;
-use chaos_core::{danmaku, livestream, lyrics, now_playing, subtitle};
-use chaos_proto::{LiveDirCategory, LiveDirRoomCard, LiveDirRoomListResult, LiveDirSubCategory};
+use chaos_core::{danmaku, livestream, lyrics, music, now_playing, subtitle};
+use chaos_proto::{
+    LiveDirCategory, LiveDirRoomCard, LiveDirRoomListResult, LiveDirSubCategory,
+    // music (FFI JSON shape follows chaos-proto)
+    KugouUserInfo, MusicAlbum, MusicAlbumTracksParams, MusicArtist, MusicArtistAlbumsParams,
+    MusicAuthState, MusicDownloadJobResult, MusicDownloadStartParams, MusicDownloadStatus,
+    MusicDownloadTarget, MusicDownloadTotals, MusicJobState, MusicLoginQr,
+    MusicLoginQrPollResult, MusicLoginQrState, MusicLoginType, MusicProviderConfig, MusicSearchParams,
+    MusicService, MusicTrack, OkReply, QqMusicCookie,
+};
 
-const API_VERSION: u32 = 5;
+const API_VERSION: u32 = 6;
 
 fn ensure_rustls_provider() {
     static ONCE: OnceLock<()> = OnceLock::new();
@@ -56,6 +64,947 @@ fn ok_json(s: String) -> *mut c_char {
         Ok(c) => c.into_raw(),
         Err(_) => {
             set_last_error("invalid utf-8/embedded NUL", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+// -----------------------------
+// Music (FFI JSON)
+// -----------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_config_set_json(config_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(config_json_utf8, "config_json_utf8")?;
+        let cfg: MusicProviderConfig = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid config_json_utf8", Some(e.to_string()));
+        })?;
+        let cfg = map_music_provider_config_to_core(cfg);
+
+        let st = music_state();
+        let mut locked = st.lock().map_err(|_| {
+            set_last_error("music state poisoned", None);
+        })?;
+        locked.cfg = cfg.clone();
+        locked.client.set_config(cfg);
+
+        serde_json::to_string(&OkReply { ok: true }).map_err(|e| {
+            set_last_error("failed to serialize ok reply", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_config_set_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_search_tracks_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: MusicSearchParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let keyword = params.keyword.trim().to_string();
+        if keyword.is_empty() {
+            return serde_json::to_string::<Vec<MusicTrack>>(&vec![]).map_err(|e| {
+                set_last_error("failed to serialize tracks", Some(e.to_string()));
+            });
+        }
+
+        let client = {
+            let st = music_state();
+            st.lock()
+                .map_err(|_| {
+                    set_last_error("music state poisoned", None);
+                })?
+                .client
+                .clone()
+        };
+
+        let out = runtime()
+            .block_on(client.search_tracks(
+                map_music_service_to_core(params.service),
+                &keyword,
+                params.page.max(1),
+                params.page_size.clamp(1, 50).max(1),
+            ))
+            .map_err(|e| {
+                set_last_error("music search tracks failed", Some(e.to_string()));
+            })?;
+
+        let mapped: Vec<MusicTrack> = out.into_iter().map(map_music_track_to_proto).collect();
+        serde_json::to_string(&mapped).map_err(|e| {
+            set_last_error("failed to serialize tracks", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_search_tracks_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_search_albums_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: MusicSearchParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let keyword = params.keyword.trim().to_string();
+        if keyword.is_empty() {
+            return serde_json::to_string::<Vec<MusicAlbum>>(&vec![]).map_err(|e| {
+                set_last_error("failed to serialize albums", Some(e.to_string()));
+            });
+        }
+
+        let client = {
+            let st = music_state();
+            st.lock()
+                .map_err(|_| {
+                    set_last_error("music state poisoned", None);
+                })?
+                .client
+                .clone()
+        };
+
+        let out = runtime()
+            .block_on(client.search_albums(
+                map_music_service_to_core(params.service),
+                &keyword,
+                params.page.max(1),
+                params.page_size.clamp(1, 50).max(1),
+            ))
+            .map_err(|e| {
+                set_last_error("music search albums failed", Some(e.to_string()));
+            })?;
+
+        let mapped: Vec<MusicAlbum> = out.into_iter().map(map_music_album_to_proto).collect();
+        serde_json::to_string(&mapped).map_err(|e| {
+            set_last_error("failed to serialize albums", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_search_albums_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_search_artists_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: MusicSearchParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let keyword = params.keyword.trim().to_string();
+        if keyword.is_empty() {
+            return serde_json::to_string::<Vec<MusicArtist>>(&vec![]).map_err(|e| {
+                set_last_error("failed to serialize artists", Some(e.to_string()));
+            });
+        }
+
+        let client = {
+            let st = music_state();
+            st.lock()
+                .map_err(|_| {
+                    set_last_error("music state poisoned", None);
+                })?
+                .client
+                .clone()
+        };
+
+        let out = runtime()
+            .block_on(client.search_artists(
+                map_music_service_to_core(params.service),
+                &keyword,
+                params.page.max(1),
+                params.page_size.clamp(1, 50).max(1),
+            ))
+            .map_err(|e| {
+                set_last_error("music search artists failed", Some(e.to_string()));
+            })?;
+
+        let mapped: Vec<MusicArtist> = out.into_iter().map(map_music_artist_to_proto).collect();
+        serde_json::to_string(&mapped).map_err(|e| {
+            set_last_error("failed to serialize artists", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_search_artists_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_album_tracks_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: MusicAlbumTracksParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let client = {
+            let st = music_state();
+            st.lock()
+                .map_err(|_| {
+                    set_last_error("music state poisoned", None);
+                })?
+                .client
+                .clone()
+        };
+
+        let out = runtime()
+            .block_on(client.album_tracks(
+                map_music_service_to_core(params.service),
+                params.album_id.trim(),
+            ))
+            .map_err(|e| {
+                set_last_error("music albumTracks failed", Some(e.to_string()));
+            })?;
+        let mapped: Vec<MusicTrack> = out.into_iter().map(map_music_track_to_proto).collect();
+        serde_json::to_string(&mapped).map_err(|e| {
+            set_last_error("failed to serialize tracks", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_album_tracks_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_artist_albums_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: MusicArtistAlbumsParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let client = {
+            let st = music_state();
+            st.lock()
+                .map_err(|_| {
+                    set_last_error("music state poisoned", None);
+                })?
+                .client
+                .clone()
+        };
+
+        let out = runtime()
+            .block_on(client.artist_albums(
+                map_music_service_to_core(params.service),
+                params.artist_id.trim(),
+            ))
+            .map_err(|e| {
+                set_last_error("music artistAlbums failed", Some(e.to_string()));
+            })?;
+        let mapped: Vec<MusicAlbum> = out.into_iter().map(map_music_album_to_proto).collect();
+        serde_json::to_string(&mapped).map_err(|e| {
+            set_last_error("failed to serialize albums", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_artist_albums_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+fn parse_login_type(s: &str) -> Result<MusicLoginType, ()> {
+    let p = s.trim().to_ascii_lowercase();
+    match p.as_str() {
+        "qq" => Ok(MusicLoginType::Qq),
+        "wechat" | "wx" => Ok(MusicLoginType::Wechat),
+        _ => Err(()),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_qq_login_qr_create_json(
+    login_type_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let lt = require_cstr(login_type_utf8, "login_type_utf8")?;
+        let login_type = parse_login_type(lt).map_err(|_| {
+            set_last_error("invalid login_type_utf8 (expected: qq|wechat)", None);
+        })?;
+
+        let http = music::providers::qq_login::new_login_client().map_err(|e| {
+            set_last_error("failed to init qq login client", Some(e.to_string()));
+        })?;
+
+        let core_lt = match login_type {
+            MusicLoginType::Qq => music::model::MusicLoginType::Qq,
+            MusicLoginType::Wechat => music::model::MusicLoginType::Wechat,
+        };
+        let (identifier, mime, bytes) = runtime()
+            .block_on(music::providers::qq_login::create_login_qr(&http, core_lt))
+            .map_err(|e| {
+                set_last_error("qq login qr create failed", Some(e.to_string()));
+            })?;
+
+        let session_id = gen_session_id("qqlogin");
+        let created_at_unix_ms = now_unix_ms();
+        let base64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+
+        {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.qq_sessions.insert(
+                session_id.clone(),
+                QqLoginSession {
+                    created_at_ms: created_at_unix_ms,
+                    login_type,
+                    identifier: identifier.clone(),
+                    http,
+                },
+            );
+        }
+
+        let qr = MusicLoginQr {
+            session_id,
+            login_type,
+            mime,
+            base64,
+            identifier,
+            created_at_unix_ms,
+        };
+        serde_json::to_string(&qr).map_err(|e| {
+            set_last_error("failed to serialize login qr", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_qq_login_qr_create_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_qq_login_qr_poll_json(
+    session_id_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?.trim().to_string();
+        if sid.is_empty() {
+            set_last_error("session_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        let (login_type, identifier, http, created_at_ms) = {
+            let st = music_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            let Some(s) = locked.qq_sessions.get(&sid) else {
+                set_last_error("session not found", None);
+                return Err(());
+            };
+            (s.login_type, s.identifier.clone(), s.http.clone(), s.created_at_ms)
+        };
+
+        if now_unix_ms().saturating_sub(created_at_ms) > 5 * 60 * 1000 {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.qq_sessions.remove(&sid);
+            let out = MusicLoginQrPollResult {
+                session_id: sid,
+                state: MusicLoginQrState::Timeout,
+                message: Some("login session timeout".to_string()),
+                cookie: None,
+                kugou_user: None,
+            };
+            return serde_json::to_string(&out).map_err(|e| {
+                set_last_error("failed to serialize poll result", Some(e.to_string()));
+            });
+        }
+
+        let core_lt = match login_type {
+            MusicLoginType::Qq => music::model::MusicLoginType::Qq,
+            MusicLoginType::Wechat => music::model::MusicLoginType::Wechat,
+        };
+        let (state, msg, sig_or_code, uin) = runtime()
+            .block_on(music::providers::qq_login::poll_login_qr(
+                &http,
+                core_lt,
+                &identifier,
+            ))
+            .map_err(|e| {
+                set_last_error("qq login qr poll failed", Some(e.to_string()));
+            })?;
+
+        let state_proto = match state {
+            music::model::MusicLoginQrState::Scan => MusicLoginQrState::Scan,
+            music::model::MusicLoginQrState::Confirm => MusicLoginQrState::Confirm,
+            music::model::MusicLoginQrState::Done => MusicLoginQrState::Done,
+            music::model::MusicLoginQrState::Timeout => MusicLoginQrState::Timeout,
+            music::model::MusicLoginQrState::Refuse => MusicLoginQrState::Refuse,
+            music::model::MusicLoginQrState::Other => MusicLoginQrState::Other,
+        };
+
+        if state_proto != MusicLoginQrState::Done {
+            let out = MusicLoginQrPollResult {
+                session_id: sid,
+                state: state_proto,
+                message: msg,
+                cookie: None,
+                kugou_user: None,
+            };
+            return serde_json::to_string(&out).map_err(|e| {
+                set_last_error("failed to serialize poll result", Some(e.to_string()));
+            });
+        }
+
+        let cookie = match login_type {
+            MusicLoginType::Qq => {
+                let sigx = sig_or_code.ok_or_else(|| {
+                    set_last_error("missing ptsigx", None);
+                })?;
+                let uin = uin.ok_or_else(|| {
+                    set_last_error("missing uin", None);
+                })?;
+                let code = runtime()
+                    .block_on(music::providers::qq_login::authorize_qq_and_get_code(
+                        &http, &sigx, &uin,
+                    ))
+                    .map_err(|e| {
+                        set_last_error("qq oauth authorize failed", Some(e.to_string()));
+                    })?;
+                let c = runtime()
+                    .block_on(music::providers::qq_login::exchange_code_for_cookie(
+                        &http,
+                        &code,
+                        music::model::MusicLoginType::Qq,
+                    ))
+                    .map_err(|e| {
+                        set_last_error("qq exchange cookie failed", Some(e.to_string()));
+                    })?;
+                map_music_qq_cookie_to_proto(c)
+            }
+            MusicLoginType::Wechat => {
+                let wx_code = sig_or_code.ok_or_else(|| {
+                    set_last_error("missing wx_code", None);
+                })?;
+                let c = runtime()
+                    .block_on(music::providers::qq_login::exchange_code_for_cookie(
+                        &http,
+                        &wx_code,
+                        music::model::MusicLoginType::Wechat,
+                    ))
+                    .map_err(|e| {
+                        set_last_error("wechat exchange cookie failed", Some(e.to_string()));
+                    })?;
+                map_music_qq_cookie_to_proto(c)
+            }
+        };
+
+        {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.qq_sessions.remove(&sid);
+        }
+
+        let out = MusicLoginQrPollResult {
+            session_id: sid,
+            state: MusicLoginQrState::Done,
+            message: None,
+            cookie: Some(cookie),
+            kugou_user: None,
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize poll result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_qq_login_qr_poll_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_qq_refresh_cookie_json(cookie_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(cookie_json_utf8, "cookie_json_utf8")?;
+        let cookie: QqMusicCookie = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid cookie_json_utf8", Some(e.to_string()));
+        })?;
+        let core_cookie = map_music_qq_cookie_to_core(cookie);
+
+        let http = music::providers::qq_login::new_login_client().map_err(|e| {
+            set_last_error("failed to init qq login client", Some(e.to_string()));
+        })?;
+        let out = runtime()
+            .block_on(music::providers::qq_login::refresh_cookie(&http, &core_cookie))
+            .map_err(|e| {
+                set_last_error("qq refresh cookie failed", Some(e.to_string()));
+            })?;
+        let out = map_music_qq_cookie_to_proto(out);
+
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize cookie", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_qq_refresh_cookie_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_kugou_login_qr_create_json(
+    login_type_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let lt = require_cstr(login_type_utf8, "login_type_utf8")?;
+        let login_type = parse_login_type(lt).map_err(|_| {
+            set_last_error("invalid login_type_utf8 (expected: qq|wechat)", None);
+        })?;
+
+        let (client, cfg) = {
+            let st = music_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            (locked.client.clone(), locked.cfg.clone())
+        };
+
+        let (identifier, mime, base64) = match login_type {
+            MusicLoginType::Qq => {
+                let qr = runtime()
+                    .block_on(music::providers::kugou::kugou_qr_create(
+                        &client.http,
+                        &cfg,
+                        client.timeout,
+                    ))
+                    .map_err(|e| {
+                        set_last_error("kugou qr create failed", Some(e.to_string()));
+                    })?;
+                (qr.key, "image/png".to_string(), qr.image_base64)
+            }
+            MusicLoginType::Wechat => {
+                let (uuid, data_uri) = runtime()
+                    .block_on(music::providers::kugou::kugou_wx_qr_create(
+                        &client.http,
+                        &cfg,
+                        client.timeout,
+                    ))
+                    .map_err(|e| {
+                        set_last_error("kugou wechat qr create failed", Some(e.to_string()));
+                    })?;
+                if let Some((meta, b64)) = data_uri.split_once(',') {
+                    let mime = meta
+                        .strip_prefix("data:")
+                        .and_then(|s| s.split(';').next())
+                        .unwrap_or("image/jpeg");
+                    (uuid, mime.to_string(), b64.to_string())
+                } else {
+                    (uuid, "image/jpeg".to_string(), data_uri)
+                }
+            }
+        };
+
+        let session_id = gen_session_id("kugoulogin");
+        let created_at_unix_ms = now_unix_ms();
+        {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.kugou_sessions.insert(
+                session_id.clone(),
+                KugouLoginSession {
+                    created_at_ms: created_at_unix_ms,
+                    login_type,
+                    identifier: identifier.clone(),
+                },
+            );
+        }
+
+        let qr = MusicLoginQr {
+            session_id,
+            login_type,
+            mime,
+            base64,
+            identifier,
+            created_at_unix_ms,
+        };
+        serde_json::to_string(&qr).map_err(|e| {
+            set_last_error("failed to serialize login qr", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_kugou_login_qr_create_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_kugou_login_qr_poll_json(
+    session_id_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?.trim().to_string();
+        if sid.is_empty() {
+            set_last_error("session_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        let (login_type, identifier, created_at_ms) = {
+            let st = music_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            let Some(s) = locked.kugou_sessions.get(&sid) else {
+                set_last_error("session not found", None);
+                return Err(());
+            };
+            (s.login_type, s.identifier.clone(), s.created_at_ms)
+        };
+
+        if now_unix_ms().saturating_sub(created_at_ms) > 5 * 60 * 1000 {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.kugou_sessions.remove(&sid);
+            let out = MusicLoginQrPollResult {
+                session_id: sid,
+                state: MusicLoginQrState::Timeout,
+                message: Some("login session timeout".to_string()),
+                cookie: None,
+                kugou_user: None,
+            };
+            return serde_json::to_string(&out).map_err(|e| {
+                set_last_error("failed to serialize poll result", Some(e.to_string()));
+            });
+        }
+
+        let (client, cfg) = {
+            let st = music_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            (locked.client.clone(), locked.cfg.clone())
+        };
+
+        let user = match login_type {
+            MusicLoginType::Qq => runtime()
+                .block_on(music::providers::kugou::kugou_qr_poll(
+                    &client.http,
+                    &cfg,
+                    &identifier,
+                    client.timeout,
+                ))
+                .map_err(|e| {
+                    set_last_error("kugou qr poll failed", Some(e.to_string()));
+                })?,
+            MusicLoginType::Wechat => runtime()
+                .block_on(music::providers::kugou::kugou_wx_qr_poll(
+                    &client.http,
+                    &cfg,
+                    &identifier,
+                    client.timeout,
+                ))
+                .map_err(|e| {
+                    set_last_error("kugou wechat qr poll failed", Some(e.to_string()));
+                })?,
+        };
+
+        if let Some(u) = user {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.kugou_sessions.remove(&sid);
+
+            let out = MusicLoginQrPollResult {
+                session_id: sid,
+                state: MusicLoginQrState::Done,
+                message: None,
+                cookie: None,
+                kugou_user: Some(KugouUserInfo {
+                    token: u.token,
+                    userid: u.userid,
+                }),
+            };
+            return serde_json::to_string(&out).map_err(|e| {
+                set_last_error("failed to serialize poll result", Some(e.to_string()));
+            });
+        }
+
+        let out = MusicLoginQrPollResult {
+            session_id: sid,
+            state: MusicLoginQrState::Scan,
+            message: None,
+            cookie: None,
+            kugou_user: None,
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize poll result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_kugou_login_qr_poll_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_download_blocking_json(
+    start_params_json_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(start_params_json_utf8, "start_params_json_utf8")?;
+        let params: MusicDownloadStartParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid start_params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let cfg_core = map_music_provider_config_to_core(params.config);
+        let client = {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.cfg = cfg_core.clone();
+            locked.client.set_config(cfg_core.clone());
+            locked.client.clone()
+        };
+
+        let out = runtime()
+            .block_on(async move {
+                let out_dir = params.options.out_dir.trim().to_string();
+                if out_dir.is_empty() {
+                    return Err("options.outDir is empty".to_string());
+                }
+                let requested_quality = params.options.quality_id.trim().to_string();
+                if requested_quality.is_empty() {
+                    return Err("options.qualityId is empty".to_string());
+                }
+
+                let mut auth = map_music_auth_to_core(params.auth);
+
+                let target_service = match &params.target {
+                    MusicDownloadTarget::Track { track } => track.service,
+                    MusicDownloadTarget::Album { service, .. } => *service,
+                    MusicDownloadTarget::ArtistAll { service, .. } => *service,
+                };
+                if matches!(target_service, MusicService::Netease) && auth.netease_cookie.is_none() {
+                    if let Ok(c) = music::providers::netease::fetch_anonymous_cookie(
+                        &client.http,
+                        &cfg_core,
+                        client.timeout,
+                    )
+                    .await
+                    {
+                        auth.netease_cookie = Some(c);
+                    }
+                }
+
+                let mut tracks: Vec<(MusicTrack, Option<u32>)> = Vec::new();
+                match params.target {
+                    MusicDownloadTarget::Track { track } => tracks.push((track, None)),
+                    MusicDownloadTarget::Album { service, album_id } => {
+                        let list = client
+                            .album_tracks(map_music_service_to_core(service), &album_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        for (idx, t) in list.into_iter().enumerate() {
+                            tracks.push((map_music_track_to_proto(t), Some((idx as u32) + 1)));
+                        }
+                    }
+                    MusicDownloadTarget::ArtistAll { service, artist_id } => {
+                        let albums = client
+                            .artist_albums(map_music_service_to_core(service), &artist_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let mut seen = std::collections::HashSet::<String>::new();
+                        for alb in albums {
+                            let album_title = alb.title.clone();
+                            let list = client
+                                .album_tracks(map_music_service_to_core(service), &alb.id)
+                                .await
+                                .unwrap_or_default();
+                            for (idx, mut t) in list.into_iter().enumerate() {
+                                if !seen.insert(t.id.clone()) {
+                                    continue;
+                                }
+                                if t.album.is_none() {
+                                    t.album = Some(album_title.clone());
+                                }
+                                tracks.push((map_music_track_to_proto(t), Some((idx as u32) + 1)));
+                            }
+                        }
+                    }
+                }
+
+                let out_dir = PathBuf::from(out_dir);
+                let overwrite = params.options.overwrite;
+                let retries = params.options.retries.min(10);
+
+                let total = u32::try_from(tracks.len()).unwrap_or(u32::MAX);
+                let mut status = MusicDownloadStatus {
+                    done: total == 0,
+                    totals: MusicDownloadTotals {
+                        total,
+                        done: 0,
+                        failed: 0,
+                        skipped: 0,
+                        canceled: 0,
+                    },
+                    jobs: tracks
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (t, _))| MusicDownloadJobResult {
+                            index: i as u32,
+                            track_id: Some(t.id.clone()),
+                            state: MusicJobState::Pending,
+                            path: None,
+                            bytes: None,
+                            error: None,
+                        })
+                        .collect(),
+                };
+
+                for (idx, (track, track_no)) in tracks.into_iter().enumerate() {
+                    if let Some(job) = status.jobs.get_mut(idx) {
+                        job.state = MusicJobState::Running;
+                    }
+
+                    let chosen_quality = choose_quality_id(&track, &requested_quality)
+                        .unwrap_or_else(|| requested_quality.clone());
+                    let core_svc = map_music_service_to_core(track.service);
+
+                    let (url, ext) = client
+                        .track_download_url(core_svc, &track.id, &chosen_quality, &auth)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let path = music::util::build_track_path(
+                        &out_dir,
+                        &track.artists,
+                        track.album.as_deref(),
+                        track_no,
+                        &track.title,
+                        &ext,
+                    );
+                    if path.exists() && !overwrite {
+                        if let Some(job) = status.jobs.get_mut(idx) {
+                            job.state = MusicJobState::Skipped;
+                            job.path = Some(path.to_string_lossy().to_string());
+                            job.error = Some("skipped: target exists".to_string());
+                        }
+                        status.totals.skipped = status.totals.skipped.saturating_add(1);
+                        continue;
+                    }
+                    match music::download::download_url_to_file(
+                        &client.http,
+                        &url,
+                        &path,
+                        client.timeout,
+                        retries,
+                        overwrite,
+                    )
+                    .await
+                    {
+                        Ok(bytes) => {
+                            if let Some(job) = status.jobs.get_mut(idx) {
+                                job.state = MusicJobState::Done;
+                                job.path = Some(path.to_string_lossy().to_string());
+                                job.bytes = Some(bytes);
+                            }
+                            status.totals.done = status.totals.done.saturating_add(1);
+                        }
+                        Err(e) => {
+                            if let Some(job) = status.jobs.get_mut(idx) {
+                                job.state = MusicJobState::Failed;
+                                job.error = Some(e.to_string());
+                            }
+                            status.totals.failed = status.totals.failed.saturating_add(1);
+                        }
+                    }
+                }
+
+                status.done = true;
+                Ok(status)
+            })
+            .map_err(|e| {
+                set_last_error("music download blocking failed", Some(e));
+            })?;
+
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize download status", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_download_blocking_json", None);
             ptr::null_mut()
         }
     }
@@ -144,6 +1093,226 @@ fn map_dir_room(x: live_directory::LiveRoomCard) -> LiveDirRoomCard {
         user_name: x.user_name,
         online: x.online,
     }
+}
+
+// -----------------------------
+// Music (FFI)
+// -----------------------------
+
+fn now_unix_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn gen_session_id(prefix: &str) -> String {
+    format!("{prefix}_{}_{:x}", now_unix_ms(), fastrand::u64(..))
+}
+
+fn map_music_service_to_core(s: MusicService) -> music::model::MusicService {
+    match s {
+        MusicService::Qq => music::model::MusicService::Qq,
+        MusicService::Kugou => music::model::MusicService::Kugou,
+        MusicService::Netease => music::model::MusicService::Netease,
+        MusicService::Kuwo => music::model::MusicService::Kuwo,
+    }
+}
+
+fn map_music_service_to_proto(s: music::model::MusicService) -> MusicService {
+    match s {
+        music::model::MusicService::Qq => MusicService::Qq,
+        music::model::MusicService::Kugou => MusicService::Kugou,
+        music::model::MusicService::Netease => MusicService::Netease,
+        music::model::MusicService::Kuwo => MusicService::Kuwo,
+    }
+}
+
+fn map_music_track_to_proto(t: music::model::MusicTrack) -> MusicTrack {
+    MusicTrack {
+        service: map_music_service_to_proto(t.service),
+        id: t.id,
+        title: t.title,
+        artists: t.artists,
+        artist_ids: t.artist_ids,
+        album: t.album,
+        album_id: t.album_id,
+        duration_ms: t.duration_ms,
+        cover_url: t.cover_url,
+        qualities: t
+            .qualities
+            .into_iter()
+            .map(|q| chaos_proto::MusicQuality {
+                id: q.id,
+                label: q.label,
+                format: q.format,
+                bitrate_kbps: q.bitrate_kbps,
+                lossless: q.lossless,
+            })
+            .collect(),
+    }
+}
+
+fn map_music_album_to_proto(a: music::model::MusicAlbum) -> MusicAlbum {
+    MusicAlbum {
+        service: map_music_service_to_proto(a.service),
+        id: a.id,
+        title: a.title,
+        artist: a.artist,
+        artist_id: a.artist_id,
+        cover_url: a.cover_url,
+        publish_time: a.publish_time,
+        track_count: a.track_count,
+    }
+}
+
+fn map_music_artist_to_proto(a: music::model::MusicArtist) -> MusicArtist {
+    MusicArtist {
+        service: map_music_service_to_proto(a.service),
+        id: a.id,
+        name: a.name,
+        cover_url: a.cover_url,
+        album_count: a.album_count,
+    }
+}
+
+fn map_music_provider_config_to_core(cfg: MusicProviderConfig) -> music::model::ProviderConfig {
+    music::model::ProviderConfig {
+        kugou_base_url: cfg
+            .kugou_base_url
+            .as_deref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        netease_base_urls: cfg
+            .netease_base_urls
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        netease_anonymous_cookie_url: cfg
+            .netease_anonymous_cookie_url
+            .as_deref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+    }
+}
+
+fn map_music_auth_to_core(auth: MusicAuthState) -> music::model::AuthState {
+    music::model::AuthState {
+        qq: auth.qq.map(|c| music::model::QqMusicCookie {
+            openid: c.openid,
+            refresh_token: c.refresh_token,
+            access_token: c.access_token,
+            expired_at: c.expired_at,
+            musicid: c.musicid,
+            musickey: c.musickey,
+            musickey_create_time: c.musickey_create_time,
+            first_login: c.first_login,
+            refresh_key: c.refresh_key,
+            login_type: c.login_type,
+            str_musicid: c.str_musicid,
+            nick: c.nick,
+            logo: c.logo,
+            encrypt_uin: c.encrypt_uin,
+        }),
+        kugou: auth.kugou.map(|u| music::model::KugouUserInfo {
+            token: u.token,
+            userid: u.userid,
+        }),
+        netease_cookie: auth.netease_cookie,
+    }
+}
+
+fn map_music_qq_cookie_to_core(c: QqMusicCookie) -> music::model::QqMusicCookie {
+    music::model::QqMusicCookie {
+        openid: c.openid,
+        refresh_token: c.refresh_token,
+        access_token: c.access_token,
+        expired_at: c.expired_at,
+        musicid: c.musicid,
+        musickey: c.musickey,
+        musickey_create_time: c.musickey_create_time,
+        first_login: c.first_login,
+        refresh_key: c.refresh_key,
+        login_type: c.login_type,
+        str_musicid: c.str_musicid,
+        nick: c.nick,
+        logo: c.logo,
+        encrypt_uin: c.encrypt_uin,
+    }
+}
+
+fn map_music_qq_cookie_to_proto(c: music::model::QqMusicCookie) -> QqMusicCookie {
+    QqMusicCookie {
+        openid: c.openid,
+        refresh_token: c.refresh_token,
+        access_token: c.access_token,
+        expired_at: c.expired_at,
+        musicid: c.musicid,
+        musickey: c.musickey,
+        refresh_key: c.refresh_key,
+        login_type: c.login_type,
+        str_musicid: c.str_musicid,
+        nick: c.nick,
+        logo: c.logo,
+        encrypt_uin: c.encrypt_uin,
+        musickey_create_time: c.musickey_create_time,
+        first_login: c.first_login,
+    }
+}
+
+fn choose_quality_id(track: &MusicTrack, requested: &str) -> Option<String> {
+    let req = requested.trim();
+    if req.is_empty() {
+        return None;
+    }
+    if track.qualities.iter().any(|q| q.id == req) {
+        return Some(req.to_string());
+    }
+    for q in music::util::quality_fallback_order() {
+        if track.qualities.iter().any(|x| x.id == q) {
+            return Some(q.to_string());
+        }
+    }
+    None
+}
+
+#[derive(Debug)]
+struct QqLoginSession {
+    created_at_ms: i64,
+    login_type: MusicLoginType,
+    identifier: String,
+    http: reqwest::Client,
+}
+
+#[derive(Debug)]
+struct KugouLoginSession {
+    created_at_ms: i64,
+    login_type: MusicLoginType,
+    identifier: String,
+}
+
+#[derive(Debug)]
+struct MusicFfiState {
+    client: music::client::MusicClient,
+    cfg: music::model::ProviderConfig,
+    qq_sessions: HashMap<String, QqLoginSession>,
+    kugou_sessions: HashMap<String, KugouLoginSession>,
+}
+
+fn music_state() -> &'static Mutex<MusicFfiState> {
+    static STATE: OnceLock<Mutex<MusicFfiState>> = OnceLock::new();
+    STATE.get_or_init(|| {
+        let cfg = music::model::ProviderConfig::default();
+        let client = music::client::MusicClient::new(cfg.clone()).expect("music client");
+        Mutex::new(MusicFfiState {
+            client,
+            cfg,
+            qq_sessions: HashMap::new(),
+            kugou_sessions: HashMap::new(),
+        })
+    })
 }
 
 #[unsafe(no_mangle)]

@@ -33,16 +33,16 @@
                 Opacity="0.95" />
         </Grid>
 
-        <muxc:NavigationView
-            x:Name="Nav"
-            Grid.Row="1"
+            <muxc:NavigationView
+                x:Name="Nav"
+                Grid.Row="1"
             IsBackButtonVisible="Collapsed"
             IsSettingsVisible="False"
             PaneDisplayMode="Left"
             IsPaneOpen="False"
             OpenPaneLength="176"
             CompactPaneLength="40"
-            SelectionChanged="OnSelectionChanged">
+                SelectionChanged="OnSelectionChanged">
             <muxc:NavigationView.MenuItems>
                 <muxc:NavigationViewItem Content="首页" Tag="home">
                     <muxc:NavigationViewItem.Icon>
@@ -67,6 +67,11 @@
                 <muxc:NavigationViewItem Content="歌词" Tag="lyrics">
                     <muxc:NavigationViewItem.Icon>
                         <muxc:SymbolIcon Symbol="Document" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="歌曲" Tag="music">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Audio" />
                     </muxc:NavigationViewItem.Icon>
                 </muxc:NavigationViewItem>
             </muxc:NavigationView.MenuItems>

@@ -1,5 +1,7 @@
 namespace ChaosSeed.WinUI3.Models;
 
+using ChaosSeed.WinUI3.Models.Music;
+
 public enum ThemeMode
 {
     FollowSystem = 0,
@@ -28,12 +30,14 @@ public sealed class AppSettings
     public LiveBackendMode LiveBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode LyricsBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode DanmakuBackendMode { get; set; } = LiveBackendMode.Auto;
+    public LiveBackendMode MusicBackendMode { get; set; } = LiveBackendMode.Auto;
 
     public bool LyricsAutoDetect { get; set; } = false;
     public string[] LyricsProviders { get; set; } = new[] { "qq", "netease", "lrclib" };
     public int LyricsThreshold { get; set; } = 40;
     public int LyricsLimit { get; set; } = 10;
     public int LyricsTimeoutMs { get; set; } = 8000;
+    public string? LyricsPreferredAppId { get; set; }
 
     public int? DanmakuOverlayX { get; set; }
     public int? DanmakuOverlayY { get; set; }
@@ -55,4 +59,26 @@ public sealed class AppSettings
     public bool LiveDefaultFullscreen { get; set; } = false;
     public double LiveFullscreenAnimRate { get; set; } = 1.0;
     public bool DebugPlayerOverlay { get; set; } = false;
+
+    // ----- music -----
+
+    // ProviderConfig
+    public string? KugouBaseUrl { get; set; }
+    // Built-in defaults so users can use Netease search/download without manual configuration.
+    // Users can still override in Settings if needed.
+    public string? NeteaseBaseUrls { get; set; } =
+        "http://plugin.changsheng.space:3000;https://wyy.xhily.com;http://111.229.38.178:3333;http://dg-t.cn:3000;https://zm.armoe.cn"; // ';' separated
+    public string? NeteaseAnonymousCookieUrl { get; set; } = "/register/anonimous";
+
+    // Auth (persisted in WinUI settings; daemon/ffi does not persist)
+    public QqMusicCookie? QqMusicCookie { get; set; }
+    public KugouUserInfo? KugouUserInfo { get; set; }
+
+    // Download preferences
+    public string? MusicLastOutDir { get; set; }
+    public bool MusicAskOutDirEachTime { get; set; } = true;
+    public string MusicPathTemplate { get; set; } = "{{artist}}/{{album}}/{{title}} - {{artist}}.{{ext}}";
+    public int MusicDownloadConcurrency { get; set; } = 3;
+    public int MusicDownloadRetries { get; set; } = 2;
+    public bool MusicDownloadOverwrite { get; set; } = false;
 }

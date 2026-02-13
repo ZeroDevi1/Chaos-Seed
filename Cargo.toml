@@ -15,7 +15,7 @@ members = [
 default-members = ["chaos-core", "chaos-slint", "chaos-ffi"]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.93.0"
 license = "MIT"

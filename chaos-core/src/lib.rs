@@ -2,6 +2,7 @@ pub mod danmaku;
 pub mod live_directory;
 pub mod livestream;
 pub mod lyrics;
+pub mod music;
 pub mod now_playing;
 pub mod subtitle;
 

@@ -1,5 +1,6 @@
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Services;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace ChaosSeed.WinUI3.Pages;
@@ -68,6 +69,14 @@ public sealed partial class SettingsPage : Page
         var win11 = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
         BackdropCombo.IsEnabled = win11;
         BackdropHint.IsOpen = !win11;
+
+        MusicKugouBaseUrlBox.Text = s.KugouBaseUrl ?? "";
+        MusicNeteaseBaseUrlsBox.Text = s.NeteaseBaseUrls ?? "";
+        MusicNeteaseAnonUrlBox.Text = s.NeteaseAnonymousCookieUrl ?? "/register/anonimous";
+        MusicAskOutDirToggle.IsOn = s.MusicAskOutDirEachTime;
+        MusicPathTemplateBox.Text = string.IsNullOrWhiteSpace(s.MusicPathTemplate)
+            ? new AppSettings().MusicPathTemplate
+            : s.MusicPathTemplate;
     }
 
     private void OnThemeChanged(object sender, SelectionChangedEventArgs e)
@@ -219,5 +228,79 @@ public sealed partial class SettingsPage : Page
         }
 
         SettingsService.Instance.Update(s => s.DebugPlayerOverlay = DebugPlayerToggle.IsOn);
+    }
+
+    private void OnMusicKugouBaseUrlLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        var v = (MusicKugouBaseUrlBox.Text ?? "").Trim().TrimEnd('/');
+        SettingsService.Instance.Update(s => s.KugouBaseUrl = string.IsNullOrWhiteSpace(v) ? null : v);
+    }
+
+    private void OnMusicNeteaseBaseUrlsLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        var v = (MusicNeteaseBaseUrlsBox.Text ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(v))
+        {
+            v = new AppSettings().NeteaseBaseUrls ?? "";
+            MusicNeteaseBaseUrlsBox.Text = v;
+        }
+        SettingsService.Instance.Update(s => s.NeteaseBaseUrls = v);
+    }
+
+    private void OnMusicNeteaseAnonUrlLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        var v = (MusicNeteaseAnonUrlBox.Text ?? "").Trim();
+        SettingsService.Instance.Update(s => s.NeteaseAnonymousCookieUrl = string.IsNullOrWhiteSpace(v) ? "/register/anonimous" : v);
+    }
+
+    private void OnMusicAskOutDirToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s => s.MusicAskOutDirEachTime = MusicAskOutDirToggle.IsOn);
+    }
+
+    private void OnMusicPathTemplateLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        var v = (MusicPathTemplateBox.Text ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(v))
+        {
+            v = new AppSettings().MusicPathTemplate;
+            MusicPathTemplateBox.Text = v;
+        }
+        SettingsService.Instance.Update(s => s.MusicPathTemplate = v);
     }
 }

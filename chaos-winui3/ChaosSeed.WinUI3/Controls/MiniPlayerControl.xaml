@@ -1,0 +1,99 @@
+<UserControl
+    x:Class="ChaosSeed.WinUI3.Controls.MiniPlayerControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:conv="using:ChaosSeed.WinUI3.Converters"
+    Visibility="Collapsed">
+
+    <UserControl.Resources>
+        <conv:SecondsToTimeConverter x:Key="SecondsToTimeConverter" />
+    </UserControl.Resources>
+
+    <Border
+        CornerRadius="14"
+        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+        Padding="12">
+        <Grid RowSpacing="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="56" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border CornerRadius="999" Width="48" Height="48" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" VerticalAlignment="Center">
+                    <Image x:Name="CoverImg" Stretch="UniformToFill" />
+                </Border>
+
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleText" Text="-" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="SubtitleText" Text="" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button x:Name="PlayPauseBtn" Click="OnPlayPauseClicked">
+                        <muxc:SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
+                    </Button>
+                    <Button x:Name="StopBtn" Click="OnStopClicked">
+                        <muxc:SymbolIcon Symbol="Stop" />
+                    </Button>
+
+                    <Button x:Name="VolumeBtn">
+                        <muxc:SymbolIcon x:Name="VolumeIcon" Symbol="Volume" />
+                        <Button.Flyout>
+                            <Flyout Placement="Top">
+                                <Border Padding="12" CornerRadius="10" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                    <StackPanel Spacing="10" HorizontalAlignment="Center">
+                                        <Slider
+                                            x:Name="VolumeSlider"
+                                            Orientation="Vertical"
+                                            Height="180"
+                                            Minimum="0"
+                                            Maximum="100"
+                                            StepFrequency="1"
+                                            SmallChange="1"
+                                            LargeChange="10"
+                                            ValueChanged="OnVolumeChanged" />
+                                        <TextBlock x:Name="VolumePercentText" Text="100%" HorizontalAlignment="Center" Opacity="0.85" />
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+
+                    <Button Click="OnCloseClicked">
+                        <muxc:SymbolIcon Symbol="Clear" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <Grid Grid.Row="1" ColumnSpacing="10" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="PosText" Text="00:00" Opacity="0.75" VerticalAlignment="Center" />
+                <Slider
+                    x:Name="PosSlider"
+                    Grid.Column="1"
+                    Minimum="0"
+                    Maximum="1"
+                    StepFrequency="1"
+                    SmallChange="1"
+                    LargeChange="5"
+                    IsThumbToolTipEnabled="True"
+                    ThumbToolTipValueConverter="{StaticResource SecondsToTimeConverter}"
+                    ValueChanged="OnPositionChanged" />
+                <TextBlock x:Name="DurText" Grid.Column="2" Text="--:--" Opacity="0.75" VerticalAlignment="Center" />
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

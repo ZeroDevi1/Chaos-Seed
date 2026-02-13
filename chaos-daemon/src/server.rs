@@ -12,6 +12,18 @@ use chaos_proto::{
     METHOD_LIVE_OPEN, METHOD_LIVESTREAM_DECODE_MANIFEST, METHOD_LYRICS_SEARCH,
     METHOD_NOW_PLAYING_SNAPSHOT, NOTIF_DANMAKU_MESSAGE, NowPlayingSnapshot,
     NowPlayingSnapshotParams,
+    // music
+    METHOD_MUSIC_ALBUM_TRACKS, METHOD_MUSIC_ARTIST_ALBUMS, METHOD_MUSIC_CONFIG_SET,
+    METHOD_MUSIC_DOWNLOAD_CANCEL, METHOD_MUSIC_DOWNLOAD_START, METHOD_MUSIC_DOWNLOAD_STATUS,
+    METHOD_MUSIC_KUGOU_LOGIN_QR_CREATE, METHOD_MUSIC_KUGOU_LOGIN_QR_POLL,
+    METHOD_MUSIC_QQ_LOGIN_QR_CREATE, METHOD_MUSIC_QQ_LOGIN_QR_POLL, METHOD_MUSIC_QQ_REFRESH_COOKIE,
+    METHOD_MUSIC_SEARCH_ALBUMS, METHOD_MUSIC_SEARCH_ARTISTS, METHOD_MUSIC_SEARCH_TRACKS,
+    METHOD_MUSIC_TRACK_PLAY_URL,
+    MusicAlbum, MusicAlbumTracksParams, MusicArtist, MusicArtistAlbumsParams, MusicDownloadCancelParams,
+    MusicDownloadStartParams, MusicDownloadStartResult, MusicDownloadStatus, MusicDownloadStatusParams,
+    MusicLoginQr, MusicLoginQrCreateParams, MusicLoginQrPollParams, MusicLoginQrPollResult,
+    MusicProviderConfig, MusicRefreshCookieParams, MusicSearchParams, MusicTrack, OkReply, QqMusicCookie,
+    MusicTrackPlayUrlParams, MusicTrackPlayUrlResult,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -98,6 +110,82 @@ pub trait ChaosService: Send + Sync + 'static {
         &self,
         params: DanmakuFetchImageParams,
     ) -> impl Future<Output = Result<chaos_proto::DanmakuFetchImageResult, String>> + Send;
+
+    // ----- music -----
+    fn music_config_set(
+        &self,
+        params: MusicProviderConfig,
+    ) -> impl Future<Output = Result<OkReply, String>> + Send;
+
+    fn music_search_tracks(
+        &self,
+        params: MusicSearchParams,
+    ) -> impl Future<Output = Result<Vec<MusicTrack>, String>> + Send;
+
+    fn music_search_albums(
+        &self,
+        params: MusicSearchParams,
+    ) -> impl Future<Output = Result<Vec<MusicAlbum>, String>> + Send;
+
+    fn music_search_artists(
+        &self,
+        params: MusicSearchParams,
+    ) -> impl Future<Output = Result<Vec<MusicArtist>, String>> + Send;
+
+    fn music_album_tracks(
+        &self,
+        params: MusicAlbumTracksParams,
+    ) -> impl Future<Output = Result<Vec<MusicTrack>, String>> + Send;
+
+    fn music_artist_albums(
+        &self,
+        params: MusicArtistAlbumsParams,
+    ) -> impl Future<Output = Result<Vec<MusicAlbum>, String>> + Send;
+
+    fn music_track_play_url(
+        &self,
+        params: MusicTrackPlayUrlParams,
+    ) -> impl Future<Output = Result<MusicTrackPlayUrlResult, String>> + Send;
+
+    fn music_qq_login_qr_create(
+        &self,
+        params: MusicLoginQrCreateParams,
+    ) -> impl Future<Output = Result<MusicLoginQr, String>> + Send;
+
+    fn music_qq_login_qr_poll(
+        &self,
+        params: MusicLoginQrPollParams,
+    ) -> impl Future<Output = Result<MusicLoginQrPollResult, String>> + Send;
+
+    fn music_qq_refresh_cookie(
+        &self,
+        params: MusicRefreshCookieParams,
+    ) -> impl Future<Output = Result<QqMusicCookie, String>> + Send;
+
+    fn music_kugou_login_qr_create(
+        &self,
+        params: MusicLoginQrCreateParams,
+    ) -> impl Future<Output = Result<MusicLoginQr, String>> + Send;
+
+    fn music_kugou_login_qr_poll(
+        &self,
+        params: MusicLoginQrPollParams,
+    ) -> impl Future<Output = Result<MusicLoginQrPollResult, String>> + Send;
+
+    fn music_download_start(
+        &self,
+        params: MusicDownloadStartParams,
+    ) -> impl Future<Output = Result<MusicDownloadStartResult, String>> + Send;
+
+    fn music_download_status(
+        &self,
+        params: MusicDownloadStatusParams,
+    ) -> impl Future<Output = Result<MusicDownloadStatus, String>> + Send;
+
+    fn music_download_cancel(
+        &self,
+        params: MusicDownloadCancelParams,
+    ) -> impl Future<Output = Result<OkReply, String>> + Send;
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -243,6 +331,351 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                             }
                         };
                         match svc.lyrics_search(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_CONFIG_SET => {
+                        let params: MusicProviderConfig = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_config_set(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_SEARCH_TRACKS => {
+                        let params: MusicSearchParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_search_tracks(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_SEARCH_ALBUMS => {
+                        let params: MusicSearchParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_search_albums(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_SEARCH_ARTISTS => {
+                        let params: MusicSearchParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_search_artists(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_ALBUM_TRACKS => {
+                        let params: MusicAlbumTracksParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_album_tracks(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_ARTIST_ALBUMS => {
+                        let params: MusicArtistAlbumsParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_artist_albums(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_TRACK_PLAY_URL => {
+                        let params: MusicTrackPlayUrlParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_track_play_url(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_QQ_LOGIN_QR_CREATE => {
+                        let params: MusicLoginQrCreateParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_qq_login_qr_create(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_QQ_LOGIN_QR_POLL => {
+                        let params: MusicLoginQrPollParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_qq_login_qr_poll(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_QQ_REFRESH_COOKIE => {
+                        let params: MusicRefreshCookieParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_qq_refresh_cookie(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_KUGOU_LOGIN_QR_CREATE => {
+                        let params: MusicLoginQrCreateParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_kugou_login_qr_create(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_KUGOU_LOGIN_QR_POLL => {
+                        let params: MusicLoginQrPollParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_kugou_login_qr_poll(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_DOWNLOAD_START => {
+                        let params: MusicDownloadStartParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_download_start(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_DOWNLOAD_STATUS => {
+                        let params: MusicDownloadStatusParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_download_status(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_MUSIC_DOWNLOAD_CANCEL => {
+                        let params: MusicDownloadCancelParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.music_download_cancel(params).await {
                             Ok(res) => {
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());

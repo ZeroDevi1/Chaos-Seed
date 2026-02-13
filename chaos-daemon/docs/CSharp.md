@@ -296,3 +296,89 @@ public sealed class LiveDirRoomCard
 - daemon 传输层是 LSP framing（`HeaderDelimitedMessageHandler`），不是普通换行 JSON。
 - `preferredQuality` 建议传 `"highest"`（默认）或 `"lowest"`；只有在 `variantId` 为空时生效。
 - WinUI3 实际项目可参考 `ChaosSeed.WinUI3/Services/DaemonClient.cs` 的完整实现（包含重连/日志/通知订阅）。
+
+## 音乐下载（配置 / 登录 / 下载会话）
+
+下面片段可接在“最小客户端”中（鉴权成功后）：
+
+```csharp
+// 1) music.config.set
+// - 酷狗：需要配置 kugouBaseUrl 才能启用（留空则不可用）
+// - 网易云：neteaseBaseUrls 为空时会使用内置列表；也可在此覆盖
+var cfg = new
+{
+    kugouBaseUrl = "http://127.0.0.1:3000",
+    neteaseBaseUrls = new[] { "http://127.0.0.1:3001" },
+    neteaseAnonymousCookieUrl = "/register/anonimous",
+};
+_ = await rpc.InvokeWithParameterObjectAsync<OkReply>("music.config.set", cfg);
+
+// 2) searchTracks（示例：QQ）
+var tracks = await rpc.InvokeWithParameterObjectAsync<MusicTrack[]>(
+    "music.searchTracks",
+    new { service = "qq", keyword = "周杰伦", page = 1, pageSize = 10 }
+);
+Console.WriteLine("tracks=" + tracks.Length);
+
+// 3) QQ 扫码登录（轮询直到 done 或 timeout）
+var qr = await rpc.InvokeWithParameterObjectAsync<MusicLoginQr>(
+    "music.qq.loginQrCreate",
+    new { loginType = "qq" } // or "wechat"
+);
+
+QqMusicCookie? cookie = null;
+for (int i = 0; i < 300; i++)
+{
+    var poll = await rpc.InvokeWithParameterObjectAsync<MusicLoginQrPollResult>(
+        "music.qq.loginQrPoll",
+        new { sessionId = qr.SessionId }
+    );
+    if (poll.State == "done" && poll.Cookie is not null)
+    {
+        cookie = poll.Cookie;
+        break;
+    }
+    if (poll.State == "timeout")
+    {
+        throw new Exception("login timeout");
+    }
+    await Task.Delay(1000);
+}
+
+var auth = new { qq = cookie, kugou = (object?)null, neteaseCookie = (string?)null };
+
+// 3.5) 可选：获取试听/播放 URL（用于预览播放等）
+if (tracks.Length > 0)
+{
+    var play = await rpc.InvokeWithParameterObjectAsync<MusicTrackPlayUrlResult>(
+        "music.trackPlayUrl",
+        new { service = "qq", trackId = tracks[0].Id, qualityId = (string?)null, auth }
+    );
+    Console.WriteLine("play=" + play.Ext + " " + play.Url);
+}
+
+// 4) 启动下载（daemon 内执行；客户端轮询 status）
+var start = await rpc.InvokeWithParameterObjectAsync<MusicDownloadStartResult>(
+    "music.download.start",
+    new
+    {
+        config = cfg,
+        auth,
+        target = new { type = "album", service = "qq", albumId = "123" },
+        options = new { qualityId = "flac", outDir = "D:/Music", overwrite = false, concurrency = 3, retries = 2 }
+    }
+);
+
+while (true)
+{
+    var st = await rpc.InvokeWithParameterObjectAsync<MusicDownloadStatus>(
+        "music.download.status",
+        new { sessionId = start.SessionId }
+    );
+    Console.WriteLine($"done={st.Done} totals={st.Totals.Done}/{st.Totals.Total} failed={st.Totals.Failed}");
+    if (st.Done) break;
+    await Task.Delay(800);
+}
+```
+
+DTO 结构参考 `chaos-daemon/docs/API.md` 的“音乐下载”章节。

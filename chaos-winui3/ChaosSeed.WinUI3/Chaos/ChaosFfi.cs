@@ -84,6 +84,44 @@ internal static partial class ChaosFfi
         uint timeout_ms
     );
 
+    // ----- music -----
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_config_set_json(string config_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_search_tracks_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_search_albums_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_search_artists_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_album_tracks_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_artist_albums_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_qq_login_qr_create_json(string login_type_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_qq_login_qr_poll_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_qq_refresh_cookie_json(string cookie_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_kugou_login_qr_create_json(string login_type_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_kugou_login_qr_poll_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_download_blocking_json(string start_params_json_utf8);
+
     internal static string? TakeString(IntPtr p)
     {
         if (p == IntPtr.Zero)

@@ -23,10 +23,12 @@ public sealed partial class LyricsPage : Page
 
     public ObservableCollection<LyricsCandidateVm> Candidates { get; } = new();
     public ObservableCollection<LyricsLineVm> Lines { get; } = new();
+    public ObservableCollection<NowPlayingSessionVm> SessionOptions { get; } = new();
 
     private ILyricsBackend? _backend;
 
     private bool _uiInit;
+    private bool _sessionInit;
     private bool _suppressCandidateChanged;
 
     private CancellationTokenSource? _watchCts;
@@ -36,6 +38,7 @@ public sealed partial class LyricsPage : Page
 
     private string? _lastSongKey;
     private NowPlayingSession? _lastNowPlaying;
+    private NowPlayingSnapshot? _lastSnapshot;
     private LyricsSearchResult? _currentLyrics;
     private long _coverSeq;
 
@@ -232,13 +235,14 @@ public sealed partial class LyricsPage : Page
 
             try
             {
-                if (snap?.NowPlaying is not null)
+                var np = _lastNowPlaying ?? snap?.NowPlaying;
+                if (np is not null)
                 {
-                    var key = BuildSongKey(snap.NowPlaying);
+                    var key = BuildSongKey(np);
                     if (!string.IsNullOrWhiteSpace(key) && key != _lastSongKey)
                     {
                         _lastSongKey = key;
-                        TriggerSequentialSearch(snap.NowPlaying, ct);
+                        TriggerSequentialSearch(np, ct);
                     }
                 }
             }
@@ -247,7 +251,7 @@ public sealed partial class LyricsPage : Page
                 // ignore
             }
 
-            var isPlaying = snap?.NowPlaying?.PlaybackStatus?.Equals("Playing", StringComparison.OrdinalIgnoreCase) == true;
+            var isPlaying = (_lastNowPlaying ?? snap?.NowPlaying)?.PlaybackStatus?.Equals("Playing", StringComparison.OrdinalIgnoreCase) == true;
             var sleepMs = isPlaying ? 2000 : 8000;
             try
             {
@@ -413,9 +417,15 @@ public sealed partial class LyricsPage : Page
 
     private void ApplyNowPlayingUi(NowPlayingSnapshot snap)
     {
+        _lastSnapshot = snap;
         SupportedText.Text = snap.Supported ? "true" : "false";
 
-        var np = snap.NowPlaying;
+        var sel = UpdateSessionOptions(snap);
+        ApplyNowPlayingSession(sel ?? snap.NowPlaying);
+    }
+
+    private void ApplyNowPlayingSession(NowPlayingSession? np)
+    {
         _lastNowPlaying = np;
 
         StatusText.Text = np?.PlaybackStatus ?? "-";
@@ -436,6 +446,116 @@ public sealed partial class LyricsPage : Page
         _ = UpdateCoverAsync(np?.Thumbnail);
     }
 
+    private NowPlayingSession? UpdateSessionOptions(NowPlayingSnapshot snap)
+    {
+        SessionOptions.Clear();
+
+        var sessions = snap.Sessions ?? Array.Empty<NowPlayingSession>();
+        if (sessions.Length <= 1)
+        {
+            SessionCombo.Visibility = Visibility.Collapsed;
+            UseSessionBtn.Visibility = Visibility.Collapsed;
+            return sessions.FirstOrDefault() ?? snap.NowPlaying;
+        }
+
+        foreach (var s in sessions)
+        {
+            SessionOptions.Add(NowPlayingSessionVm.From(s));
+        }
+
+        // Prefer saved app id, then "isCurrent", then pickedAppId, then first session.
+        var preferred = (SettingsService.Instance.Current.LyricsPreferredAppId ?? "").Trim();
+        NowPlayingSessionVm? sel = null;
+        if (!string.IsNullOrWhiteSpace(preferred))
+        {
+            sel = SessionOptions.FirstOrDefault(x =>
+                string.Equals(x.Session.AppId, preferred, StringComparison.OrdinalIgnoreCase)
+            );
+        }
+        sel ??= SessionOptions.FirstOrDefault(x => x.Session.IsCurrent);
+        if (sel is null && !string.IsNullOrWhiteSpace(snap.PickedAppId))
+        {
+            sel = SessionOptions.FirstOrDefault(x =>
+                string.Equals(x.Session.AppId, snap.PickedAppId, StringComparison.OrdinalIgnoreCase)
+            );
+        }
+        sel ??= SessionOptions.FirstOrDefault();
+
+        _sessionInit = true;
+        SessionCombo.SelectedItem = sel;
+        _sessionInit = false;
+        SessionCombo.Visibility = Visibility.Visible;
+        UseSessionBtn.Visibility = Visibility.Collapsed;
+
+        return sel?.Session;
+    }
+
+    private void OnSessionSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (_sessionInit || _uiInit)
+        {
+            return;
+        }
+
+        if (SessionCombo.SelectedItem is not NowPlayingSessionVm vm)
+        {
+            return;
+        }
+
+        ApplySelectedSession(vm.Session, persist: true);
+    }
+
+    private void OnUseSelectedSessionClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (SessionCombo.SelectedItem is not NowPlayingSessionVm vm)
+        {
+            return;
+        }
+
+        ApplySelectedSession(vm.Session, persist: true);
+    }
+
+    private void ApplySelectedSession(NowPlayingSession? session, bool persist)
+    {
+        if (session is null)
+        {
+            return;
+        }
+
+        ApplyNowPlayingSession(session);
+
+        if (persist)
+        {
+            try
+            {
+                var appId = (session.AppId ?? "").Trim();
+                SettingsService.Instance.Update(s =>
+                    s.LyricsPreferredAppId = string.IsNullOrWhiteSpace(appId) ? null : appId
+                );
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        try
+        {
+            var key = BuildSongKey(session);
+            _lastSongKey = key;
+            TriggerSequentialSearch(session, CancellationToken.None);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
     private async Task UpdateCoverAsync(NowPlayingThumbnail? thumb)
     {
         var seq = Interlocked.Increment(ref _coverSeq);
@@ -1086,5 +1206,26 @@ public sealed partial class LyricsPage : Page
         }
 
         return tcs.Task;
+    }
+}
+
+public sealed class NowPlayingSessionVm
+{
+    public NowPlayingSessionVm(NowPlayingSession session, string display)
+    {
+        Session = session ?? throw new ArgumentNullException(nameof(session));
+        Display = display ?? "";
+    }
+
+    public NowPlayingSession Session { get; }
+    public string Display { get; }
+
+    public static NowPlayingSessionVm From(NowPlayingSession s)
+    {
+        var app = string.IsNullOrWhiteSpace(s.AppId) ? "-" : s.AppId.Trim();
+        var title = string.IsNullOrWhiteSpace(s.Title) ? "-" : s.Title!.Trim();
+        var artist = string.IsNullOrWhiteSpace(s.Artist) ? "" : $" - {s.Artist!.Trim()}";
+        var flag = s.IsCurrent ? " (current)" : "";
+        return new NowPlayingSessionVm(s, $"{app}{flag}: {title}{artist}");
     }
 }

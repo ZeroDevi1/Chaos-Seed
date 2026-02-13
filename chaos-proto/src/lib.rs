@@ -12,6 +12,26 @@ pub const METHOD_DANMAKU_DISCONNECT: &str = "danmaku.disconnect";
 pub const METHOD_NOW_PLAYING_SNAPSHOT: &str = "nowPlaying.snapshot";
 pub const METHOD_LYRICS_SEARCH: &str = "lyrics.search";
 
+// Music (search + login + download)
+pub const METHOD_MUSIC_CONFIG_SET: &str = "music.config.set";
+pub const METHOD_MUSIC_SEARCH_TRACKS: &str = "music.searchTracks";
+pub const METHOD_MUSIC_SEARCH_ALBUMS: &str = "music.searchAlbums";
+pub const METHOD_MUSIC_SEARCH_ARTISTS: &str = "music.searchArtists";
+pub const METHOD_MUSIC_ALBUM_TRACKS: &str = "music.albumTracks";
+pub const METHOD_MUSIC_ARTIST_ALBUMS: &str = "music.artistAlbums";
+pub const METHOD_MUSIC_TRACK_PLAY_URL: &str = "music.trackPlayUrl";
+
+pub const METHOD_MUSIC_QQ_LOGIN_QR_CREATE: &str = "music.qq.loginQrCreate";
+pub const METHOD_MUSIC_QQ_LOGIN_QR_POLL: &str = "music.qq.loginQrPoll";
+pub const METHOD_MUSIC_QQ_REFRESH_COOKIE: &str = "music.qq.refreshCookie";
+
+pub const METHOD_MUSIC_KUGOU_LOGIN_QR_CREATE: &str = "music.kugou.loginQrCreate";
+pub const METHOD_MUSIC_KUGOU_LOGIN_QR_POLL: &str = "music.kugou.loginQrPoll";
+
+pub const METHOD_MUSIC_DOWNLOAD_START: &str = "music.download.start";
+pub const METHOD_MUSIC_DOWNLOAD_STATUS: &str = "music.download.status";
+pub const METHOD_MUSIC_DOWNLOAD_CANCEL: &str = "music.download.cancel";
+
 pub const METHOD_LIVE_DIR_CATEGORIES: &str = "liveDir.categories";
 pub const METHOD_LIVE_DIR_RECOMMEND_ROOMS: &str = "liveDir.recommendRooms";
 pub const METHOD_LIVE_DIR_CATEGORY_ROOMS: &str = "liveDir.categoryRooms";
@@ -215,6 +235,351 @@ pub struct DanmakuFetchImageResult {
     pub base64: String,
     pub width: Option<u32>,
 }
+
+// -----------------------------
+// Music DTOs
+// -----------------------------
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum MusicService {
+    Qq,
+    Kugou,
+    Netease,
+    Kuwo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicQuality {
+    pub id: String,
+    pub label: String,
+    pub format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bitrate_kbps: Option<u32>,
+    pub lossless: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicTrack {
+    pub service: MusicService,
+    pub id: String,
+    pub title: String,
+    pub artists: Vec<String>,
+    pub artist_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
+    pub qualities: Vec<MusicQuality>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicAlbum {
+    pub service: MusicService,
+    pub id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artist_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publish_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicArtist {
+    pub service: MusicService,
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicProviderConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kugou_base_url: Option<String>,
+    #[serde(default)]
+    pub netease_base_urls: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub netease_anonymous_cookie_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicSearchParams {
+    pub service: MusicService,
+    pub keyword: String,
+    #[serde(default)]
+    pub page: u32,
+    #[serde(default)]
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicAlbumTracksParams {
+    pub service: MusicService,
+    pub album_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicArtistAlbumsParams {
+    pub service: MusicService,
+    pub artist_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicTrackPlayUrlParams {
+    pub service: MusicService,
+    pub track_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_id: Option<String>,
+    #[serde(default)]
+    pub auth: MusicAuthState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicTrackPlayUrlResult {
+    pub url: String,
+    pub ext: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QqMusicCookie {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expired_at: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub musicid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub musickey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub musickey_create_time: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_login: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login_type: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub str_musicid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nick: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypt_uin: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KugouUserInfo {
+    pub token: String,
+    pub userid: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicAuthState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qq: Option<QqMusicCookie>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kugou: Option<KugouUserInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub netease_cookie: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MusicDownloadTarget {
+    Track { track: MusicTrack },
+    Album { service: MusicService, album_id: String },
+    ArtistAll { service: MusicService, artist_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadOptions {
+    pub quality_id: String,
+    pub out_dir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_template: Option<String>,
+    #[serde(default)]
+    pub overwrite: bool,
+    #[serde(default = "default_music_concurrency")]
+    pub concurrency: u32,
+    #[serde(default = "default_music_retries")]
+    pub retries: u32,
+}
+
+const fn default_music_concurrency() -> u32 {
+    3
+}
+
+const fn default_music_retries() -> u32 {
+    2
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadStartParams {
+    pub config: MusicProviderConfig,
+    #[serde(default)]
+    pub auth: MusicAuthState,
+    pub target: MusicDownloadTarget,
+    pub options: MusicDownloadOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadStartResult {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MusicJobState {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Skipped,
+    Canceled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadTotals {
+    pub total: u32,
+    pub done: u32,
+    pub failed: u32,
+    pub skipped: u32,
+    pub canceled: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadJobResult {
+    pub index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_id: Option<String>,
+    pub state: MusicJobState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadStatus {
+    pub done: bool,
+    pub totals: MusicDownloadTotals,
+    pub jobs: Vec<MusicDownloadJobResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadStatusParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicDownloadCancelParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MusicLoginType {
+    Qq,
+    Wechat,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MusicLoginQrState {
+    Scan,
+    Confirm,
+    Done,
+    Timeout,
+    Refuse,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicLoginQrCreateParams {
+    pub login_type: MusicLoginType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicLoginQr {
+    pub session_id: String,
+    pub login_type: MusicLoginType,
+    pub mime: String,
+    pub base64: String,
+    pub identifier: String,
+    pub created_at_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicLoginQrPollParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicLoginQrPollResult {
+    pub session_id: String,
+    pub state: MusicLoginQrState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cookie: Option<QqMusicCookie>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kugou_user: Option<KugouUserInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicRefreshCookieParams {
+    pub cookie: QqMusicCookie,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

@@ -53,6 +53,13 @@ daemon 会把弹幕以 **服务器通知**的形式推给客户端：
 - `daemon.ping`
 - `nowPlaying.snapshot`
 - `lyrics.search`
+- `music.config.set`
+- `music.searchTracks` / `music.searchAlbums` / `music.searchArtists`
+- `music.albumTracks` / `music.artistAlbums`
+- `music.trackPlayUrl`
+- `music.qq.loginQrCreate` / `music.qq.loginQrPoll` / `music.qq.refreshCookie`
+- `music.kugou.loginQrCreate` / `music.kugou.loginQrPoll`
+- `music.download.start` / `music.download.status` / `music.download.cancel`
 - `livestream.decodeManifest`
 - `live.open` / `live.close`
 - `danmaku.connect` / `danmaku.disconnect` / `danmaku.fetchImage`
@@ -72,7 +79,7 @@ params:
 result:
 
 ```json
-{ "version": "0.3.0" }
+{ "version": "0.4.0" }
 ```
 
 说明：
@@ -172,6 +179,165 @@ result：`LyricsSearchResult[]`（按 `quality` 排序，best-effort）
   "debug": null
 }
 ```
+
+## 音乐下载（歌曲搜索 / 登录 / 下载会话）
+
+说明：
+- 字段形状与 `chaos-proto` 的 music DTO 对齐（`camelCase`）。
+- `service` 取值：`qq | kugou | netease | kuwo`。
+- 客户端负责保存登录态（Cookie/Token）；daemon 不落盘，只接收/返回。
+- 合规边界：仅下载“接口返回的可直接下载 URL”，不包含任何 DRM 解密/绕过逻辑；若无权限/登录失效/接口不返回 URL，会返回明确错误。
+
+### `music.config.set`（注入 ProviderConfig）
+
+params：`MusicProviderConfig`
+
+```json
+{
+  "kugouBaseUrl": "http://127.0.0.1:3000",
+  "neteaseBaseUrls": ["http://127.0.0.1:3001"],
+  "neteaseAnonymousCookieUrl": "/register/anonimous"
+}
+```
+
+result：`OkReply`
+
+```json
+{ "ok": true }
+```
+
+说明：
+- 酷狗：需要配置 `kugouBaseUrl` 才能启用相关能力（留空则不可用）。
+- 网易云：若 `neteaseBaseUrls` 为空，daemon 会使用内置的一组可用 API 列表；也可通过 `music.config.set` 覆盖。
+
+### `music.searchTracks` / `music.searchAlbums` / `music.searchArtists`
+
+params：`MusicSearchParams`
+
+```json
+{ "service": "qq", "keyword": "周杰伦", "page": 1, "pageSize": 20 }
+```
+
+result：
+- `music.searchTracks` -> `MusicTrack[]`
+- `music.searchAlbums` -> `MusicAlbum[]`
+- `music.searchArtists` -> `MusicArtist[]`
+
+### `music.albumTracks` / `music.artistAlbums`
+
+params：
+
+```json
+{ "service": "qq", "albumId": "123" }
+```
+
+```json
+{ "service": "qq", "artistId": "456" }
+```
+
+result：
+- `music.albumTracks` -> `MusicTrack[]`
+- `music.artistAlbums` -> `MusicAlbum[]`
+
+### `music.trackPlayUrl`
+
+用于获取“可直接播放/试听”的 URL（best-effort）。常见用途：
+- UI 点播放预览
+- 下载前做一次“能否拿到 URL / 是否需要登录”的探测
+
+params：`MusicTrackPlayUrlParams`
+
+```json
+{
+  "service": "qq",
+  "trackId": "songmid",
+  "qualityId": "flac",
+  "auth": { "qq": null, "kugou": null, "neteaseCookie": null }
+}
+```
+
+result：`MusicTrackPlayUrlResult`
+
+```json
+{ "url": "https://...", "ext": "flac" }
+```
+
+### `music.qq.loginQrCreate` / `music.qq.loginQrPoll`
+
+创建二维码：
+
+params：`MusicLoginQrCreateParams`
+
+```json
+{ "loginType": "qq" }
+```
+
+result：`MusicLoginQr`（`base64` 为二维码图片）
+
+轮询：
+
+params：`MusicLoginQrPollParams`
+
+```json
+{ "sessionId": "<sessionId>" }
+```
+
+result：`MusicLoginQrPollResult`
+
+说明：
+- `state`：`scan | confirm | done | timeout | refuse | other`
+- 成功时 `cookie` 非空（`QqMusicCookie`），客户端应保存并在下载时传回。
+
+### `music.qq.refreshCookie`
+
+params：
+
+```json
+{ "cookie": { "strMusicid": "...", "musickey": "...", "refreshKey": "...", "loginType": 1 } }
+```
+
+result：`QqMusicCookie`
+
+### `music.kugou.loginQrCreate` / `music.kugou.loginQrPoll`
+
+说明：依赖 `kugouBaseUrl` 配置；成功时 `kugouUser`（token/userid）非空。
+
+### `music.download.start` / `music.download.status` / `music.download.cancel`
+
+start params：`MusicDownloadStartParams`（包含 `config` + `auth` + `target` + `options`）
+
+示例（单曲）：
+
+```json
+{
+  "config": { "kugouBaseUrl": null, "neteaseBaseUrls": [], "neteaseAnonymousCookieUrl": "/register/anonimous" },
+  "auth": { "qq": { "strMusicid": "...", "musickey": "...", "refreshKey": "...", "loginType": 1 }, "kugou": null, "neteaseCookie": null },
+  "target": { "type": "track", "track": { "service": "qq", "id": "songmid", "title": "Song", "artists": ["Artist"], "artistIds": [], "album": "Album", "albumId": "1", "qualities": [] } },
+  "options": { "qualityId": "flac", "outDir": "D:/Music", "overwrite": false, "concurrency": 3, "retries": 2 }
+}
+```
+
+start result：`MusicDownloadStartResult`
+
+```json
+{ "sessionId": "<downloadSessionId>" }
+```
+
+status params：
+
+```json
+{ "sessionId": "<downloadSessionId>" }
+```
+
+status result：`MusicDownloadStatus`（含 totals + jobs 状态）
+
+cancel params：
+
+```json
+{ "sessionId": "<downloadSessionId>" }
+```
+
+cancel result：`OkReply`
 
 ### `livestream.decodeManifest`（直播源解析 / 清晰度列表）
 

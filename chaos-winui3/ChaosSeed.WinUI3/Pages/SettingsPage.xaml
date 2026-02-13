@@ -148,6 +148,72 @@
                             Message="Backdrop 仅 Windows 11 生效；Windows 10 将自动降级为“无”。" />
                     </StackPanel>
                 </Border>
+
+                <Border Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="歌曲下载" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="提示：网易云默认已内置可用的 API 列表；酷狗需要配置 API 才能启用。" Opacity="0.8" TextWrapping="Wrap" />
+
+                        <Grid RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="420" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="酷狗 API baseUrl" VerticalAlignment="Center" />
+                            <TextBox
+                                x:Name="MusicKugouBaseUrlBox"
+                                Grid.Row="0"
+                                Grid.Column="1"
+                                PlaceholderText="留空则禁用（例如：http://127.0.0.1:3000）"
+                                LostFocus="OnMusicKugouBaseUrlLostFocus" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="网易云 API baseUrls" VerticalAlignment="Center" />
+                            <TextBox
+                                x:Name="MusicNeteaseBaseUrlsBox"
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                PlaceholderText="多个用 ; 分隔"
+                                LostFocus="OnMusicNeteaseBaseUrlsLostFocus" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="网易云匿名 cookieUrl" VerticalAlignment="Center" />
+                            <TextBox
+                                x:Name="MusicNeteaseAnonUrlBox"
+                                Grid.Row="2"
+                                Grid.Column="1"
+                                PlaceholderText="/register/anonimous"
+                                LostFocus="OnMusicNeteaseAnonUrlLostFocus" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="每次下载都询问保存位置" VerticalAlignment="Center" />
+                            <ToggleSwitch
+                                x:Name="MusicAskOutDirToggle"
+                                Grid.Row="3"
+                                Grid.Column="1"
+                                OffContent="关闭"
+                                OnContent="开启"
+                                Toggled="OnMusicAskOutDirToggled" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="下载路径模板" VerticalAlignment="Center" />
+                            <StackPanel Grid.Row="4" Grid.Column="1" Spacing="4">
+                                <TextBox
+                                    x:Name="MusicPathTemplateBox"
+                                    PlaceholderText="{}{{artist}}/{{album}}/{{title}} - {{artist}}.{{ext}}"
+                                    LostFocus="OnMusicPathTemplateLostFocus" />
+                                <TextBlock
+                                    Text="变量：artist、album、title、ext、track_no（可选）；支持用 / 分隔文件夹。"
+                                    Opacity="0.75"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </Grid>
     </ScrollViewer>

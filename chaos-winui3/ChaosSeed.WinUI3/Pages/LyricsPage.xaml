@@ -13,11 +13,68 @@
                 </TransitionCollection>
             </Grid.Transitions>
 
-            <StackPanel Spacing="12" MaxWidth="860">
-                <TextBlock Text="歌词" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="通过 SMTC/GSMTC 读取系统 Now Playing，并按 BetterLyrics 风格策略多源搜索歌词。" Opacity="0.8" />
+            <Grid x:Name="LyricsLayout" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-                <Border Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+                <StackPanel Grid.Row="0" Spacing="12">
+                    <TextBlock Text="歌词" FontSize="28" FontWeight="SemiBold" />
+                    <TextBlock Text="通过 SMTC/GSMTC 读取系统 Now Playing，并按 BetterLyrics 风格策略多源搜索歌词。" Opacity="0.8" />
+                </StackPanel>
+
+                <Grid Grid.Row="1" x:Name="LyricsCardsGrid" ColumnSpacing="12" RowSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="LyricsCol0" Width="*" />
+                        <ColumnDefinition x:Name="LyricsCol1" Width="0" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <VisualStateManager.VisualStateGroups>
+	                        <VisualStateGroup>
+	                            <VisualState x:Name="Narrow">
+	                                <VisualState.StateTriggers>
+	                                    <AdaptiveTrigger MinWindowWidth="0" />
+	                                </VisualState.StateTriggers>
+	                                <VisualState.Setters>
+	                                    <Setter Target="LyricsCol1.Width" Value="0" />
+	                                    <Setter Target="NowPlayingCard.(Grid.Row)" Value="0" />
+	                                    <Setter Target="NowPlayingCard.(Grid.Column)" Value="0" />
+	                                    <Setter Target="LyricsConfigCard.(Grid.Row)" Value="1" />
+                                    <Setter Target="LyricsConfigCard.(Grid.Column)" Value="0" />
+                                    <Setter Target="LyricsListCard.(Grid.Row)" Value="2" />
+                                    <Setter Target="LyricsListCard.(Grid.Column)" Value="0" />
+                                    <Setter Target="LyricsListCard.(Grid.RowSpan)" Value="1" />
+
+                                    <Setter Target="LyricsList.MaxHeight" Value="520" />
+                                </VisualState.Setters>
+                            </VisualState>
+                            <VisualState x:Name="Wide">
+                                <VisualState.StateTriggers>
+                                    <AdaptiveTrigger MinWindowWidth="1200" />
+                                </VisualState.StateTriggers>
+                                <VisualState.Setters>
+                                    <Setter Target="LyricsCol1.Width" Value="*" />
+                                    <Setter Target="NowPlayingCard.(Grid.Row)" Value="0" />
+                                    <Setter Target="NowPlayingCard.(Grid.Column)" Value="0" />
+                                    <Setter Target="LyricsConfigCard.(Grid.Row)" Value="1" />
+                                    <Setter Target="LyricsConfigCard.(Grid.Column)" Value="0" />
+                                    <Setter Target="LyricsListCard.(Grid.Row)" Value="0" />
+                                    <Setter Target="LyricsListCard.(Grid.Column)" Value="1" />
+                                    <Setter Target="LyricsListCard.(Grid.RowSpan)" Value="2" />
+
+                                    <Setter Target="LyricsList.MaxHeight" Value="900" />
+                                </VisualState.Setters>
+                            </VisualState>
+                        </VisualStateGroup>
+                    </VisualStateManager.VisualStateGroups>
+
+                    <Border x:Name="NowPlayingCard" Grid.Row="0" Grid.Column="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                     <StackPanel Spacing="12">
                         <TextBlock Text="Now Playing" FontSize="18" FontWeight="SemiBold" />
 
@@ -44,6 +101,14 @@
                             <StackPanel Grid.Column="1" Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <Button x:Name="RefreshBtn" Content="刷新 Now Playing" Click="OnRefreshNowPlayingClicked" />
+                                    <ComboBox
+                                        x:Name="SessionCombo"
+                                        Width="420"
+                                        ItemsSource="{x:Bind SessionOptions, Mode=OneWay}"
+                                        DisplayMemberPath="Display"
+                                        SelectionChanged="OnSessionSelectionChanged"
+                                        Visibility="Collapsed" />
+                                    <Button x:Name="UseSessionBtn" Content="切换" Click="OnUseSelectedSessionClicked" Visibility="Collapsed" />
                                 </StackPanel>
 
                                 <Grid ColumnSpacing="12" RowSpacing="6">
@@ -87,7 +152,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+                <Border x:Name="LyricsConfigCard" Grid.Row="1" Grid.Column="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                     <StackPanel Spacing="12">
                         <TextBlock Text="歌词" FontSize="18" FontWeight="SemiBold" />
 
@@ -206,55 +271,63 @@
                             </StackPanel>
                         </Border>
 
-                        <Border
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            CornerRadius="8"
-                            Padding="0">
-                            <Grid>
-                                <ListView
-                                    x:Name="LyricsList"
-                                    ItemsSource="{x:Bind Lines, Mode=OneWay}"
-                                    MaxHeight="520">
-                                    <ListView.ItemTemplate>
-                                        <DataTemplate x:DataType="models:LyricsLineVm">
-                                            <Grid Padding="10" ColumnSpacing="12">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="72" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-
-                                                <TextBlock
-                                                    Grid.Column="0"
-                                                    Text="{x:Bind TimeLabel}"
-                                                    Opacity="0.7"
-                                                    FontFamily="Consolas" />
-
-                                                <StackPanel Grid.Column="1" Spacing="2">
-                                                    <TextBlock Text="{x:Bind Original}" TextWrapping="Wrap" FontSize="14" />
-                                                    <TextBlock
-                                                        Text="{x:Bind TranslationText}"
-                                                        Visibility="{x:Bind TranslationVisibility}"
-                                                        TextWrapping="Wrap"
-                                                        Opacity="0.75"
-                                                        FontSize="13" />
-                                                </StackPanel>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListView.ItemTemplate>
-                                </ListView>
-
-                                <TextBlock
-                                    x:Name="LyricsEmptyText"
-                                    Text="暂无歌词"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Opacity="0.6"
-                                    IsHitTestVisible="False" />
-                            </Grid>
-                        </Border>
                     </StackPanel>
                 </Border>
-            </StackPanel>
+
+                    <Border x:Name="LyricsListCard" Grid.Row="2" Grid.Column="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="歌词内容" FontSize="18" FontWeight="SemiBold" />
+
+                            <Border
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                CornerRadius="8"
+                                Padding="0">
+                                <Grid>
+                                    <ListView
+                                        x:Name="LyricsList"
+                                        ItemsSource="{x:Bind Lines, Mode=OneWay}"
+                                        MaxHeight="520">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="models:LyricsLineVm">
+                                                <Grid Padding="10" ColumnSpacing="12">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="72" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <TextBlock
+                                                        Grid.Column="0"
+                                                        Text="{x:Bind TimeLabel}"
+                                                        Opacity="0.7"
+                                                        FontFamily="Consolas" />
+
+                                                    <StackPanel Grid.Column="1" Spacing="2">
+                                                        <TextBlock Text="{x:Bind Original}" TextWrapping="Wrap" FontSize="14" />
+                                                        <TextBlock
+                                                            Text="{x:Bind TranslationText}"
+                                                            Visibility="{x:Bind TranslationVisibility}"
+                                                            TextWrapping="Wrap"
+                                                            Opacity="0.75"
+                                                            FontSize="13" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+
+                                    <TextBlock
+                                        x:Name="LyricsEmptyText"
+                                        Text="暂无歌词"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Opacity="0.6"
+                                        IsHitTestVisible="False" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
         </Grid>
     </ScrollViewer>
 </Page>

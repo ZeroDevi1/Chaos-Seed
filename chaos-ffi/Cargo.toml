@@ -10,8 +10,10 @@ description = "C ABI adapter for chaos-core (JSON-based, for WinUI3/Qt/etc)."
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+base64 = "0.22"
 chaos-core = { path = "../chaos-core" }
 chaos-proto = { path = "../chaos-proto" }
+fastrand = "2"
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rustls = "0.23"

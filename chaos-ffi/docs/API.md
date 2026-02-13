@@ -17,15 +17,18 @@
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-返回 API 版本号。当前为 `5`。
+返回 API 版本号。当前为 `6`。
 
 ### `char* chaos_ffi_version_json(void)`
 
 返回：
 
 ```json
-{"version":"0.3.0","git":"unknown","api":5}
+{"version":"0.4.0","git":"unknown","api":6}
 ```
+
+当前为：
+- `api = 6`（包含“歌曲下载”相关接口）。
 
 ### `char* chaos_ffi_last_error_json(void)`
 
@@ -84,6 +87,64 @@ char* chaos_now_playing_snapshot_json(
 说明：
 - **非 Windows 平台**：不会报错；返回 `supported=false` 且 `sessions=[]`，`now_playing=null`。
 - **无媒体会话**：`sessions=[]`，`now_playing=null`。
+
+## 音乐（歌曲搜索 / 登录 / 下载）
+
+说明：
+- 字段形状与 `chaos-proto` 的 music DTO 对齐（`camelCase`）。
+- `service` 取值：`qq | kugou | netease | kuwo`。
+- 合规边界：仅下载“接口返回的可直接下载 URL”，不包含任何 DRM 解密/绕过逻辑；若无权限/登录失效/接口不返回 URL，会返回明确错误。
+
+### 配置
+
+#### `char* chaos_music_config_set_json(const char* config_json_utf8)`
+
+输入：`MusicProviderConfig` JSON，例如：
+
+```json
+{
+  "kugouBaseUrl": "http://127.0.0.1:3000",
+  "neteaseBaseUrls": ["http://127.0.0.1:3001"],
+  "neteaseAnonymousCookieUrl": "/register/anonimous"
+}
+```
+
+返回：`OkReply` JSON：
+
+```json
+{ "ok": true }
+```
+
+说明：
+- 酷狗：需要配置 `kugouBaseUrl` 才能启用相关能力（留空则不可用）。
+- 网易云：若 `neteaseBaseUrls` 为空，会使用内置的一组可用 API 列表；也可通过 config 覆盖。
+
+### 搜索 / 列表
+
+- `char* chaos_music_search_tracks_json(const char* params_json_utf8)` -> `MusicTrack[]`
+- `char* chaos_music_search_albums_json(const char* params_json_utf8)` -> `MusicAlbum[]`
+- `char* chaos_music_search_artists_json(const char* params_json_utf8)` -> `MusicArtist[]`
+- `char* chaos_music_album_tracks_json(const char* params_json_utf8)` -> `MusicTrack[]`
+- `char* chaos_music_artist_albums_json(const char* params_json_utf8)` -> `MusicAlbum[]`
+
+其中 `params_json_utf8` 为对应的 params DTO（如 `MusicSearchParams` / `MusicAlbumTracksParams`）。
+
+### 登录（QQ 音乐）
+
+- `char* chaos_music_qq_login_qr_create_json(const char* login_type_utf8)`：`login_type_utf8 = "qq" | "wechat"`，返回 `MusicLoginQr`（含二维码 base64）。
+- `char* chaos_music_qq_login_qr_poll_json(const char* session_id_utf8)`：轮询返回 `MusicLoginQrPollResult`；成功时 `cookie` 非空。
+- `char* chaos_music_qq_refresh_cookie_json(const char* cookie_json_utf8)`：输入 `QqMusicCookie` JSON，返回更新后的 `QqMusicCookie` JSON。
+
+### 登录（酷狗）
+
+- `char* chaos_music_kugou_login_qr_create_json(const char* login_type_utf8)`：依赖 `kugouBaseUrl` 配置；返回 `MusicLoginQr`。
+- `char* chaos_music_kugou_login_qr_poll_json(const char* session_id_utf8)`：成功时 `kugouUser` 非空。
+
+### 下载（阻塞）
+
+#### `char* chaos_music_download_blocking_json(const char* start_params_json_utf8)`
+
+输入：`MusicDownloadStartParams` JSON；返回：`MusicDownloadStatus` JSON（包含每个 job 的结果与错误信息）。
 
 ## 字幕（Thunder）
 

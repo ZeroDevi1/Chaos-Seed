@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.IO.Pipes;
 using ChaosSeed.WinUI3.Models;
+using ChaosSeed.WinUI3.Models.Music;
 using StreamJsonRpc;
 using StreamJsonRpc.Protocol;
 using StreamJsonRpc.Reflection;
@@ -345,6 +346,362 @@ public sealed class DaemonClient : IDisposable
         catch (RemoteInvocationException ex)
         {
             throw WrapRpcFailure("lyrics.search", ex);
+        }
+    }
+
+    // ----- music -----
+
+    public async Task MusicConfigSetAsync(MusicProviderConfig cfg, CancellationToken ct = default)
+    {
+        if (cfg is null) throw new ArgumentNullException(nameof(cfg));
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>("music.config.set", cfg, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.config.set", ex);
+        }
+    }
+
+    public async Task<MusicTrack[]> MusicSearchTracksAsync(MusicSearchParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicTrack[]>("music.searchTracks", p, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.searchTracks", ex);
+        }
+    }
+
+    public async Task<MusicAlbum[]> MusicSearchAlbumsAsync(MusicSearchParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicAlbum[]>("music.searchAlbums", p, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.searchAlbums", ex);
+        }
+    }
+
+    public async Task<MusicArtist[]> MusicSearchArtistsAsync(MusicSearchParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicArtist[]>("music.searchArtists", p, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.searchArtists", ex);
+        }
+    }
+
+    public async Task<MusicTrack[]> MusicAlbumTracksAsync(MusicAlbumTracksParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicTrack[]>("music.albumTracks", p, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.albumTracks", ex);
+        }
+    }
+
+    public async Task<MusicAlbum[]> MusicArtistAlbumsAsync(MusicArtistAlbumsParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicAlbum[]>("music.artistAlbums", p, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.artistAlbums", ex);
+        }
+    }
+
+    public async Task<MusicTrackPlayUrlResult> MusicTrackPlayUrlAsync(MusicTrackPlayUrlParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            // Use an anonymous payload with explicit camelCase keys to avoid serializer naming-policy differences
+            // (daemon expects e.g. "trackId" rather than "TrackId").
+            var payload = new
+            {
+                service = (p.Service ?? "").Trim(),
+                trackId = (p.TrackId ?? "").Trim(),
+                qualityId = string.IsNullOrWhiteSpace(p.QualityId) ? null : p.QualityId,
+                auth = p.Auth,
+            };
+            return await _rpc.InvokeWithParameterObjectAsync<MusicTrackPlayUrlResult>("music.trackPlayUrl", payload, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.trackPlayUrl", ex);
+        }
+    }
+
+    public async Task<MusicLoginQr> MusicQqLoginQrCreateAsync(string loginType, CancellationToken ct = default)
+    {
+        var lt = (loginType ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(lt))
+        {
+            throw new ArgumentException("empty loginType", nameof(loginType));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicLoginQr>(
+                "music.qq.loginQrCreate",
+                new { loginType = lt },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.qq.loginQrCreate", ex);
+        }
+    }
+
+    public async Task<MusicLoginQrPollResult> MusicQqLoginQrPollAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicLoginQrPollResult>(
+                "music.qq.loginQrPoll",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.qq.loginQrPoll", ex);
+        }
+    }
+
+    public async Task<QqMusicCookie> MusicQqRefreshCookieAsync(QqMusicCookie cookie, CancellationToken ct = default)
+    {
+        if (cookie is null) throw new ArgumentNullException(nameof(cookie));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<QqMusicCookie>(
+                "music.qq.refreshCookie",
+                new { cookie },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.qq.refreshCookie", ex);
+        }
+    }
+
+    public async Task<MusicLoginQr> MusicKugouLoginQrCreateAsync(string loginType, CancellationToken ct = default)
+    {
+        var lt = (loginType ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(lt))
+        {
+            throw new ArgumentException("empty loginType", nameof(loginType));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicLoginQr>(
+                "music.kugou.loginQrCreate",
+                new { loginType = lt },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.kugou.loginQrCreate", ex);
+        }
+    }
+
+    public async Task<MusicLoginQrPollResult> MusicKugouLoginQrPollAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicLoginQrPollResult>(
+                "music.kugou.loginQrPoll",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.kugou.loginQrPoll", ex);
+        }
+    }
+
+    public async Task<MusicDownloadStartResult> MusicDownloadStartAsync(MusicDownloadStartParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicDownloadStartResult>("music.download.start", p, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.download.start", ex);
+        }
+    }
+
+    public async Task<MusicDownloadStatus> MusicDownloadStatusAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<MusicDownloadStatus>(
+                "music.download.status",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.download.status", ex);
+        }
+    }
+
+    public async Task MusicDownloadCancelAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>(
+                "music.download.cancel",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("music.download.cancel", ex);
         }
     }
 

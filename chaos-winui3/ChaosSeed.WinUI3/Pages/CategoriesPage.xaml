@@ -77,10 +77,12 @@
                                                                 Background="Transparent"
                                                                 BorderThickness="0"
                                                                 Padding="0"
+                                                                Width="120"
                                                                 Margin="0,0,12,12">
                                                                 <Border
                                                                     CornerRadius="{StaticResource ChaosCornerRadius12}"
                                                                     Padding="10"
+                                                                    Width="120"
                                                                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                                                                     <StackPanel Spacing="8" HorizontalAlignment="Center">
                                                                         <Border
@@ -106,9 +108,11 @@
                                                                         <TextBlock
                                                                             Text="{x:Bind Name, Mode=OneWay}"
                                                                             TextAlignment="Center"
-                                                                            TextWrapping="NoWrap"
                                                                             TextTrimming="CharacterEllipsis"
-                                                                            MaxLines="1" />
+                                                                            TextWrapping="Wrap"
+                                                                            MaxLines="2"
+                                                                            Width="100"
+                                                                            Height="36" />
                                                                     </StackPanel>
                                                                 </Border>
                                                             </Button>

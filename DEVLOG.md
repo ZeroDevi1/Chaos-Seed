@@ -136,3 +136,23 @@
   - 移除原“主页”，默认进入“直播”页；导航新增“歌词”页。
   - 直播页：输入框支持回车触发解析；播放打开中点击“返回”会立即恢复清晰度卡片可点击，并取消本地打开流程。
   - 歌词页：显示 Now Playing 信息，支持“自动检测”（轮询）并按 `qq,netease,lrclib` 顺序做阈值搜索（默认阈值 `40`）；歌词后端独立设置（Auto / FFI / daemon）。
+
+## 2026-02-13
+
+### 变更（音乐下载：core/daemon/WinUI3）
+- `chaos-core`：
+  - 新增 `music` 模块：ProviderConfig 注入 + 搜索（单曲/专辑/歌手）+ `albumTracks/artistAlbums` + `trackPlayUrl`（试听/预览 URL）。
+  - 登录：QQ（QQ/微信扫码登录、refresh cookie）、酷狗扫码登录（依赖 baseUrl）。
+  - 下载：按单曲/专辑/歌手创建下载会话；任务队列、并发/重试、进度统计、取消；落盘目录结构 `Artist/Album/...` 并做文件名 sanitize。
+- `chaos-proto`：新增 music DTO 与方法常量（`music.*`），统一 IPC 的 JSON 字段形状。
+- `chaos-daemon`：
+  - 新增 RPC：`music.config.set`、`music.search*`、`music.albumTracks`/`music.artistAlbums`、`music.trackPlayUrl`、`music.qq.*`、`music.kugou.*`、`music.download.*`（start/status/cancel）。
+  - 增加 JSON-RPC over LSP framing 服务器实现与测试（pipe/鉴权/错误码）。
+- `chaos-ffi`：
+  - 新增 music JSON API：`chaos_music_*`（config/search/login/download_blocking），并更新 `docs/API.md` / `docs/CSharp.md`。
+- WinUI 3：
+  - 新增「歌曲」页：搜索（单曲/专辑/歌手）、扫码登录/刷新 Cookie、选择音质、下载队列与进度轮询/取消。
+  - 新增手动验收脚本：`docs/WinUI3_MusicPage_ManualTest.md`。
+
+### 测试与回归
+- 新增 core 侧 music 相关单测（文件名 sanitize、QQ cookie 容错反序列化、QQ 签名等），以及 daemon RPC dispatch 相关测试。

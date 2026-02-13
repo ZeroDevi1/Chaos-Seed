@@ -146,6 +146,9 @@ public sealed partial class MainWindow : Window
             case "lyrics":
                 ContentFrame.Navigate(typeof(LyricsPage), null, new DrillInNavigationTransitionInfo());
                 break;
+            case "music":
+                ContentFrame.Navigate(typeof(MusicPage), null, new DrillInNavigationTransitionInfo());
+                break;
             case "settings":
                 ContentFrame.Navigate(typeof(SettingsPage), null, new DrillInNavigationTransitionInfo());
                 break;

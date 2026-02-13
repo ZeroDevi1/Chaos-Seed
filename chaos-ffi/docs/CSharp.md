@@ -64,6 +64,44 @@ internal static partial class ChaosFfi
         string? services_csv_utf8_or_null,
         uint timeout_ms);
 
+    // ----- music -----
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_config_set_json(string config_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_search_tracks_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_search_albums_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_search_artists_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_album_tracks_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_artist_albums_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_qq_login_qr_create_json(string login_type_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_qq_login_qr_poll_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_qq_refresh_cookie_json(string cookie_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_kugou_login_qr_create_json(string login_type_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_kugou_login_qr_poll_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_download_blocking_json(string start_params_json_utf8);
+
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_live_dir_categories_json(string site_utf8);
 
@@ -271,6 +309,65 @@ Console.WriteLine(variantJson);
 // Player-side hints:
 // - Use manifest.playback.referer / user_agent as request headers.
 // - Prefer variant.url; fallback to variant.backup_urls.
+```
+
+## 音乐（搜索 / 登录 / 下载）
+
+```csharp
+static string TakeOrThrow(IntPtr p, string what)
+{
+    var s = ChaosFfi.TakeString(p);
+    if (!string.IsNullOrEmpty(s)) return s;
+    var err = ChaosFfi.TakeString(ChaosFfi.chaos_ffi_last_error_json());
+    throw new Exception($"{what} failed: {err}");
+}
+
+// 1) config.set
+// - 酷狗：需要配置 kugouBaseUrl 才能启用（留空则不可用）
+// - 网易云：neteaseBaseUrls 为空时会使用内置列表；也可在此覆盖
+var cfgJson = """
+{
+  "kugouBaseUrl": "http://127.0.0.1:3000",
+  "neteaseBaseUrls": ["http://127.0.0.1:3001"],
+  "neteaseAnonymousCookieUrl": "/register/anonimous"
+}
+""";
+_ = TakeOrThrow(ChaosFfi.chaos_music_config_set_json(cfgJson), "music.config.set");
+
+// 2) searchTracks（示例：QQ）
+var searchJson = """
+{ "service": "qq", "keyword": "周杰伦", "page": 1, "pageSize": 10 }
+""";
+var tracksJson = TakeOrThrow(ChaosFfi.chaos_music_search_tracks_json(searchJson), "music.searchTracks");
+Console.WriteLine(tracksJson);
+
+// 3) QQ 扫码登录（轮询直到 done 或 timeout）
+var qrJson = TakeOrThrow(ChaosFfi.chaos_music_qq_login_qr_create_json("qq"), "qq.loginQrCreate");
+using var qrDoc = JsonDocument.Parse(qrJson);
+var sessionId = qrDoc.RootElement.GetProperty("sessionId").GetString()!;
+var base64 = qrDoc.RootElement.GetProperty("base64").GetString()!;
+Console.WriteLine("QR base64 length=" + base64.Length);
+
+// poll:
+for (int i = 0; i < 300; i++)
+{
+    var pollJson = TakeOrThrow(ChaosFfi.chaos_music_qq_login_qr_poll_json(sessionId), "qq.loginQrPoll");
+    using var pollDoc = JsonDocument.Parse(pollJson);
+    var state = pollDoc.RootElement.GetProperty("state").GetString();
+    if (state == "done")
+    {
+        Console.WriteLine("login ok");
+        break;
+    }
+    if (state == "timeout")
+    {
+        throw new Exception("login timeout");
+    }
+    await Task.Delay(1000);
+}
+
+// 4) （可选）阻塞下载：传 MusicDownloadStartParams JSON
+// 注意：WinUI3 推荐走 daemon 的 start/status/cancel 会话式下载。
 ```
 
 ## 直播目录（首页/分类）

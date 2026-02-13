@@ -7,6 +7,12 @@ use chaos_proto::{
     LiveOpenResult, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
     LivestreamPlaybackHints, LivestreamVariant, LyricsSearchParams, LyricsSearchResult,
     NowPlayingSession, NowPlayingSnapshot, NowPlayingSnapshotParams,
+    // music
+    KugouUserInfo, MusicAlbum, MusicAlbumTracksParams, MusicArtist, MusicArtistAlbumsParams,
+    MusicDownloadCancelParams, MusicDownloadStartParams, MusicDownloadStartResult, MusicDownloadStatus,
+    MusicDownloadStatusParams, MusicDownloadTotals, MusicLoginQr, MusicLoginQrCreateParams, MusicLoginQrPollParams,
+    MusicLoginQrPollResult, MusicLoginQrState, MusicProviderConfig, MusicRefreshCookieParams,
+    MusicSearchParams, MusicTrack, MusicTrackPlayUrlParams, MusicTrackPlayUrlResult, OkReply, QqMusicCookie,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -244,6 +250,139 @@ impl ChaosService for FakeSvc {
             base64: "AA==".to_string(),
             width: Some(24),
         })
+    }
+
+    // ----- music -----
+
+    async fn music_config_set(&self, _params: MusicProviderConfig) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
+    async fn music_search_tracks(&self, _params: MusicSearchParams) -> Result<Vec<MusicTrack>, String> {
+        Ok(vec![])
+    }
+
+    async fn music_search_albums(&self, _params: MusicSearchParams) -> Result<Vec<MusicAlbum>, String> {
+        Ok(vec![])
+    }
+
+    async fn music_search_artists(&self, _params: MusicSearchParams) -> Result<Vec<MusicArtist>, String> {
+        Ok(vec![])
+    }
+
+    async fn music_album_tracks(&self, _params: MusicAlbumTracksParams) -> Result<Vec<MusicTrack>, String> {
+        Ok(vec![])
+    }
+
+    async fn music_artist_albums(&self, _params: MusicArtistAlbumsParams) -> Result<Vec<MusicAlbum>, String> {
+        Ok(vec![])
+    }
+
+    async fn music_track_play_url(
+        &self,
+        _params: MusicTrackPlayUrlParams,
+    ) -> Result<MusicTrackPlayUrlResult, String> {
+        Ok(MusicTrackPlayUrlResult {
+            url: "https://example.com/a.mp3".to_string(),
+            ext: "mp3".to_string(),
+        })
+    }
+
+    async fn music_qq_login_qr_create(
+        &self,
+        params: MusicLoginQrCreateParams,
+    ) -> Result<MusicLoginQr, String> {
+        Ok(MusicLoginQr {
+            session_id: "qq".to_string(),
+            login_type: params.login_type,
+            mime: "image/png".to_string(),
+            base64: "".to_string(),
+            identifier: "id".to_string(),
+            created_at_unix_ms: 0,
+        })
+    }
+
+    async fn music_qq_login_qr_poll(
+        &self,
+        params: MusicLoginQrPollParams,
+    ) -> Result<MusicLoginQrPollResult, String> {
+        Ok(MusicLoginQrPollResult {
+            session_id: params.session_id,
+            state: MusicLoginQrState::Scan,
+            message: None,
+            cookie: None,
+            kugou_user: None,
+        })
+    }
+
+    async fn music_qq_refresh_cookie(
+        &self,
+        params: MusicRefreshCookieParams,
+    ) -> Result<QqMusicCookie, String> {
+        Ok(params.cookie)
+    }
+
+    async fn music_kugou_login_qr_create(
+        &self,
+        params: MusicLoginQrCreateParams,
+    ) -> Result<MusicLoginQr, String> {
+        Ok(MusicLoginQr {
+            session_id: "kugou".to_string(),
+            login_type: params.login_type,
+            mime: "image/png".to_string(),
+            base64: "".to_string(),
+            identifier: "id".to_string(),
+            created_at_unix_ms: 0,
+        })
+    }
+
+    async fn music_kugou_login_qr_poll(
+        &self,
+        params: MusicLoginQrPollParams,
+    ) -> Result<MusicLoginQrPollResult, String> {
+        Ok(MusicLoginQrPollResult {
+            session_id: params.session_id,
+            state: MusicLoginQrState::Scan,
+            message: None,
+            cookie: None,
+            kugou_user: Some(KugouUserInfo {
+                token: "t".to_string(),
+                userid: "u".to_string(),
+            }),
+        })
+    }
+
+    async fn music_download_start(
+        &self,
+        _params: MusicDownloadStartParams,
+    ) -> Result<MusicDownloadStartResult, String> {
+        Ok(MusicDownloadStartResult {
+            session_id: "dl".to_string(),
+        })
+    }
+
+    async fn music_download_status(
+        &self,
+        _params: MusicDownloadStatusParams,
+    ) -> Result<MusicDownloadStatus, String> {
+        Ok(MusicDownloadStatus {
+            done: true,
+            totals: MusicDownloadTotals {
+                total: 0,
+                done: 0,
+                failed: 0,
+                skipped: 0,
+                canceled: 0,
+            },
+            jobs: vec![],
+        })
+    }
+
+    async fn music_download_cancel(
+        &self,
+        _params: MusicDownloadCancelParams,
+    ) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
     }
 }
 
