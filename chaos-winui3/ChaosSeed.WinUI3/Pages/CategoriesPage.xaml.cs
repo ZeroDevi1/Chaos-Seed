@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Services.LiveDirectoryBackends;
+using Microsoft.UI.Xaml.Media;
 
 namespace ChaosSeed.WinUI3.Pages;
 
@@ -15,6 +16,7 @@ public sealed partial class CategoriesPage : Page
     private ILiveDirectoryBackend _backend;
     private string _site = "bili_live";
     private ItemsWrapGrid? _roomsWrapGrid;
+    private ScrollViewer? _roomScrollViewer;
 
     private string? _activeParentId;
     private string? _activeCategoryId;
@@ -44,6 +46,17 @@ public sealed partial class CategoriesPage : Page
     {
         base.OnNavigatedFrom(e);
         try { _cts?.Cancel(); } catch { }
+        try
+        {
+            if (_roomScrollViewer is not null)
+            {
+                _roomScrollViewer.ViewChanged -= OnRoomScrollViewChanged;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private void ShowInfo(string msg)
@@ -263,6 +276,7 @@ public sealed partial class CategoriesPage : Page
         CategoriesView.Visibility = Visibility.Collapsed;
         RoomsView.Visibility = Visibility.Visible;
         PagerBar.Visibility = Visibility.Visible;
+        TryHookRoomsScrollViewer();
         TryUpdateRoomsWrapGrid();
         UpdateRoomsItemWidth(RoomGrid.ActualWidth);
 
@@ -330,6 +344,7 @@ public sealed partial class CategoriesPage : Page
     {
         _ = sender;
         _ = e;
+        TryHookRoomsScrollViewer();
         TryUpdateRoomsWrapGrid();
         UpdateRoomsItemWidth(RoomGrid.ActualWidth);
     }
@@ -381,6 +396,71 @@ public sealed partial class CategoriesPage : Page
         {
             panel.ItemWidth = item;
         }
+    }
+
+    private void TryHookRoomsScrollViewer()
+    {
+        if (_roomScrollViewer is not null)
+        {
+            return;
+        }
+        try
+        {
+            _roomScrollViewer = FindDescendant<ScrollViewer>(RoomGrid);
+            if (_roomScrollViewer is not null)
+            {
+                _roomScrollViewer.ViewChanged += OnRoomScrollViewChanged;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async void OnRoomScrollViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        _ = sender;
+        // Match HomePage behavior: only trigger at scroll end to reduce churn.
+        if (e.IsIntermediate)
+        {
+            return;
+        }
+        if (RoomsView.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var sv = _roomScrollViewer;
+        if (sv is null)
+        {
+            return;
+        }
+
+        // Near bottom => load more.
+        if (sv.ScrollableHeight > 0 && (sv.ScrollableHeight - sv.VerticalOffset) < 480)
+        {
+            await LoadNextRoomsPageAsync();
+        }
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        var n = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T t)
+            {
+                return t;
+            }
+            var found = FindDescendant<T>(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+        return null;
     }
 }
 

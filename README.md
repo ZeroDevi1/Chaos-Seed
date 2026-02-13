@@ -216,6 +216,20 @@ cargo run -p chaos-core --example lyrics_search -- --title "Hello" --artist "Ade
 - `chaos-winui3-windows-x86_64.zip`
 - `chaos-tauri-windows-x86_64.zip`
 
+推送示例（创建 tag 后一定要 push 到远端，CI 才会触发）：
+
+```bash
+# 1) 先确保要打 tag 的提交已在远端（可选，但推荐）
+git push origin main
+
+# 2) 创建并推送 tag（建议使用 annotated tag，便于 --follow-tags）
+git tag -a "v0.2.0" -m "v0.2.0"
+git push origin "v0.2.0"
+
+# 或者：一次性推送提交 + 相关 annotated tags
+git push --follow-tags
+```
+
 ## Tauri（当前 UI）
 
 仅 Rust 侧编译检查（不跑前端构建）：
