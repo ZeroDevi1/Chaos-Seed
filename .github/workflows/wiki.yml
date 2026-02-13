@@ -11,6 +11,7 @@ on:
       - "TODO_NEXT.md"
       - "docs/**/*.md"
       - "chaos-ffi/docs/**/*.md"
+      - "chaos-daemon/docs/**/*.md"
       - "scripts/wiki_export.sh"
       - ".github/workflows/wiki.yml"
   workflow_dispatch: {}

@@ -20,6 +20,8 @@
 | `chaos-ffi/docs/API.md` | `FFI_API.md` | `FFI_API` |
 | `chaos-ffi/docs/CSharp.md` | `FFI_CSharp.md` | `FFI_CSharp` |
 | `chaos-ffi/docs/BUILD.md` | `FFI_BUILD.md` | `FFI_BUILD` |
+| `chaos-daemon/docs/API.md` | `Daemon_API.md` | `Daemon_API` |
+| `chaos-daemon/docs/CSharp.md` | `Daemon_CSharp.md` | `Daemon_CSharp` |
 | `TODO.md` | `TODO.md` | `TODO` |
 | `TODO_NEXT.md` | `TODO_NEXT.md` | `TODO_NEXT` |
 | `DEVLOG.md` | `DEVLOG.md` | `DEVLOG` |
@@ -51,4 +53,3 @@ ls -la .wiki-export
 
 - 风险：镜像模式会删除 Wiki 中“非 allowlist 导出”的页面；不要手工维护 Wiki 内容。
 - 回退：禁用 `.github/workflows/wiki.yml`，或移除 `rsync --delete`（会导致旧页面残留）。
-

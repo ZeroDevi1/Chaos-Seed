@@ -59,6 +59,10 @@ copy "chaos-ffi/docs/API.md" "FFI_API.md"
 copy "chaos-ffi/docs/CSharp.md" "FFI_CSharp.md"
 copy "chaos-ffi/docs/BUILD.md" "FFI_BUILD.md"
 
+# Daemon docs
+copy "chaos-daemon/docs/API.md" "Daemon_API.md"
+copy "chaos-daemon/docs/CSharp.md" "Daemon_CSharp.md"
+
 # Project logs / roadmaps
 copy "TODO.md" "TODO.md"
 copy "TODO_NEXT.md" "TODO_NEXT.md"
@@ -70,6 +74,8 @@ cat >"${out_dir}/_Sidebar.md" <<'EOF'
 - [[FFI_API]]
 - [[FFI_CSharp]]
 - [[FFI_BUILD]]
+- [[Daemon_API]]
+- [[Daemon_CSharp]]
 - [[TODO]]
 - [[TODO_NEXT]]
 - [[DEVLOG]]
