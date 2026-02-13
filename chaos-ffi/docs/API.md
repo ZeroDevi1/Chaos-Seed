@@ -100,6 +100,13 @@ char* chaos_subtitle_search_json(
   uint32_t timeout_ms);
 ```
 
+参数：
+- `query_utf8`：搜索关键字（必填，UTF-8；`NULL/空串/全空白` 会失败）。
+- `limit`：最多返回多少条（最小为 1；内部会 `max(1)`）。
+- `min_score_or_neg1`：最小评分过滤；传负数（例如 `-1.0`）表示不启用过滤。
+- `lang_utf8_or_null`：语言过滤（可选，UTF-8），如 `"zh"` / `"en"`；传 `NULL/空串` 表示不过滤。
+- `timeout_ms`：单次请求超时（ms，最小为 1；内部会 `max(1)`）。
+
 返回 `ThunderSubtitleItem` 的 JSON 数组（直接序列化 `chaos-core` 中的结构）。
 
 示例元素（仅展示字段形状）：
@@ -120,6 +127,13 @@ char* chaos_subtitle_download_item_json(
   uint32_t retries,
   uint8_t overwrite);
 ```
+
+参数：
+- `item_json_utf8`：`ThunderSubtitleItem` 的 JSON（必填；通常来自 `chaos_subtitle_search_json` 返回数组中的元素）。
+- `out_dir_utf8`：输出目录（必填，UTF-8；目录不存在时行为由 core 决定，建议调用方先创建）。
+- `timeout_ms`：下载超时（ms，最小为 1；内部会 `max(1)`）。
+- `retries`：失败重试次数（原样传递给 core）。
+- `overwrite`：`1` 覆盖同名文件；`0` 不覆盖。
 
 返回：
 
@@ -275,9 +289,15 @@ char* chaos_lyrics_search_json(
 2) 选择一个 `variants[i].id`（例如 `bili_live:2000:原画` 或 `douyu:2:原画`）
 3) 调用 `chaos_livestream_resolve_variant_json(input, variant_id)` 获取补齐后的 `StreamVariant`
 
+参数：
+- `input_utf8`：与 `decode_manifest` 相同（必填，UTF-8；空串会失败）。
+- `variant_id_utf8`：从 `manifest.variants[i].id` 中取（必填，UTF-8；空串会失败）。
+
 说明：
 - 该函数会 **内部先 decode manifest** 来拿到 canonical `room_id`（例如斗鱼真实 rid / B 站长号），再进行二段解析；
   因此性能上比直接传 `(site, room_id, variant_id)` 略慢。
+
+返回：`StreamVariant` JSON（字段形状同 `resolve_variant2_json` 的示例）。
 
 ### `char* chaos_livestream_resolve_variant2_json(const char* site_utf8, const char* room_id_utf8, const char* variant_id_utf8)`
 
@@ -353,6 +373,9 @@ char* err = chaos_ffi_last_error_json();
 
 ### `char* chaos_live_dir_categories_json(const char* site_utf8)`
 
+参数：
+- `site_utf8`：平台字符串（必填，UTF-8）。支持：`bili_live` / `huya` / `douyu`（也兼容 `bili`/`bl`/`bililive`、`hy`、`dy` 等别名）。
+
 返回 `LiveDirCategory[]` JSON（字段形状）：
 
 ```json
@@ -368,6 +391,10 @@ char* err = chaos_ffi_last_error_json();
 ```
 
 ### `char* chaos_live_dir_recommend_rooms_json(const char* site_utf8, uint32_t page)`
+
+参数：
+- `site_utf8`：同上。
+- `page`：页码（从 `1` 开始；内部会 `max(1)`）。
 
 返回 `LiveDirRoomListResult` JSON（字段形状）：
 
@@ -395,11 +422,22 @@ char* err = chaos_ffi_last_error_json();
 - B 站（`bili_live`）需要 `parent_id` 与 `category_id`（对应 “一级分区 id / 二级分区 id”）。
 - 虎牙/斗鱼通常只需要 `category_id`；`parent_id` 可传 `NULL`。
 
+参数：
+- `site_utf8`：同上。
+- `parent_id_utf8_or_null`：一级分区 id（可选，UTF-8；B 站推荐必传）。
+- `category_id_utf8`：分区 id（必填，UTF-8；空串会失败）。
+- `page`：页码（从 `1` 开始；内部会 `max(1)`）。
+
 返回：同 `LiveDirRoomListResult`。
 
 ### `char* chaos_live_dir_search_rooms_json(const char* site_utf8, const char* keyword_utf8, uint32_t page)`
 
 站内搜索（仅当前平台）。
+
+参数：
+- `site_utf8`：同上。
+- `keyword_utf8`：关键字（必填，UTF-8；空串会失败）。
+- `page`：页码（从 `1` 开始；内部会 `max(1)`）。
 
 返回：同 `LiveDirRoomListResult`。
 
@@ -418,9 +456,24 @@ char* err = chaos_ffi_last_error_json();
 
 返回一个 handle 指针。失败返回 `NULL`（再读取 `last_error_json`）。
 
+参数：
+- `input_utf8`：直播间输入（必填，UTF-8；支持完整 URL 或平台前缀，复用 core 的解析规则）。
+
+返回值：
+- 成功：非 `NULL` 的 handle 指针（后续传给 `set_callback` / `poll_json` / `disconnect`）。
+- 失败：`NULL`；调用 `chaos_ffi_last_error_json()` 获取错误 JSON。
+
 ### `char* chaos_danmaku_poll_json(void* handle, uint32_t max_events)`
 
 返回最多 `max_events` 条事件的 JSON 数组。如果 `max_events == 0`，默认取 `50`。
+
+参数：
+- `handle`：必须是 `chaos_danmaku_connect` 返回的非空指针；传 `NULL` 会失败。
+- `max_events`：最多返回多少条；`0` 表示默认 `50`。
+
+返回值：
+- 成功：事件数组 JSON（可能是 `[]`）。
+- 失败：返回 `NULL`；调用 `chaos_ffi_last_error_json()` 获取错误 JSON。
 
 ### 回调
 
@@ -437,6 +490,9 @@ chaos_danmaku_set_callback(handle, NULL, NULL);
 ```
 - `event_json_utf8` 指针仅在**回调执行期间**有效（回调返回后 Rust 会释放）。
 - 回调在后台线程触发（不是 UI 线程）。
+- 返回值：
+  - `0`：成功。
+  - `-1`：失败；请调用 `chaos_ffi_last_error_json()` 获取错误 JSON。
 
 ### `int32_t chaos_danmaku_disconnect(void* handle)`
 

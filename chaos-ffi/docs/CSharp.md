@@ -11,6 +11,7 @@
 
 ```csharp
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -44,24 +45,24 @@ internal static partial class ChaosFfi
         string? lang_utf8_or_null,
         uint timeout_ms);
 
-	    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
-	    internal static partial IntPtr chaos_subtitle_download_item_json(
-	        string item_json_utf8,
-	        string out_dir_utf8,
-	        uint timeout_ms,
-	        uint retries,
-	        byte overwrite);
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_subtitle_download_item_json(
+        string item_json_utf8,
+        string out_dir_utf8,
+        uint timeout_ms,
+        uint retries,
+        byte overwrite);
 
-	    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
-	    internal static partial IntPtr chaos_lyrics_search_json(
-	        string title_utf8,
-	        string? album_utf8_or_null,
-	        string? artist_utf8_or_null,
-	        uint duration_ms_or_0,
-	        uint limit,
-	        byte strict_match,
-	        string? services_csv_utf8_or_null,
-	        uint timeout_ms);
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_lyrics_search_json(
+        string title_utf8,
+        string? album_utf8_or_null,
+        string? artist_utf8_or_null,
+        uint duration_ms_or_0,
+        uint limit,
+        byte strict_match,
+        string? services_csv_utf8_or_null,
+        uint timeout_ms);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_live_dir_categories_json(string site_utf8);
@@ -160,6 +161,41 @@ var json = ChaosFfi.TakeString(p) ?? throw new Exception("search failed: " + Cha
 
 var items = JsonDocument.Parse(json).RootElement;
 Console.WriteLine("items=" + items.GetArrayLength());
+```
+
+## 字幕下载
+
+`chaos_subtitle_download_item_json` 的 `item_json_utf8` 建议直接传 `search` 返回数组中某个元素的 `GetRawText()`。
+
+```csharp
+static string TakeOrThrow(IntPtr p, string what)
+{
+    var s = ChaosFfi.TakeString(p);
+    if (!string.IsNullOrEmpty(s)) return s;
+    var err = ChaosFfi.TakeString(ChaosFfi.chaos_ffi_last_error_json());
+    throw new Exception($"{what} failed: {err}");
+}
+
+var searchJson = TakeOrThrow(ChaosFfi.chaos_subtitle_search_json("三体", 10, -1.0, "zh", 20000), "subtitle_search");
+using var doc = JsonDocument.Parse(searchJson);
+var arr = doc.RootElement;
+if (arr.GetArrayLength() == 0) throw new Exception("no subtitle items");
+
+var itemJson = arr[0].GetRawText();
+var outDir = Path.Combine(Path.GetTempPath(), "chaos-seed-subs");
+Directory.CreateDirectory(outDir);
+
+var dlJson = TakeOrThrow(
+    ChaosFfi.chaos_subtitle_download_item_json(
+        itemJson,
+        outDir,
+        20000, // timeout_ms
+        2,     // retries
+        1      // overwrite
+    ),
+    "subtitle_download"
+);
+Console.WriteLine(dlJson); // {"path":"...","bytes":12345}
 ```
 
 ## 歌词搜索
