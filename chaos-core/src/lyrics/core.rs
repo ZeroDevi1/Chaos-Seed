@@ -4,7 +4,9 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 
 use crate::lyrics::error::LyricsError;
 use crate::lyrics::match_score;
-use crate::lyrics::model::{LyricsSearchOptions, LyricsSearchRequest, LyricsSearchResult, LyricsService};
+use crate::lyrics::model::{
+    LyricsSearchOptions, LyricsSearchRequest, LyricsSearchResult, LyricsService,
+};
 use crate::lyrics::providers::Provider;
 use crate::lyrics::quality;
 
@@ -65,9 +67,7 @@ pub async fn search_with_http(
         }
         let qa = a.quality;
         let qb = b.quality;
-        let by_q = qb
-            .partial_cmp(&qa)
-            .unwrap_or(std::cmp::Ordering::Equal);
+        let by_q = qb.partial_cmp(&qa).unwrap_or(std::cmp::Ordering::Equal);
         if by_q != std::cmp::Ordering::Equal {
             return by_q;
         }

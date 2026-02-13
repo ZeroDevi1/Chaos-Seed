@@ -12,6 +12,11 @@ pub const METHOD_DANMAKU_DISCONNECT: &str = "danmaku.disconnect";
 pub const METHOD_NOW_PLAYING_SNAPSHOT: &str = "nowPlaying.snapshot";
 pub const METHOD_LYRICS_SEARCH: &str = "lyrics.search";
 
+pub const METHOD_LIVE_DIR_CATEGORIES: &str = "liveDir.categories";
+pub const METHOD_LIVE_DIR_RECOMMEND_ROOMS: &str = "liveDir.recommendRooms";
+pub const METHOD_LIVE_DIR_CATEGORY_ROOMS: &str = "liveDir.categoryRooms";
+pub const METHOD_LIVE_DIR_SEARCH_ROOMS: &str = "liveDir.searchRooms";
+
 pub const NOTIF_DANMAKU_MESSAGE: &str = "danmaku.message";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -105,6 +110,72 @@ pub struct LivestreamDecodeManifestResult {
     pub info: LivestreamInfo,
     pub playback: LivestreamPlaybackHints,
     pub variants: Vec<LivestreamVariant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirCategoriesParams {
+    pub site: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirRecommendRoomsParams {
+    pub site: String,
+    pub page: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirCategoryRoomsParams {
+    pub site: String,
+    pub parent_id: Option<String>,
+    pub category_id: String,
+    pub page: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirSearchRoomsParams {
+    pub site: String,
+    pub keyword: String,
+    pub page: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirSubCategory {
+    pub id: String,
+    pub parent_id: String,
+    pub name: String,
+    pub pic: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirCategory {
+    pub id: String,
+    pub name: String,
+    pub children: Vec<LiveDirSubCategory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirRoomCard {
+    pub site: String,
+    pub room_id: String,
+    pub input: String,
+    pub title: String,
+    pub cover: Option<String>,
+    pub user_name: Option<String>,
+    pub online: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDirRoomListResult {
+    pub has_more: bool,
+    pub items: Vec<LiveDirRoomCard>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use regex::Regex;
-use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::lyrics::error::LyricsError;
-use crate::lyrics::model::{LyricsSearchRequest, LyricsSearchResult, LyricsService, LyricsSearchTerm};
+use crate::lyrics::model::{
+    LyricsSearchRequest, LyricsSearchResult, LyricsSearchTerm, LyricsService,
+};
 use crate::lyrics::util;
 
 #[derive(Debug, Clone)]
@@ -85,10 +87,7 @@ impl SyairProvider {
         };
 
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "Referer",
-            HeaderValue::from_static("https://syair.info/"),
-        );
+        headers.insert("Referer", HeaderValue::from_static("https://syair.info/"));
         let resp = http
             .get(url)
             .headers(headers)

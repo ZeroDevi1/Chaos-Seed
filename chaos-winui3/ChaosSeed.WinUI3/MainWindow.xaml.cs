@@ -29,7 +29,7 @@ public sealed partial class MainWindow : Window
         SettingsService.Instance.SettingsChanged += (_, _) => ApplyWindowStyleFromSettings();
 
         Nav.SelectedItem = Nav.MenuItems[0];
-        ContentFrame.Navigate(typeof(LivePage), null, new DrillInNavigationTransitionInfo());
+        ContentFrame.Navigate(typeof(HomePage), null, new DrillInNavigationTransitionInfo());
     }
 
     private void InitTitleBar()
@@ -131,6 +131,12 @@ public sealed partial class MainWindow : Window
 
         switch (item.Tag as string)
         {
+            case "home":
+                ContentFrame.Navigate(typeof(HomePage), null, new DrillInNavigationTransitionInfo());
+                break;
+            case "categories":
+                ContentFrame.Navigate(typeof(CategoriesPage), null, new DrillInNavigationTransitionInfo());
+                break;
             case "live":
                 ContentFrame.Navigate(typeof(LivePage), null, new DrillInNavigationTransitionInfo());
                 break;

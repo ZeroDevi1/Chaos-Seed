@@ -7,10 +7,11 @@
 - 字幕（已完成）：Thunder 搜索 / 列表展示 / 单条下载（每次下载选择目录，支持超时与重试）
 - 弹幕（已完成）：BiliLive / Douyu / Huya 连接与解析；UI 已接入（Chat / Overlay）
 - 直播源解析（已完成 core/ffi）：BiliLive / Douyu / Huya 的 `manifest/variants` 解析 + `resolve_variant` 二段补全
+- 直播目录（已完成 WinUI3/FFI/Daemon）：首页/分类（平台 Tab + 站内搜索 + 卡片列表 + 分页）；点卡片跳转“直播”页，仅解析清晰度列表（不自动播放）
 - 歌词（已完成增强）：对齐 BetterLyrics 三源（QQ 音乐 / 网易云 / LRCLIB），按“顺序 + 匹配阈值”自动搜索；读取系统 Now Playing（Windows SMTC snapshot 自适应轮询）并推送时间轴事件；支持主界面 + 停靠（Dock）+ 桌面悬浮（Float），暂停自动隐藏；支持轻量特效背景（fluid / fan3d / snow）；提供 Tauri 托盘开关“歌词检测”（旧 Chat/Overlay 窗口保留作调试/兼容）
 - UI（已完成初版）：直播源解析 UI（manifest/variants）+ 新窗口播放器（Master 风格；Hls.js + Libmedia AvPlayer），支持清晰度/线路切换、直连 URL 调试显示、关闭窗口自动停止播放
 - UI（后续增强）：反盗链/本地代理（Referer/UA/Cookie 注入）、播放诊断与更完善的自动重试策略、播放器观感与快捷键
-- WinUI 3（PoC 已实现）：直播页输入直播间地址 → 解析展示清晰度/线路卡片 → 点击卡片播放（Flyleaf/FFmpeg）→ 右侧弹幕滚动（支持表情图片）+ 播放器 Overlay 弹幕（B 站风格开关，支持显示区域/透明度/字号/同屏密度）；新增“歌词”页（Now Playing + 顺序多源阈值搜索，可选 daemon/FFI 后端）；新增“弹幕”页（独立连接/断开，不与直播会话互相干扰；支持 Chat 窗口与 Overlay 透明悬浮窗）
+- WinUI 3（PoC 已实现）：新增“首页/分类/直播”导航；首页/分类对齐 simple_live 的目录交互（平台 Tab + 搜索 + 卡片列表 + 分页），卡片点击跳转“直播”页解析清晰度；直播页支持播放（Flyleaf/FFmpeg）+ 右侧弹幕滚动（支持表情图）+ 播放器 Overlay 弹幕（B 站风格开关，支持显示区域/透明度/字号/同屏密度）；新增“歌词”页（Now Playing + 顺序多源阈值搜索，可选 daemon/FFI 后端）；新增“弹幕”页（独立连接/断开，不与直播会话互相干扰；支持 Chat 窗口与 Overlay 透明悬浮窗）
 
 ## 构建前提（重要）
 

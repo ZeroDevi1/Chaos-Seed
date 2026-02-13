@@ -17,14 +17,14 @@
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-返回 API 版本号。当前为 `4`。
+返回 API 版本号。当前为 `5`。
 
 ### `char* chaos_ffi_version_json(void)`
 
 返回：
 
 ```json
-{"version":"0.1.0","git":"unknown","api":4}
+{"version":"0.3.0","git":"unknown","api":5}
 ```
 
 ### `char* chaos_ffi_last_error_json(void)`
@@ -341,6 +341,67 @@ char* err = chaos_ffi_last_error_json();
 
 真实站点可能受网络波动/风控/开播状态影响。默认 `cargo test` 必须稳定、离线可跑；
 因此真实 URL 测试放在 `--features live-tests` 下，按需手动运行。
+
+## 直播目录（Live Directory）
+
+用于实现 WinUI3 的“首页/分类”目录能力：平台 Tab + 推荐/分区列表 + 站内搜索，输出统一的卡片数据结构。
+
+约定：
+- `site`：平台字符串：`bili_live` / `huya` / `douyu`（与 WinUI3/daemon 的约定一致）。
+- `page`：从 `1` 开始。
+- `input`：可直接传给现有直播解析/播放链路的字符串（例如 `bilibili:<rid>` / `huya:<rid>` / `douyu:<rid>`）。
+
+### `char* chaos_live_dir_categories_json(const char* site_utf8)`
+
+返回 `LiveDirCategory[]` JSON（字段形状）：
+
+```json
+[
+  {
+    "id": "1",
+    "name": "网游",
+    "children": [
+      { "id": "11", "parentId": "1", "name": "英雄联盟", "pic": "https://...@100w.png" }
+    ]
+  }
+]
+```
+
+### `char* chaos_live_dir_recommend_rooms_json(const char* site_utf8, uint32_t page)`
+
+返回 `LiveDirRoomListResult` JSON（字段形状）：
+
+```json
+{
+  "hasMore": true,
+  "items": [
+    {
+      "site": "bili_live",
+      "roomId": "100",
+      "input": "bilibili:100",
+      "title": "标题",
+      "cover": "https://...@400w.jpg",
+      "userName": "主播",
+      "online": 12345
+    }
+  ]
+}
+```
+
+### `char* chaos_live_dir_category_rooms_json(const char* site_utf8, const char* parent_id_utf8_or_null, const char* category_id_utf8, uint32_t page)`
+
+按分区拉取房间卡片列表。
+
+- B 站（`bili_live`）需要 `parent_id` 与 `category_id`（对应 “一级分区 id / 二级分区 id”）。
+- 虎牙/斗鱼通常只需要 `category_id`；`parent_id` 可传 `NULL`。
+
+返回：同 `LiveDirRoomListResult`。
+
+### `char* chaos_live_dir_search_rooms_json(const char* site_utf8, const char* keyword_utf8, uint32_t page)`
+
+站内搜索（仅当前平台）。
+
+返回：同 `LiveDirRoomListResult`。
 
 ## 弹幕（Danmaku）
 

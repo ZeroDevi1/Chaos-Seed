@@ -11,4 +11,3 @@ pub enum LyricsError {
     #[error("unsupported search term for this provider")]
     UnsupportedTerm,
 }
-

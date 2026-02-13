@@ -37,7 +37,8 @@ fn percent_encode_component(s: &str) -> String {
     // Encode everything not in the unreserved set.
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
-        let unreserved = matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~');
+        let unreserved =
+            matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~');
         if unreserved {
             out.push(b as char);
         } else {
@@ -104,9 +105,7 @@ pub fn format(
     let convert_uid = rotl32_8(presenter_uid);
     let calc_uid: u32 = if is_wap { presenter_uid } else { convert_uid };
 
-    let secret_str = format!(
-        "{secret_prefix}_{calc_uid}_{stream_name}_{secret_hash}_{ws_time}"
-    );
+    let secret_str = format!("{secret_prefix}_{calc_uid}_{stream_name}_{secret_hash}_{ws_time}");
     let ws_secret = md5_hex(&secret_str);
 
     // Keep insertion order stable (Dart maps preserve insertion order).
@@ -118,15 +117,15 @@ pub fn format(
     pairs.push(("ver".to_string(), "1".to_string()));
     pairs.push(("fs".to_string(), fs));
     // Dart re-encodes the decoded fm value as a component.
-    pairs.push((
-        "fm".to_string(),
-        percent_encode_component(&fm_dec),
-    ));
+    pairs.push(("fm".to_string(), percent_encode_component(&fm_dec)));
     pairs.push(("t".to_string(), platform_id.to_string()));
 
     if is_wap {
         // This branch is rare for mp endpoints; still implement for completeness.
-        let ws_time_i = i64::from_str_radix(ws_time.trim_start_matches("0x").trim_start_matches("0X"), 16)
+        let ws_time_i = i64::from_str_radix(
+            ws_time.trim_start_matches("0x").trim_start_matches("0X"),
+            16,
+        )
         .unwrap_or(0);
         let jitter_ms = fastrand::f64();
         let ct = ((ws_time_i as f64 + jitter_ms) * 1000.0) as i64;

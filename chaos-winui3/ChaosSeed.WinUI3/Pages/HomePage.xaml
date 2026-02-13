@@ -1,0 +1,164 @@
+<Page
+    x:Class="ChaosSeed.WinUI3.Pages.HomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:vm="using:ChaosSeed.WinUI3.Pages">
+
+    <Grid Padding="{StaticResource ChaosPagePadding}">
+        <muxc:NavigationView
+            x:Name="PlatformNav"
+            PaneDisplayMode="Top"
+            IsBackButtonVisible="Collapsed"
+            IsPaneToggleButtonVisible="False"
+            IsSettingsVisible="False"
+            IsPaneOpen="False"
+            SelectionChanged="OnPlatformNavSelectionChanged">
+            <muxc:NavigationView.MenuItems>
+                <muxc:NavigationViewItem Content="哔哩哔哩" Tag="bili_live">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Video" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="虎牙直播" Tag="huya">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Favorite" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="斗鱼直播" Tag="douyu">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Camera" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+            </muxc:NavigationView.MenuItems>
+
+            <muxc:NavigationView.Content>
+                <Grid RowSpacing="12" Padding="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox
+                            x:Name="SearchBox"
+                            PlaceholderText="搜索直播间"
+                            KeyDown="OnSearchKeyDown" />
+
+                        <Button
+                            Grid.Column="1"
+                            Style="{StaticResource ChaosIconButtonStyle}"
+                            Click="OnSearchClicked"
+                            ToolTipService.ToolTip="搜索">
+                            <muxc:SymbolIcon Symbol="Find" />
+                        </Button>
+
+                        <Button
+                            Grid.Column="2"
+                            Style="{StaticResource ChaosIconButtonStyle}"
+                            Click="OnClearSearchClicked"
+                            ToolTipService.ToolTip="清空搜索">
+                            <muxc:SymbolIcon Symbol="Cancel" />
+                        </Button>
+                    </Grid>
+
+                    <muxc:InfoBar
+                        x:Name="StatusBar"
+                        Grid.Row="1"
+                        IsOpen="False"
+                        Severity="Informational"
+                        Title="提示" />
+
+                    <Grid Grid.Row="2">
+                        <GridView
+                            x:Name="RoomGrid"
+                            Loaded="OnRoomGridLoaded"
+                            SizeChanged="OnRoomGridSizeChanged"
+                            ItemsSource="{x:Bind RoomCards, Mode=OneWay}"
+                            IsItemClickEnabled="True"
+                            ItemClick="OnRoomItemClick"
+                            SelectionMode="None"
+                            ItemContainerStyle="{StaticResource ChaosCardGridViewItemStyle}">
+                            <GridView.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ItemsWrapGrid Orientation="Horizontal" ItemWidth="240" />
+                                </ItemsPanelTemplate>
+                            </GridView.ItemsPanel>
+                            <GridView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:HomeRoomCardVm">
+                                    <Border
+                                        CornerRadius="{StaticResource ChaosCornerRadius12}"
+                                        Padding="0"
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="140" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <Grid Grid.Row="0">
+                                                <Border
+                                                    CornerRadius="{StaticResource ChaosCornerRadius12}"
+                                                    Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+                                                    <Image Source="{x:Bind Cover, Mode=OneWay}" Stretch="UniformToFill" />
+                                                </Border>
+                                                <Border
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Bottom"
+                                                    Margin="8"
+                                                    Padding="6,2"
+                                                    Background="#66000000"
+                                                    CornerRadius="10"
+                                                    Visibility="{x:Bind OnlineVisibility, Mode=OneWay}">
+                                                    <TextBlock Text="{x:Bind OnlineText, Mode=OneWay}" Foreground="White" FontSize="12" />
+                                                </Border>
+                                            </Grid>
+
+                                            <StackPanel Grid.Row="1" Padding="10" Spacing="4">
+                                                <TextBlock
+                                                    Text="{x:Bind Title, Mode=OneWay}"
+                                                    FontWeight="SemiBold"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    MaxLines="1" />
+                                                <TextBlock
+                                                    Text="{x:Bind Streamer, Mode=OneWay}"
+                                                    Opacity="0.8"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    MaxLines="1" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </GridView.ItemTemplate>
+                        </GridView>
+
+                        <!-- Centered loading/empty state: avoids "blank screen" during first load / empty results. -->
+                        <StackPanel
+                            x:Name="CenterStatePanel"
+                            Visibility="Collapsed"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="10">
+                            <ProgressRing x:Name="CenterLoadingRing" Width="32" Height="32" IsActive="False" />
+                            <TextBlock x:Name="CenterStateText" Text="加载中..." Opacity="0.8" />
+                            <Button x:Name="RetryBtn" Content="重试" Click="OnRetryClicked" Visibility="Collapsed" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <ProgressRing x:Name="LoadingRing" Width="18" Height="18" IsActive="False" />
+                        <Button x:Name="LoadMoreBtn" Click="OnLoadMoreClicked" Content="加载更多" />
+                    </StackPanel>
+                </Grid>
+            </muxc:NavigationView.Content>
+        </muxc:NavigationView>
+    </Grid>
+</Page>

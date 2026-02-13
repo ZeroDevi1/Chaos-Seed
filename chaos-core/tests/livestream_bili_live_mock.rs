@@ -101,7 +101,11 @@ async fn decode_manifest_room_play_info_ok() {
         .await
         .expect("manifest");
 
-    assert_eq!(bad_qn0.hits(), 0, "should not request getRoomPlayInfo with qn=0");
+    assert_eq!(
+        bad_qn0.hits(),
+        0,
+        "should not request getRoomPlayInfo with qn=0"
+    );
     assert_eq!(man.site, Site::BiliLive);
     assert_eq!(man.room_id, "999");
     assert_eq!(man.info.title, "t");
@@ -197,7 +201,8 @@ async fn decode_manifest_resolves_highest_quality_to_avoid_single_variant() {
 
     // First call (no qn): server reports current_qn=1000 (low), accept_qn has higher options.
     server.mock(|when, then| {
-        when.method(GET).path("/xlive/web-room/v2/index/getRoomPlayInfo");
+        when.method(GET)
+            .path("/xlive/web-room/v2/index/getRoomPlayInfo");
         then.status(200).json_body(serde_json::json!({
             "code": 0,
             "data": {
@@ -244,11 +249,19 @@ async fn decode_manifest_resolves_highest_quality_to_avoid_single_variant() {
         .await
         .expect("manifest");
 
-    assert_eq!(bad_qn0.hits(), 0, "should not request getRoomPlayInfo with qn=0");
+    assert_eq!(
+        bad_qn0.hits(),
+        0,
+        "should not request getRoomPlayInfo with qn=0"
+    );
     assert_eq!(man.site, Site::BiliLive);
     assert_eq!(man.room_id, "1010");
     assert!(man.variants.len() >= 2);
-    let high = man.variants.iter().find(|v| v.quality == 2000).expect("high");
+    let high = man
+        .variants
+        .iter()
+        .find(|v| v.quality == 2000)
+        .expect("high");
     assert!(high.url.as_deref().unwrap_or("").contains("high.flv"));
 }
 
@@ -409,7 +422,8 @@ async fn decode_manifest_room_play_info_ignores_qn_fallback_to_playurl() {
 
     // Quality enumeration (no qn): current_qn is low.
     server.mock(|when, then| {
-        when.method(GET).path("/xlive/web-room/v2/index/getRoomPlayInfo");
+        when.method(GET)
+            .path("/xlive/web-room/v2/index/getRoomPlayInfo");
         then.status(200).json_body(serde_json::json!({
             "code": 0,
             "data": {
@@ -479,14 +493,19 @@ async fn decode_manifest_room_play_info_ignores_qn_fallback_to_playurl() {
     assert_eq!(man.site, Site::BiliLive);
     assert_eq!(man.room_id, "1111");
     assert!(v2_qn_ignored.hits() >= 1);
-    assert_eq!(playurl_10000.hits(), 1, "should fallback to v1 playUrl for qn=10000");
+    assert_eq!(
+        playurl_10000.hits(),
+        1,
+        "should fallback to v1 playUrl for qn=10000"
+    );
 
-    let high = man.variants.iter().find(|v| v.quality == 10000).expect("high");
+    let high = man
+        .variants
+        .iter()
+        .find(|v| v.quality == 10000)
+        .expect("high");
     assert!(
-        high.url
-            .as_deref()
-            .unwrap_or("")
-            .contains("hi_bluray.flv"),
+        high.url.as_deref().unwrap_or("").contains("hi_bluray.flv"),
         "expected v1 bluray url to be bound to qn=10000 variant"
     );
 }

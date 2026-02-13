@@ -46,6 +46,19 @@ char *chaos_subtitle_download_item_json(const char *item_json_utf8,
 char *chaos_livestream_decode_manifest_json(const char *input_utf8,
                                             uint8_t drop_inaccessible_high_qualities);
 
+char *chaos_live_dir_categories_json(const char *site_utf8);
+
+char *chaos_live_dir_recommend_rooms_json(const char *site_utf8, uint32_t page);
+
+char *chaos_live_dir_category_rooms_json(const char *site_utf8,
+                                         const char *parent_id_utf8_or_null,
+                                         const char *category_id_utf8,
+                                         uint32_t page);
+
+char *chaos_live_dir_search_rooms_json(const char *site_utf8,
+                                       const char *keyword_utf8,
+                                       uint32_t page);
+
 char *chaos_livestream_resolve_variant_json(const char *input_utf8, const char *variant_id_utf8);
 
 /**
@@ -60,28 +73,10 @@ char *chaos_livestream_resolve_variant2_json(const char *site_utf8,
 
 void *chaos_danmaku_connect(const char *input_utf8);
 
-/**
- * Set or clear the danmaku callback.
- *
- * - Pass `cb = NULL` to disable callbacks.
- * - Callback runs on a background thread (not the UI thread).
- * - `event_json_utf8` is only valid during the callback invocation.
- *
- * Returns 0 on success, -1 on failure. On failure, call `chaos_ffi_last_error_json()`.
- */
 int32_t chaos_danmaku_set_callback(void *handle, ChaosDanmakuCallback cb, void *user_data);
 
 char *chaos_danmaku_poll_json(void *handle, uint32_t max_events);
 
-/**
- * Disconnect and dispose the danmaku session.
- *
- * - `handle` must be non-NULL and previously returned by `chaos_danmaku_connect`.
- * - After a successful call, the handle becomes invalid and must not be reused.
- * - Guarantees no further callbacks after the function returns.
- *
- * Returns 0 on success, -1 on failure. On failure, call `chaos_ffi_last_error_json()`.
- */
 int32_t chaos_danmaku_disconnect(void *handle);
 
 #endif  /* CHAOS_FFI_H */

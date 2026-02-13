@@ -1664,7 +1664,10 @@ async fn open_player_window(
     });
 
     if let Some(r) = from_rect.as_ref() {
-        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: r.x, y: r.y }));
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: r.x,
+            y: r.y,
+        }));
         let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize {
             width: r.width,
             height: r.height,
@@ -1705,12 +1708,13 @@ async fn open_player_window(
                 .and_then(|mw| mw.current_monitor().ok().flatten())
                 .or_else(|| w2.current_monitor().ok().flatten());
 
-            let (mon_pos, mon_size) = mon
-                .map(|m| (*m.position(), *m.size()))
-                .unwrap_or((
-                    tauri::PhysicalPosition { x: 0, y: 0 },
-                    tauri::PhysicalSize { width: 1920, height: 1080 },
-                ));
+            let (mon_pos, mon_size) = mon.map(|m| (*m.position(), *m.size())).unwrap_or((
+                tauri::PhysicalPosition { x: 0, y: 0 },
+                tauri::PhysicalSize {
+                    width: 1920,
+                    height: 1080,
+                },
+            ));
 
             let sf = w2.scale_factor().unwrap_or(1.0);
             let mut tw = (960.0 * sf).round() as u32;
@@ -1736,8 +1740,14 @@ async fn open_player_window(
 
             let min_x = mon_pos.x;
             let min_y = mon_pos.y;
-            let max_x = mon_pos.x.saturating_add(mon_size.width as i32).saturating_sub(tw as i32);
-            let max_y = mon_pos.y.saturating_add(mon_size.height as i32).saturating_sub(th as i32);
+            let max_x = mon_pos
+                .x
+                .saturating_add(mon_size.width as i32)
+                .saturating_sub(tw as i32);
+            let max_y = mon_pos
+                .y
+                .saturating_add(mon_size.height as i32)
+                .saturating_sub(th as i32);
 
             tx = tx.clamp(min_x, max_x);
             ty = ty.clamp(min_y, max_y);
@@ -1777,7 +1787,8 @@ async fn animate_window_rect(
         let e = 1.0 - (1.0 - t).powi(3); // easeOutCubic
 
         let lerp_i32 = |a: i32, b: i32| -> i32 { (a as f64 + (b - a) as f64 * e).round() as i32 };
-        let lerp_u32 = |a: u32, b: u32| -> u32 { (a as f64 + (b - a) as f64 * e).round().max(1.0) as u32 };
+        let lerp_u32 =
+            |a: u32, b: u32| -> u32 { (a as f64 + (b - a) as f64 * e).round().max(1.0) as u32 };
 
         let x = lerp_i32(from.x, to.x);
         let y = lerp_i32(from.y, to.y);
@@ -1802,7 +1813,7 @@ struct RgbColor {
 fn system_accent_rgb() -> Result<RgbColor, String> {
     #[cfg(target_os = "windows")]
     {
-        use windows::UI::ViewManagement::{UISettings, UIColorType};
+        use windows::UI::ViewManagement::{UIColorType, UISettings};
 
         let ui = UISettings::new().map_err(|e| format!("{e}"))?;
         let c = ui

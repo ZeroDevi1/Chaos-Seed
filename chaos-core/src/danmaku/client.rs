@@ -54,7 +54,10 @@ impl DanmakuClient {
                 // Best-effort stderr log for debugging (library callers may ignore the "error" event
                 // payload).
                 if let Err(e) = &res {
-                    eprintln!("danmaku connector error for {:?}/{}: {e}", target2.site, target2.room_id);
+                    eprintln!(
+                        "danmaku connector error for {:?}/{}: {e}",
+                        target2.site, target2.room_id
+                    );
                 }
                 // Best-effort: match IINA+ semantics: empty means ok, "error" means failure.
                 let _ = tx2.send(DanmakuEvent::new(

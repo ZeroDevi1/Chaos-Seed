@@ -114,7 +114,13 @@ async fn decode_manifest_parses_room_id_and_lists_multirates() {
         .expect("rate=1");
     assert!(current.url.is_some());
     // Prefer direct FLV as primary; P2P/xs hosts become backups.
-    assert!(current.url.as_deref().unwrap().contains("http://play/live.flv"));
+    assert!(
+        current
+            .url
+            .as_deref()
+            .unwrap()
+            .contains("http://play/live.flv")
+    );
     assert!(
         current
             .backup_urls

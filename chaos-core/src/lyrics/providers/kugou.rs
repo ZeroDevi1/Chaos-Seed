@@ -172,7 +172,9 @@ fn decode_b64(s: &str) -> Result<Vec<u8>, base64::DecodeError> {
 
 fn decrypt_kugou_krc(data: &[u8]) -> Option<String> {
     const FLAG: &[u8] = b"krc1";
-    const KEY: [u8; 16] = [64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105];
+    const KEY: [u8; 16] = [
+        64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105,
+    ];
     if !data.starts_with(FLAG) {
         return None;
     }

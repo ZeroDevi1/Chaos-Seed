@@ -1,9 +1,9 @@
 use std::time::Duration;
 
+use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::OnceLock;
-use regex::Regex;
 
 use crate::lyrics::error::LyricsError;
 use crate::lyrics::model::{LyricsSearchRequest, LyricsSearchResult, LyricsService};
@@ -35,9 +35,15 @@ impl LrcLibProvider {
         timeout: Duration,
     ) -> Result<Vec<LrcLibToken>, LyricsError> {
         let (title, artist, album) = match &req.term {
-            crate::lyrics::model::LyricsSearchTerm::Info { title, artist, album } => {
-                (title.trim(), artist.trim(), album.as_deref().unwrap_or("").trim())
-            }
+            crate::lyrics::model::LyricsSearchTerm::Info {
+                title,
+                artist,
+                album,
+            } => (
+                title.trim(),
+                artist.trim(),
+                album.as_deref().unwrap_or("").trim(),
+            ),
             crate::lyrics::model::LyricsSearchTerm::Keyword { keyword } => (keyword.trim(), "", ""),
         };
 
@@ -151,6 +157,7 @@ struct LrcLibSearchItem {
 fn looks_like_lrc(s: &str) -> bool {
     // Quick heuristic to drive UI/quality bonuses.
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]").expect("lrc tag regex"));
+    let re =
+        RE.get_or_init(|| Regex::new(r"\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]").expect("lrc tag regex"));
     re.is_match(s)
 }

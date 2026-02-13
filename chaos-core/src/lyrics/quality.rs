@@ -1,4 +1,4 @@
-use crate::lyrics::model::{LyricsSearchRequest, LyricsSearchTerm, LyricsSearchResult};
+use crate::lyrics::model::{LyricsSearchRequest, LyricsSearchResult, LyricsSearchTerm};
 
 const TRANSLATION_BONUS: f64 = 0.1;
 const INLINE_TIMETAG_BONUS: f64 = 0.1;
@@ -18,11 +18,14 @@ pub fn is_matched(result: &LyricsSearchResult, req: &LyricsSearchRequest) -> boo
         return false;
     };
     match &req.term {
-        LyricsSearchTerm::Info { title: st, artist: sa, .. } => {
-            is_case_insensitive_similar(title, st) && is_case_insensitive_similar(artist, sa)
-        }
+        LyricsSearchTerm::Info {
+            title: st,
+            artist: sa,
+            ..
+        } => is_case_insensitive_similar(title, st) && is_case_insensitive_similar(artist, sa),
         LyricsSearchTerm::Keyword { keyword } => {
-            is_case_insensitive_similar(title, keyword) && is_case_insensitive_similar(artist, keyword)
+            is_case_insensitive_similar(title, keyword)
+                && is_case_insensitive_similar(artist, keyword)
         }
     }
 }
@@ -44,11 +47,7 @@ pub fn compute_quality(result: &LyricsSearchResult, req: &LyricsSearchRequest) -
         quality += INLINE_TIMETAG_BONUS;
     }
 
-    if quality.is_finite() {
-        quality
-    } else {
-        0.0
-    }
+    if quality.is_finite() { quality } else { 0.0 }
 }
 
 pub fn is_case_insensitive_similar(a: &str, b: &str) -> bool {
@@ -155,4 +154,3 @@ fn distance(s1: &str, s2: &str, sub_cost: usize, ins_cost: usize, del_cost: usiz
     }
     d[b.len()]
 }
-

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, REFERER};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue, REFERER};
 use serde::Deserialize;
 
 use crate::lyrics::error::LyricsError;

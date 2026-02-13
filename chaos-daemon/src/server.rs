@@ -2,12 +2,16 @@ use crate::lsp::{read_lsp_frame, write_lsp_frame};
 use crate::rpc::{JsonRpcError, JsonRpcResponse, RpcErrorCode};
 use chaos_proto::{
     DaemonPingParams, DaemonPingResult, DanmakuConnectParams, DanmakuConnectResult,
-    DanmakuDisconnectParams, DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams,
+    DanmakuDisconnectParams, DanmakuFetchImageParams, LiveCloseParams, LiveDirCategoriesParams,
+    LiveDirCategory, LiveDirCategoryRoomsParams, LiveDirRecommendRoomsParams,
+    LiveDirRoomListResult, LiveDirSearchRoomsParams, LiveOpenParams,
     LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LyricsSearchParams,
     LyricsSearchResult, METHOD_DAEMON_PING, METHOD_DANMAKU_CONNECT, METHOD_DANMAKU_DISCONNECT,
-    METHOD_DANMAKU_FETCH_IMAGE, METHOD_LIVE_CLOSE, METHOD_LIVE_OPEN,
-    METHOD_LIVESTREAM_DECODE_MANIFEST, METHOD_LYRICS_SEARCH, METHOD_NOW_PLAYING_SNAPSHOT,
-    NOTIF_DANMAKU_MESSAGE, NowPlayingSnapshot, NowPlayingSnapshotParams,
+    METHOD_DANMAKU_FETCH_IMAGE, METHOD_LIVE_CLOSE, METHOD_LIVE_DIR_CATEGORIES,
+    METHOD_LIVE_DIR_CATEGORY_ROOMS, METHOD_LIVE_DIR_RECOMMEND_ROOMS, METHOD_LIVE_DIR_SEARCH_ROOMS,
+    METHOD_LIVE_OPEN, METHOD_LIVESTREAM_DECODE_MANIFEST, METHOD_LYRICS_SEARCH,
+    METHOD_NOW_PLAYING_SNAPSHOT, NOTIF_DANMAKU_MESSAGE, NowPlayingSnapshot,
+    NowPlayingSnapshotParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -23,6 +27,26 @@ pub trait ChaosService: Send + Sync + 'static {
         &self,
         params: LivestreamDecodeManifestParams,
     ) -> impl Future<Output = Result<LivestreamDecodeManifestResult, String>> + Send;
+
+    fn live_dir_categories(
+        &self,
+        params: LiveDirCategoriesParams,
+    ) -> impl Future<Output = Result<Vec<LiveDirCategory>, String>> + Send;
+
+    fn live_dir_recommend_rooms(
+        &self,
+        params: LiveDirRecommendRoomsParams,
+    ) -> impl Future<Output = Result<LiveDirRoomListResult, String>> + Send;
+
+    fn live_dir_category_rooms(
+        &self,
+        params: LiveDirCategoryRoomsParams,
+    ) -> impl Future<Output = Result<LiveDirRoomListResult, String>> + Send;
+
+    fn live_dir_search_rooms(
+        &self,
+        params: LiveDirSearchRoomsParams,
+    ) -> impl Future<Output = Result<LiveDirRoomListResult, String>> + Send;
 
     fn now_playing_snapshot(
         &self,
@@ -243,6 +267,98 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                         };
 
                         match svc.livestream_decode_manifest(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_LIVE_DIR_CATEGORIES => {
+                        let params: LiveDirCategoriesParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.live_dir_categories(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_LIVE_DIR_RECOMMEND_ROOMS => {
+                        let params: LiveDirRecommendRoomsParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.live_dir_recommend_rooms(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_LIVE_DIR_CATEGORY_ROOMS => {
+                        let params: LiveDirCategoryRoomsParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.live_dir_category_rooms(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_LIVE_DIR_SEARCH_ROOMS => {
+                        let params: LiveDirSearchRoomsParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.live_dir_search_rooms(params).await {
                             Ok(res) => {
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());

@@ -1,4 +1,6 @@
-use chaos_core::lyrics::model::{LyricsSearchRequest, LyricsSearchResult, LyricsSearchTerm, LyricsService};
+use chaos_core::lyrics::model::{
+    LyricsSearchRequest, LyricsSearchResult, LyricsSearchTerm, LyricsService,
+};
 use chaos_core::lyrics::quality;
 
 fn req_info(title: &str, artist: &str, duration_ms: Option<u64>) -> LyricsSearchRequest {
@@ -12,7 +14,11 @@ fn req_info(title: &str, artist: &str, duration_ms: Option<u64>) -> LyricsSearch
     r
 }
 
-fn base_result(title: Option<&str>, artist: Option<&str>, duration_ms: Option<u64>) -> LyricsSearchResult {
+fn base_result(
+    title: Option<&str>,
+    artist: Option<&str>,
+    duration_ms: Option<u64>,
+) -> LyricsSearchResult {
     LyricsSearchResult {
         service: LyricsService::QQMusic,
         service_token: "t".to_string(),

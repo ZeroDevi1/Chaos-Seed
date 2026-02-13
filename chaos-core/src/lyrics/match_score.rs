@@ -12,24 +12,54 @@ const WEIGHT_DURATION: f64 = 0.30;
 
 pub fn compute_match_percentage(req: &LyricsSearchRequest, result: &LyricsSearchResult) -> u8 {
     let (local_has_meta, local_title, local_artist, local_album) = match &req.term {
-        LyricsSearchTerm::Info { title, artist, album } => {
+        LyricsSearchTerm::Info {
+            title,
+            artist,
+            album,
+        } => {
             let t = title.trim();
             let a = artist.trim();
-            (!t.is_empty() && !a.is_empty(), Some(t), Some(a), album.as_deref().map(|s| s.trim()))
+            (
+                !t.is_empty() && !a.is_empty(),
+                Some(t),
+                Some(a),
+                album.as_deref().map(|s| s.trim()),
+            )
         }
         LyricsSearchTerm::Keyword { .. } => (false, None, None, None),
     };
 
-    let remote_title = result.title.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    let remote_artist = result.artist.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    let remote_album = result.album.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty());
+    let remote_title = result
+        .title
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let remote_artist = result
+        .artist
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let remote_album = result
+        .album
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
 
     let remote_has_meta = remote_title.is_some();
 
     let score = if local_has_meta && remote_has_meta {
-        let title_score = string_similarity(local_title.unwrap_or_default(), remote_title.unwrap_or_default());
-        let artist_score = string_similarity(local_artist.unwrap_or_default(), remote_artist.unwrap_or_default());
-        let album_score = string_similarity(local_album.unwrap_or_default(), remote_album.unwrap_or_default());
+        let title_score = string_similarity(
+            local_title.unwrap_or_default(),
+            remote_title.unwrap_or_default(),
+        );
+        let artist_score = string_similarity(
+            local_artist.unwrap_or_default(),
+            remote_artist.unwrap_or_default(),
+        );
+        let album_score = string_similarity(
+            local_album.unwrap_or_default(),
+            remote_album.unwrap_or_default(),
+        );
         let duration_score = duration_similarity_ms(req.duration_ms, result.duration_ms);
 
         (title_score * WEIGHT_TITLE)
@@ -116,7 +146,12 @@ mod tests {
     use super::*;
     use crate::lyrics::model::{LyricsSearchTerm, LyricsService};
 
-    fn req_info(title: &str, artist: &str, album: Option<&str>, duration_ms: Option<u64>) -> LyricsSearchRequest {
+    fn req_info(
+        title: &str,
+        artist: &str,
+        album: Option<&str>,
+        duration_ms: Option<u64>,
+    ) -> LyricsSearchRequest {
         let mut req = LyricsSearchRequest::new(LyricsSearchTerm::Info {
             title: title.to_string(),
             artist: artist.to_string(),
@@ -126,7 +161,12 @@ mod tests {
         req
     }
 
-    fn res(title: Option<&str>, artist: Option<&str>, album: Option<&str>, duration_ms: Option<u64>) -> LyricsSearchResult {
+    fn res(
+        title: Option<&str>,
+        artist: Option<&str>,
+        album: Option<&str>,
+        duration_ms: Option<u64>,
+    ) -> LyricsSearchResult {
         LyricsSearchResult {
             service: LyricsService::QQMusic,
             service_token: "t".to_string(),

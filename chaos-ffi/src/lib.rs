@@ -12,9 +12,11 @@ use std::time::Duration;
 
 use libc::{c_char, c_void};
 
+use chaos_core::live_directory;
 use chaos_core::{danmaku, livestream, lyrics, now_playing, subtitle};
+use chaos_proto::{LiveDirCategory, LiveDirRoomCard, LiveDirRoomListResult, LiveDirSubCategory};
 
-const API_VERSION: u32 = 4;
+const API_VERSION: u32 = 5;
 
 fn ensure_rustls_provider() {
     static ONCE: OnceLock<()> = OnceLock::new();
@@ -107,6 +109,41 @@ fn livestream_http() -> &'static reqwest::Client {
 fn livestream_cfg() -> &'static livestream::LivestreamConfig {
     static CFG: OnceLock<livestream::LivestreamConfig> = OnceLock::new();
     CFG.get_or_init(livestream::LivestreamConfig::default)
+}
+
+fn live_dir_client() -> &'static live_directory::LiveDirectoryClient {
+    static CLIENT: OnceLock<live_directory::LiveDirectoryClient> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| live_directory::LiveDirectoryClient::new().expect("live directory client"))
+}
+
+fn map_dir_category(c: live_directory::LiveCategory) -> LiveDirCategory {
+    LiveDirCategory {
+        id: c.id,
+        name: c.name,
+        children: c
+            .children
+            .into_iter()
+            .map(|x| LiveDirSubCategory {
+                id: x.id,
+                parent_id: x.parent_id,
+                name: x.name,
+                pic: x.pic,
+            })
+            .collect(),
+    }
+}
+
+fn map_dir_room(x: live_directory::LiveRoomCard) -> LiveDirRoomCard {
+    LiveDirRoomCard {
+        site: x.site.as_str().to_string(),
+        room_id: x.room_id,
+        input: x.input,
+        title: x.title,
+        cover: x.cover,
+        user_name: x.user_name,
+        online: x.online,
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -317,7 +354,10 @@ pub extern "C" fn chaos_lyrics_search_json(
             })?;
 
         serde_json::to_string(&items).map_err(|e| {
-            set_last_error("failed to serialize lyrics search result", Some(e.to_string()));
+            set_last_error(
+                "failed to serialize lyrics search result",
+                Some(e.to_string()),
+            );
         })
     });
 
@@ -437,6 +477,163 @@ pub extern "C" fn chaos_livestream_decode_manifest_json(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn chaos_live_dir_categories_json(site_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let site_s = require_cstr(site_utf8, "site_utf8")?.trim().to_string();
+        if site_s.is_empty() {
+            set_last_error("site_utf8 is empty", None);
+            return Err(());
+        }
+        let site = parse_site_utf8(&site_s)?;
+        let items = runtime()
+            .block_on(live_dir_client().get_categories(site))
+            .map_err(|e| set_last_error("live dir categories failed", Some(e.to_string())))?;
+        let out: Vec<LiveDirCategory> = items.into_iter().map(map_dir_category).collect();
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize categories", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_live_dir_categories_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_live_dir_recommend_rooms_json(
+    site_utf8: *const c_char,
+    page: u32,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let site_s = require_cstr(site_utf8, "site_utf8")?.trim().to_string();
+        if site_s.is_empty() {
+            set_last_error("site_utf8 is empty", None);
+            return Err(());
+        }
+        let site = parse_site_utf8(&site_s)?;
+        let list = runtime()
+            .block_on(live_dir_client().get_recommend_rooms(site, page.max(1)))
+            .map_err(|e| set_last_error("live dir recommend failed", Some(e.to_string())))?;
+        let out = LiveDirRoomListResult {
+            has_more: list.has_more,
+            items: list.items.into_iter().map(map_dir_room).collect(),
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize recommend rooms", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_live_dir_recommend_rooms_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_live_dir_category_rooms_json(
+    site_utf8: *const c_char,
+    parent_id_utf8_or_null: *const c_char,
+    category_id_utf8: *const c_char,
+    page: u32,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let site_s = require_cstr(site_utf8, "site_utf8")?.trim().to_string();
+        if site_s.is_empty() {
+            set_last_error("site_utf8 is empty", None);
+            return Err(());
+        }
+        let category_id = require_cstr(category_id_utf8, "category_id_utf8")?
+            .trim()
+            .to_string();
+        if category_id.is_empty() {
+            set_last_error("category_id_utf8 is empty", None);
+            return Err(());
+        }
+        let parent_id = optional_cstr(parent_id_utf8_or_null, "parent_id_utf8_or_null")?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let site = parse_site_utf8(&site_s)?;
+        let list = runtime()
+            .block_on(live_dir_client().get_category_rooms(
+                site,
+                parent_id.as_deref(),
+                &category_id,
+                page.max(1),
+            ))
+            .map_err(|e| set_last_error("live dir category rooms failed", Some(e.to_string())))?;
+
+        let out = LiveDirRoomListResult {
+            has_more: list.has_more,
+            items: list.items.into_iter().map(map_dir_room).collect(),
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize category rooms", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_live_dir_category_rooms_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_live_dir_search_rooms_json(
+    site_utf8: *const c_char,
+    keyword_utf8: *const c_char,
+    page: u32,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let site_s = require_cstr(site_utf8, "site_utf8")?.trim().to_string();
+        if site_s.is_empty() {
+            set_last_error("site_utf8 is empty", None);
+            return Err(());
+        }
+        let keyword = require_cstr(keyword_utf8, "keyword_utf8")?
+            .trim()
+            .to_string();
+        if keyword.is_empty() {
+            set_last_error("keyword_utf8 is empty", None);
+            return Err(());
+        }
+        let site = parse_site_utf8(&site_s)?;
+        let list = runtime()
+            .block_on(live_dir_client().search_rooms(site, &keyword, page.max(1)))
+            .map_err(|e| set_last_error("live dir search failed", Some(e.to_string())))?;
+        let out = LiveDirRoomListResult {
+            has_more: list.has_more,
+            items: list.items.into_iter().map(map_dir_room).collect(),
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize search rooms", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_live_dir_search_rooms_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn chaos_livestream_resolve_variant_json(
     input_utf8: *const c_char,
     variant_id_utf8: *const c_char,
@@ -457,8 +654,8 @@ pub extern "C" fn chaos_livestream_resolve_variant_json(
 
         // Important: resolve_variant expects the *canonical* room_id (e.g. Douyu rid, Bili long id).
         // So we decode once to obtain (site, canonical room_id), then resolve the requested variant.
-        let (site_hint, room_hint) =
-            chaos_core::danmaku::sites::parse_target_hint(&input).map_err(|e| {
+        let (site_hint, room_hint) = chaos_core::danmaku::sites::parse_target_hint(&input)
+            .map_err(|e| {
                 set_last_error("invalid input_utf8", Some(e.to_string()));
             })?;
 
@@ -529,7 +726,9 @@ pub extern "C" fn chaos_livestream_resolve_variant2_json(
         let site_s = require_cstr(site_utf8, "site_utf8")?;
         let site = parse_site_utf8(site_s)?;
 
-        let room_id = require_cstr(room_id_utf8, "room_id_utf8")?.trim().to_string();
+        let room_id = require_cstr(room_id_utf8, "room_id_utf8")?
+            .trim()
+            .to_string();
         if room_id.is_empty() {
             set_last_error("room_id_utf8 is empty", None);
             return Err(());
@@ -855,5 +1054,14 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert!(v.get("supported").is_some());
         assert!(v.get("sessions").is_some());
+    }
+
+    #[test]
+    fn live_dir_categories_rejects_null_site() {
+        let p = chaos_live_dir_categories_json(ptr::null());
+        assert!(p.is_null());
+        let err = chaos_ffi_last_error_json();
+        assert!(!err.is_null());
+        chaos_ffi_string_free(err);
     }
 }

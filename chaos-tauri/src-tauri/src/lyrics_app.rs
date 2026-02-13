@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -221,10 +221,7 @@ impl LyricsAppState {
 }
 
 pub fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("lyrics_settings.json"))
 }
 
@@ -232,7 +229,9 @@ pub fn load_settings(app: &AppHandle) -> Result<LyricsAppSettings, String> {
     let path = settings_path(app)?;
     let bytes = match std::fs::read(&path) {
         Ok(v) => v,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(LyricsAppSettings::default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(LyricsAppSettings::default());
+        }
         Err(e) => return Err(e.to_string()),
     };
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
@@ -253,7 +252,10 @@ pub fn save_settings(app: &AppHandle, settings: &LyricsAppSettings) -> Result<()
 }
 
 pub fn emit_detection_state(app: &AppHandle, enabled: bool) {
-    let _ = app.emit("lyrics_detection_state_changed", serde_json::json!({ "enabled": enabled }));
+    let _ = app.emit(
+        "lyrics_detection_state_changed",
+        serde_json::json!({ "enabled": enabled }),
+    );
 }
 
 pub fn emit_now_playing_state(app: &AppHandle, payload: &NowPlayingStatePayload) {
@@ -436,7 +438,12 @@ async fn run_sequential_search(app: &AppHandle, payload: &NowPlayingStatePayload
     let s = st.settings.lock().expect("lyrics settings mutex").clone();
 
     let artist = payload.artist.as_deref().unwrap_or("").trim().to_string();
-    let album = payload.album_title.as_deref().unwrap_or("").trim().to_string();
+    let album = payload
+        .album_title
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
 
     let term = if !artist.is_empty() {
         lyrics::model::LyricsSearchTerm::Info {
@@ -476,19 +483,13 @@ async fn run_sequential_search(app: &AppHandle, payload: &NowPlayingStatePayload
             let _ = app.emit("lyrics_current_changed", best.clone());
             // Persist as the global "current lyrics" so all windows can read.
             let state = app.state::<crate::LyricsWindowState>();
-            *state
-                .current
-                .lock()
-                .expect("lyrics window state mutex") = Some(best);
+            *state.current.lock().expect("lyrics window state mutex") = Some(best);
             return;
         }
     }
 
     // Not found: clear current.
     let state = app.state::<crate::LyricsWindowState>();
-    *state
-        .current
-        .lock()
-        .expect("lyrics window state mutex") = None;
+    *state.current.lock().expect("lyrics window state mutex") = None;
     let _ = app.emit("lyrics_current_changed", serde_json::Value::Null);
 }

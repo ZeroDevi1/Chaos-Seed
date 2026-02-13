@@ -64,6 +64,22 @@ internal static partial class ChaosFfi
 	        uint timeout_ms);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_categories_json(string site_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_recommend_rooms_json(string site_utf8, uint page);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_category_rooms_json(
+        string site_utf8,
+        string? parent_id_utf8_or_null,
+        string category_id_utf8,
+        uint page);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_search_rooms_json(string site_utf8, string keyword_utf8, uint page);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_livestream_decode_manifest_json(
         string input_utf8,
         byte drop_inaccessible_high_qualities);
@@ -219,6 +235,33 @@ Console.WriteLine(variantJson);
 // Player-side hints:
 // - Use manifest.playback.referer / user_agent as request headers.
 // - Prefer variant.url; fallback to variant.backup_urls.
+```
+
+## 直播目录（首页/分类）
+
+```csharp
+static string TakeOrThrow(IntPtr p, string what)
+{
+    var s = ChaosFfi.TakeString(p);
+    if (!string.IsNullOrEmpty(s)) return s;
+    var err = ChaosFfi.TakeString(ChaosFfi.chaos_ffi_last_error_json());
+    throw new Exception($"{what} failed: {err}");
+}
+
+var site = "bili_live";
+
+// 1) categories (for 分类页)
+var categoriesJson = TakeOrThrow(ChaosFfi.chaos_live_dir_categories_json(site), "live_dir_categories");
+Console.WriteLine(categoriesJson);
+
+// 2) recommend rooms (for 首页)
+var recJson = TakeOrThrow(ChaosFfi.chaos_live_dir_recommend_rooms_json(site, 1), "live_dir_recommend_rooms");
+using var recDoc = JsonDocument.Parse(recJson);
+Console.WriteLine("items=" + recDoc.RootElement.GetProperty("items").GetArrayLength());
+
+// 3) search (for 首页搜索)
+var searchJson = TakeOrThrow(ChaosFfi.chaos_live_dir_search_rooms_json(site, "lol", 1), "live_dir_search_rooms");
+Console.WriteLine(searchJson);
 ```
 
 ## 弹幕（callback + poll）

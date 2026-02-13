@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 chaos-core = { path = "../chaos-core" }
+chaos-proto = { path = "../chaos-proto" }
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rustls = "0.23"

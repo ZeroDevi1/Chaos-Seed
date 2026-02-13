@@ -100,10 +100,7 @@ fn build_winui3(release: bool) -> Result<(), String> {
     run_cmd(dotnet)?;
 
     // Verify daemon exists (copy is handled by csproj).
-    let exe = root
-        .join("target")
-        .join(profile)
-        .join("chaos-daemon.exe");
+    let exe = root.join("target").join(profile).join("chaos-daemon.exe");
     if !exe.exists() {
         return Err(format!("expected daemon at {}", exe.display()));
     }
@@ -126,10 +123,7 @@ fn ensure_winui3_ffmpeg(root: &Path) -> Result<(), String> {
 
     let script = root.join("scripts").join("fetch_ffmpeg_win.ps1");
     if !script.exists() {
-        return Err(format!(
-            "missing ffmpeg fetch script: {}",
-            script.display()
-        ));
+        return Err(format!("missing ffmpeg fetch script: {}", script.display()));
     }
 
     eprintln!(

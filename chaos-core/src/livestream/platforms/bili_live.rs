@@ -264,7 +264,11 @@ async fn fetch_play_url(
 
 fn pick_variant_with_url(vars: Vec<StreamVariant>, qn: i32) -> Option<StreamVariant> {
     vars.into_iter().find(|v| {
-        v.quality == qn && v.url.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+        v.quality == qn
+            && v.url
+                .as_deref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
     })
 }
 
@@ -404,7 +408,11 @@ pub async fn decode_manifest(
         // Cap attempts to avoid excessive requests on flaky networks.
         for qn in qns.into_iter().take(8) {
             let already_has_url = vars.iter().any(|v| {
-                v.quality == qn && v.url.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+                v.quality == qn
+                    && v.url
+                        .as_ref()
+                        .map(|s| !s.trim().is_empty())
+                        .unwrap_or(false)
             });
             if already_has_url {
                 break;

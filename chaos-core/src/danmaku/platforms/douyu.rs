@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 use tokio_tungstenite::tungstenite::http::header::{HeaderValue, ORIGIN, USER_AGENT};
-use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
 use crate::danmaku::model::{

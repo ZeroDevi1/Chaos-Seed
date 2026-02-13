@@ -41,7 +41,12 @@ impl GecimiProvider {
         let artist = util::percent_encode_component(artist);
         let url = format!("{}/{}/{}", self.base_url, title, artist);
 
-        let resp = http.get(url).timeout(timeout).send().await?.error_for_status()?;
+        let resp = http
+            .get(url)
+            .timeout(timeout)
+            .send()
+            .await?
+            .error_for_status()?;
         let body = resp.bytes().await?;
         let data: GecimiSearchResp = serde_json::from_slice(&body)?;
         Ok(data
@@ -70,7 +75,9 @@ impl GecimiProvider {
         let body = resp.bytes().await?;
         let s = String::from_utf8_lossy(&body).to_string();
         if s.trim().is_empty() {
-            return Err(LyricsError::Parse("gecimi: empty lyric content".to_string()));
+            return Err(LyricsError::Parse(
+                "gecimi: empty lyric content".to_string(),
+            ));
         }
 
         Ok(LyricsSearchResult {

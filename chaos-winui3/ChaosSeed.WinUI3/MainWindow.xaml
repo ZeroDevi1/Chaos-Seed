@@ -44,6 +44,16 @@
             CompactPaneLength="40"
             SelectionChanged="OnSelectionChanged">
             <muxc:NavigationView.MenuItems>
+                <muxc:NavigationViewItem Content="首页" Tag="home">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Home" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="分类" Tag="categories">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="AllApps" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
                 <muxc:NavigationViewItem Content="直播" Tag="live">
                     <muxc:NavigationViewItem.Icon>
                         <muxc:SymbolIcon Symbol="Play" />

@@ -1,9 +1,9 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, REFERER, SET_COOKIE, USER_AGENT};
-use reqwest::Client;
 use regex::Regex;
+use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue, REFERER, SET_COOKIE, USER_AGENT};
 use serde::Deserialize;
 
 use crate::lyrics::error::LyricsError;
@@ -50,10 +50,16 @@ impl NeteaseProvider {
         headers.insert(REFERER, HeaderValue::from_static("http://music.163.com/"));
         headers.insert(
             USER_AGENT,
-            HeaderValue::from_str(&self.user_agent).unwrap_or(HeaderValue::from_static("chaos-seed/0.1")),
+            HeaderValue::from_str(&self.user_agent)
+                .unwrap_or(HeaderValue::from_static("chaos-seed/0.1")),
         );
 
-        let params = [("s", term.as_str()), ("offset", "0"), ("limit", "10"), ("type", "1")];
+        let params = [
+            ("s", term.as_str()),
+            ("offset", "0"),
+            ("limit", "10"),
+            ("type", "1"),
+        ];
 
         // First request to obtain cookie (LyricsKit does this explicitly).
         let resp1 = http
@@ -149,7 +155,9 @@ impl NeteaseProvider {
         } else if let Some(l) = lrc {
             l
         } else {
-            return Err(LyricsError::Parse("netease: missing lyric content".to_string()));
+            return Err(LyricsError::Parse(
+                "netease: missing lyric content".to_string(),
+            ));
         };
 
         let lyrics_translation = data

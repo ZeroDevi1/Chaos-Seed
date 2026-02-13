@@ -1,7 +1,8 @@
 pub mod danmaku;
+pub mod live_directory;
 pub mod livestream;
-pub mod now_playing;
 pub mod lyrics;
+pub mod now_playing;
 pub mod subtitle;
 
 // Ensure Rustls has a selected CryptoProvider in builds where multiple providers are enabled.

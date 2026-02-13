@@ -202,6 +202,80 @@ public sealed class DaemonClient : IDisposable
         );
     }
 
+    public async Task<LiveDirCategory[]> LiveDirCategoriesAsync(string site, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        return await _rpc.InvokeWithParameterObjectAsync<LiveDirCategory[]>(
+            "liveDir.categories",
+            new { site = (site ?? "").Trim() },
+            ct
+        );
+    }
+
+    public async Task<LiveDirRoomListResult> LiveDirRecommendRoomsAsync(string site, int page, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        return await _rpc.InvokeWithParameterObjectAsync<LiveDirRoomListResult>(
+            "liveDir.recommendRooms",
+            new { site = (site ?? "").Trim(), page = Math.Max(1, page) },
+            ct
+        );
+    }
+
+    public async Task<LiveDirRoomListResult> LiveDirCategoryRoomsAsync(
+        string site,
+        string? parentId,
+        string categoryId,
+        int page,
+        CancellationToken ct = default
+    )
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        object payload = new
+        {
+            site = (site ?? "").Trim(),
+            parentId = string.IsNullOrWhiteSpace(parentId) ? null : parentId.Trim(),
+            categoryId = (categoryId ?? "").Trim(),
+            page = Math.Max(1, page),
+        };
+
+        return await _rpc.InvokeWithParameterObjectAsync<LiveDirRoomListResult>(
+            "liveDir.categoryRooms",
+            payload,
+            ct
+        );
+    }
+
+    public async Task<LiveDirRoomListResult> LiveDirSearchRoomsAsync(string site, string keyword, int page, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        return await _rpc.InvokeWithParameterObjectAsync<LiveDirRoomListResult>(
+            "liveDir.searchRooms",
+            new { site = (site ?? "").Trim(), keyword = (keyword ?? "").Trim(), page = Math.Max(1, page) },
+            ct
+        );
+    }
+
     public async Task<NowPlayingSnapshot> NowPlayingSnapshotAsync(
         bool includeThumbnail,
         int maxThumbBytes,

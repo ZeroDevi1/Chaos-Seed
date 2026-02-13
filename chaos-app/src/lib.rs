@@ -8,10 +8,12 @@ use std::time::Duration;
 
 use chaos_core::danmaku::client::DanmakuClient;
 use chaos_core::danmaku::model::{ConnectOptions, DanmakuSession, Site};
+use chaos_core::live_directory::client::LiveDirectoryClient;
 use chaos_core::livestream::client::LivestreamClient;
 use chaos_core::livestream::model::{ResolveOptions, StreamVariant};
 use chaos_proto::{
-    DanmakuFetchImageParams, DanmakuFetchImageResult, DanmakuMessage, LiveOpenResult,
+    DanmakuFetchImageParams, DanmakuFetchImageResult, DanmakuMessage, LiveDirCategory,
+    LiveDirRoomCard, LiveDirRoomListResult, LiveDirSubCategory, LiveOpenResult,
     LivestreamDecodeManifestResult, LivestreamInfo, LivestreamPlaybackHints, LivestreamVariant,
 };
 use tokio::sync::mpsc;
@@ -74,6 +76,7 @@ struct LiveSession {
 pub struct ChaosApp {
     cfg: ChaosAppConfig,
     livestream: LivestreamClient,
+    live_dir: LiveDirectoryClient,
     image_http: reqwest::Client,
     sessions: Arc<Mutex<HashMap<String, LiveSession>>>,
     image_cache: Arc<Mutex<ByteLruCache<(String, String), Vec<u8>>>>,
@@ -98,6 +101,8 @@ impl ChaosApp {
     pub fn with_config(cfg: ChaosAppConfig) -> Result<Self, ChaosAppError> {
         let livestream =
             LivestreamClient::new().map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+        let live_dir =
+            LiveDirectoryClient::new().map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
         let image_http = reqwest::Client::builder()
             .user_agent("chaos-seed/0.1 (daemon)")
             .timeout(cfg.image_timeout)
@@ -107,6 +112,7 @@ impl ChaosApp {
         Ok(Self {
             cfg: cfg.clone(),
             livestream,
+            live_dir,
             image_http,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             image_cache: Arc::new(Mutex::new(ByteLruCache::new(
@@ -136,6 +142,114 @@ impl ChaosApp {
             .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
 
         Ok(map_manifest_to_proto(man))
+    }
+
+    fn parse_site_string(site: &str) -> Result<Site, ChaosAppError> {
+        let s = site.trim().to_ascii_lowercase();
+        match s.as_str() {
+            "bili_live" | "bilibili" | "bili" => Ok(Site::BiliLive),
+            "douyu" => Ok(Site::Douyu),
+            "huya" => Ok(Site::Huya),
+            _ => Err(ChaosAppError::InvalidInput(format!(
+                "unsupported site: {site}"
+            ))),
+        }
+    }
+
+    fn map_dir_category(c: chaos_core::live_directory::model::LiveCategory) -> LiveDirCategory {
+        LiveDirCategory {
+            id: c.id,
+            name: c.name,
+            children: c
+                .children
+                .into_iter()
+                .map(|x| LiveDirSubCategory {
+                    id: x.id,
+                    parent_id: x.parent_id,
+                    name: x.name,
+                    pic: x.pic,
+                })
+                .collect(),
+        }
+    }
+
+    fn map_dir_room(x: chaos_core::live_directory::model::LiveRoomCard) -> LiveDirRoomCard {
+        LiveDirRoomCard {
+            site: x.site.as_str().to_string(),
+            room_id: x.room_id,
+            input: x.input,
+            title: x.title,
+            cover: x.cover,
+            user_name: x.user_name,
+            online: x.online,
+        }
+    }
+
+    pub async fn live_dir_categories(
+        &self,
+        site: &str,
+    ) -> Result<Vec<LiveDirCategory>, ChaosAppError> {
+        let site = Self::parse_site_string(site)?;
+        let items = self
+            .live_dir
+            .get_categories(site)
+            .await
+            .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+        Ok(items.into_iter().map(Self::map_dir_category).collect())
+    }
+
+    pub async fn live_dir_recommend_rooms(
+        &self,
+        site: &str,
+        page: u32,
+    ) -> Result<LiveDirRoomListResult, ChaosAppError> {
+        let site = Self::parse_site_string(site)?;
+        let list = self
+            .live_dir
+            .get_recommend_rooms(site, page)
+            .await
+            .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+        Ok(LiveDirRoomListResult {
+            has_more: list.has_more,
+            items: list.items.into_iter().map(Self::map_dir_room).collect(),
+        })
+    }
+
+    pub async fn live_dir_category_rooms(
+        &self,
+        site: &str,
+        parent_id: Option<&str>,
+        category_id: &str,
+        page: u32,
+    ) -> Result<LiveDirRoomListResult, ChaosAppError> {
+        let site_enum = Self::parse_site_string(site)?;
+        let list = self
+            .live_dir
+            .get_category_rooms(site_enum, parent_id, category_id, page)
+            .await
+            .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+        Ok(LiveDirRoomListResult {
+            has_more: list.has_more,
+            items: list.items.into_iter().map(Self::map_dir_room).collect(),
+        })
+    }
+
+    pub async fn live_dir_search_rooms(
+        &self,
+        site: &str,
+        keyword: &str,
+        page: u32,
+    ) -> Result<LiveDirRoomListResult, ChaosAppError> {
+        let site = Self::parse_site_string(site)?;
+        let list = self
+            .live_dir
+            .search_rooms(site, keyword, page)
+            .await
+            .map_err(|e| ChaosAppError::Livestream(e.to_string()))?;
+        Ok(LiveDirRoomListResult {
+            has_more: list.has_more,
+            items: list.items.into_iter().map(Self::map_dir_room).collect(),
+        })
     }
 
     pub async fn open_live(

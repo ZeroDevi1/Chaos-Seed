@@ -1,8 +1,10 @@
 use chaos_daemon::{ChaosService, read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame};
 use chaos_proto::{
     DanmakuConnectParams, DanmakuConnectResult, DanmakuDisconnectParams, DanmakuFetchImageParams,
-    DanmakuFetchImageResult, DanmakuMessage, LiveCloseParams, LiveOpenParams, LiveOpenResult,
-    LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
+    DanmakuFetchImageResult, DanmakuMessage, LiveCloseParams, LiveDirCategoriesParams,
+    LiveDirCategory, LiveDirCategoryRoomsParams, LiveDirRecommendRoomsParams, LiveDirRoomCard,
+    LiveDirRoomListResult, LiveDirSearchRoomsParams, LiveDirSubCategory, LiveOpenParams,
+    LiveOpenResult, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
     LivestreamPlaybackHints, LivestreamVariant, LyricsSearchParams, LyricsSearchResult,
     NowPlayingSession, NowPlayingSnapshot, NowPlayingSnapshotParams,
 };
@@ -69,6 +71,60 @@ impl ChaosService for FakeSvc {
                 url: None,
                 backup_urls: vec![],
             }],
+        })
+    }
+
+    async fn live_dir_categories(
+        &self,
+        _params: LiveDirCategoriesParams,
+    ) -> Result<Vec<LiveDirCategory>, String> {
+        Ok(vec![LiveDirCategory {
+            id: "1".to_string(),
+            name: "网游".to_string(),
+            children: vec![LiveDirSubCategory {
+                id: "11".to_string(),
+                parent_id: "1".to_string(),
+                name: "英雄联盟".to_string(),
+                pic: None,
+            }],
+        }])
+    }
+
+    async fn live_dir_recommend_rooms(
+        &self,
+        _params: LiveDirRecommendRoomsParams,
+    ) -> Result<LiveDirRoomListResult, String> {
+        Ok(LiveDirRoomListResult {
+            has_more: false,
+            items: vec![LiveDirRoomCard {
+                site: "bili_live".to_string(),
+                room_id: "1".to_string(),
+                input: "bilibili:1".to_string(),
+                title: "t".to_string(),
+                cover: None,
+                user_name: None,
+                online: Some(1),
+            }],
+        })
+    }
+
+    async fn live_dir_category_rooms(
+        &self,
+        _params: LiveDirCategoryRoomsParams,
+    ) -> Result<LiveDirRoomListResult, String> {
+        Ok(LiveDirRoomListResult {
+            has_more: false,
+            items: vec![],
+        })
+    }
+
+    async fn live_dir_search_rooms(
+        &self,
+        _params: LiveDirSearchRoomsParams,
+    ) -> Result<LiveDirRoomListResult, String> {
+        Ok(LiveDirRoomListResult {
+            has_more: false,
+            items: vec![],
         })
     }
 
@@ -258,6 +314,24 @@ async fn jsonrpc_request_response_and_notification_flow() {
     assert_eq!(v11["id"], 11);
     assert!(v11["result"].is_array());
     assert_eq!(v11["result"][0]["matchPercentage"], 80);
+
+    // 3.5) liveDir.categories
+    let cats = json!({
+        "jsonrpc": "2.0",
+        "id": 99,
+        "method": "liveDir.categories",
+        "params": { "site": "bili_live" }
+    });
+    let cats_bytes = serde_json::to_vec(&cats).unwrap();
+    write_lsp_frame(&mut w, &cats_bytes).await.unwrap();
+    let resp99 = timeout(Duration::from_secs(3), read_lsp_frame(&mut br, 16 * 1024))
+        .await
+        .unwrap()
+        .unwrap();
+    let v99: serde_json::Value = serde_json::from_slice(&resp99).unwrap();
+    assert_eq!(v99["id"], 99);
+    assert!(v99["result"].is_array());
+    assert_eq!(v99["result"][0]["children"][0]["id"], "11");
 
     // 4) danmaku.connect
     let dm = json!({

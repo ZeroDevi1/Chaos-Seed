@@ -20,4 +20,3 @@ fn decode_xml_entities_named_and_numeric() {
     let got = util::decode_xml_entities(s);
     assert_eq!(got.as_ref(), "a&b<c>d\"e'f!!");
 }
-

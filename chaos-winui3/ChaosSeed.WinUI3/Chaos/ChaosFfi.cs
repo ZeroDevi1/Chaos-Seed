@@ -35,6 +35,27 @@ internal static partial class ChaosFfi
         string variant_id_utf8
     );
 
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_categories_json(string site_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_recommend_rooms_json(string site_utf8, uint page);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_category_rooms_json(
+        string site_utf8,
+        string? parent_id_utf8_or_null,
+        string category_id_utf8,
+        uint page
+    );
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_live_dir_search_rooms_json(
+        string site_utf8,
+        string keyword_utf8,
+        uint page
+    );
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     internal delegate void chaos_danmaku_callback(IntPtr event_json_utf8, IntPtr user_data);
 

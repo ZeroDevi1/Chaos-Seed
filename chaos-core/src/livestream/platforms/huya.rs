@@ -107,7 +107,10 @@ fn parse_stream_infos(v: &Value) -> Vec<(String, u32, String, String, String)> {
             let presenter_uid = it
                 .get("lPresenterUid")
                 .and_then(|v| v.as_i64())
-                .or_else(|| it.get("lPresenterUid").and_then(|v| v.as_str()?.parse::<i64>().ok()))
+                .or_else(|| {
+                    it.get("lPresenterUid")
+                        .and_then(|v| v.as_str()?.parse::<i64>().ok())
+                })
                 .unwrap_or(0)
                 .clamp(0, i64::from(u32::MAX)) as u32;
             let s_flv_url = it

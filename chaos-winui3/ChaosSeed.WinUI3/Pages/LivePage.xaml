@@ -457,26 +457,24 @@
 	                                    <!-- Flip each item back so text/images are readable. -->
 	                                    <ScaleTransform ScaleY="-1" />
 	                                </Grid.RenderTransform>
-	                                <Grid.ColumnDefinitions>
-	                                    <ColumnDefinition Width="Auto" />
-	                                    <ColumnDefinition Width="Auto" />
-	                                    <ColumnDefinition Width="*" />
-	                                </Grid.ColumnDefinitions>
 
-	                                <TextBlock Text="{x:Bind UserLabel, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" />
-	                                <Image
-	                                    Grid.Column="1"
-	                                    Width="24"
-	                                    Height="24"
-	                                    Margin="6,0,0,0"
-	                                    Visibility="{x:Bind EmoteVisibility, Mode=OneWay}"
-	                                    Source="{x:Bind Emote, Mode=OneWay}" />
-	                                <TextBlock
-	                                    Grid.Column="2"
-	                                    Margin="6,0,0,0"
-	                                    Text="{x:Bind MessageText, Mode=OneWay}"
-	                                    FontSize="12"
-	                                    TextWrapping="Wrap" />
+                                    <!-- Keep username + emote + message as ONE flow region, so wrapping looks natural. -->
+                                    <RichTextBlock FontSize="12" TextWrapping="Wrap">
+                                        <Paragraph>
+                                            <Run Text="{x:Bind UserLabel, Mode=OneWay}" />
+                                            <Run Text=" " />
+                                            <InlineUIContainer>
+                                                <Image
+                                                    Width="20"
+                                                    Height="20"
+                                                    Margin="4,0,4,0"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="{x:Bind EmoteVisibility, Mode=OneWay}"
+                                                    Source="{x:Bind Emote, Mode=OneWay}" />
+                                            </InlineUIContainer>
+                                            <Run Text="{x:Bind MessageText, Mode=OneWay}" />
+                                        </Paragraph>
+                                    </RichTextBlock>
 	                            </Grid>
 	                        </DataTemplate>
 	                    </ListView.ItemTemplate>

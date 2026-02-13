@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use chaos_core::lyrics::model::{LyricsSearchOptions, LyricsSearchRequest, LyricsSearchTerm, LyricsService};
+use chaos_core::lyrics::model::{
+    LyricsSearchOptions, LyricsSearchRequest, LyricsSearchTerm, LyricsService,
+};
 
 fn usage() -> String {
     [
@@ -76,7 +78,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 "--duration-ms" => {
                     i += 1;
-                    duration_ms = Some(args.get(i).ok_or("--duration-ms requires a value")?.parse()?);
+                    duration_ms = Some(
+                        args.get(i)
+                            .ok_or("--duration-ms requires a value")?
+                            .parse()?,
+                    );
                 }
                 "--strict" => strict_match = true,
                 "--services" => {
@@ -107,9 +113,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("missing title".into());
     }
     let artist = artist.unwrap_or_default().trim().to_string();
-    let album = album.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let album = album
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
-    let term = LyricsSearchTerm::Info { title, artist, album };
+    let term = LyricsSearchTerm::Info {
+        title,
+        artist,
+        album,
+    };
     let mut req = LyricsSearchRequest::new(term);
     req.limit = limit.max(1);
     req.duration_ms = duration_ms.filter(|v| *v > 0);
@@ -145,4 +157,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

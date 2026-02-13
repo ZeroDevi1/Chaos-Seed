@@ -5,7 +5,9 @@ mod win {
     use chaos_daemon::run_jsonrpc_over_lsp;
     use chaos_proto::{
         DanmakuConnectParams, DanmakuConnectResult, DanmakuDisconnectParams,
-        DanmakuFetchImageParams, LiveCloseParams, LiveOpenParams, LivestreamDecodeManifestParams,
+        DanmakuFetchImageParams, LiveCloseParams, LiveDirCategoriesParams, LiveDirCategory,
+        LiveDirCategoryRoomsParams, LiveDirRecommendRoomsParams, LiveDirRoomListResult,
+        LiveDirSearchRoomsParams, LiveOpenParams, LivestreamDecodeManifestParams,
         LivestreamDecodeManifestResult, LyricsSearchParams, LyricsSearchResult, NowPlayingSession,
         NowPlayingSnapshot, NowPlayingSnapshotParams, NowPlayingThumbnail, PreferredQuality,
     };
@@ -28,6 +30,51 @@ mod win {
         ) -> Result<LivestreamDecodeManifestResult, String> {
             self.app
                 .decode_manifest(&params.input)
+                .await
+                .map_err(|e| e.to_string())
+        }
+
+        async fn live_dir_categories(
+            &self,
+            params: LiveDirCategoriesParams,
+        ) -> Result<Vec<LiveDirCategory>, String> {
+            self.app
+                .live_dir_categories(&params.site)
+                .await
+                .map_err(|e| e.to_string())
+        }
+
+        async fn live_dir_recommend_rooms(
+            &self,
+            params: LiveDirRecommendRoomsParams,
+        ) -> Result<LiveDirRoomListResult, String> {
+            self.app
+                .live_dir_recommend_rooms(&params.site, params.page)
+                .await
+                .map_err(|e| e.to_string())
+        }
+
+        async fn live_dir_category_rooms(
+            &self,
+            params: LiveDirCategoryRoomsParams,
+        ) -> Result<LiveDirRoomListResult, String> {
+            self.app
+                .live_dir_category_rooms(
+                    &params.site,
+                    params.parent_id.as_deref(),
+                    &params.category_id,
+                    params.page,
+                )
+                .await
+                .map_err(|e| e.to_string())
+        }
+
+        async fn live_dir_search_rooms(
+            &self,
+            params: LiveDirSearchRoomsParams,
+        ) -> Result<LiveDirRoomListResult, String> {
+            self.app
+                .live_dir_search_rooms(&params.site, &params.keyword, params.page)
                 .await
                 .map_err(|e| e.to_string())
         }
