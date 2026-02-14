@@ -137,6 +137,14 @@ jobs:
           $hash = (Get-FileHash dist/chaos-winui3-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
           $hash | Out-File -Encoding ascii dist/chaos-winui3-windows-x86_64.zip.sha256
 
+      - name: Upload Release Assets (zip - ffi + winui3)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/chaos-ffi-windows-x86_64.zip
+            dist/chaos-winui3-windows-x86_64.zip
+            dist/chaos-winui3-windows-x86_64.zip.sha256
+
       - name: Install frontend deps
         shell: pwsh
         run: pnpm -C chaos-tauri install --frozen-lockfile
@@ -178,13 +186,10 @@ jobs:
 
           Compress-Archive -Force -Path $exePath -DestinationPath dist/chaos-tauri-windows-x86_64.zip
 
-      - name: Upload Release Assets (zip)
+      - name: Upload Release Assets (zip - tauri)
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/chaos-ffi-windows-x86_64.zip
-            dist/chaos-winui3-windows-x86_64.zip
-            dist/chaos-winui3-windows-x86_64.zip.sha256
             dist/chaos-tauri-windows-x86_64.zip
 
       # Keep MSIX work last so zip assets still upload even if MSIX packaging fails.
