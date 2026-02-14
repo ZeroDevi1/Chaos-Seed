@@ -81,4 +81,11 @@ public sealed class AppSettings
     public int MusicDownloadConcurrency { get; set; } = 3;
     public int MusicDownloadRetries { get; set; } = 2;
     public bool MusicDownloadOverwrite { get; set; } = false;
+
+    // ----- updates (WinUI3 only; zip self-updater) -----
+
+    public bool AutoUpdateEnabled { get; set; } = true;
+    public int AutoUpdateIntervalHours { get; set; } = 24;
+    public long? AutoUpdateLastCheckUnixMs { get; set; }
+    public string? AutoUpdateIgnoredVersion { get; set; }
 }

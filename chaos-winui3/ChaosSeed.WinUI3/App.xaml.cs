@@ -4,6 +4,7 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using FlyleafLib;
+using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Xaml;
 
 namespace ChaosSeed.WinUI3;
@@ -85,5 +86,8 @@ public sealed partial class App : Application
     {
         MainWindowInstance = new MainWindow();
         MainWindowInstance.Activate();
+
+        // Best-effort: background update check for zip (unpackaged) builds.
+        _ = UpdateService.Instance.TryAutoCheckAsync();
     }
 }

@@ -27,6 +27,10 @@ public sealed partial class MainWindow : Window
         InitTitleBar();
         ApplyWindowStyleFromSettings();
         SettingsService.Instance.SettingsChanged += (_, _) => ApplyWindowStyleFromSettings();
+        Closed += (_, _) =>
+        {
+            try { DaemonClient.Instance.Dispose(); } catch { }
+        };
 
         Nav.SelectedItem = Nav.MenuItems[0];
         ContentFrame.Navigate(typeof(HomePage), null, new DrillInNavigationTransitionInfo());

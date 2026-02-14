@@ -17,6 +17,84 @@
 
                 <Border Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                     <StackPanel Spacing="12">
+                        <TextBlock Text="更新" FontSize="18" FontWeight="SemiBold" />
+
+                        <TextBlock x:Name="UpdateCurrentVersionText" Text="当前版本：" Opacity="0.85" />
+
+                        <muxc:InfoBar
+                            x:Name="UpdatePackagedHint"
+                            IsOpen="False"
+                            Severity="Informational"
+                            Title="提示"
+                            Message="你正在使用 MSIX 安装版：更新由系统（AppInstaller）托管，此处无需自更新。" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="自动检测更新" VerticalAlignment="Center" />
+                            <ToggleSwitch
+                                x:Name="AutoUpdateToggle"
+                                Grid.Column="1"
+                                OffContent="关闭"
+                                OnContent="开启"
+                                Toggled="OnAutoUpdateToggled" />
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="检测间隔（小时）" VerticalAlignment="Center" />
+                            <muxc:NumberBox
+                                x:Name="AutoUpdateIntervalBox"
+                                Grid.Column="1"
+                                Minimum="1"
+                                Maximum="336"
+                                SmallChange="1"
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="OnAutoUpdateIntervalChanged" />
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="240" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="检查更新" VerticalAlignment="Center" />
+                            <Button
+                                x:Name="CheckUpdateButton"
+                                Grid.Column="1"
+                                Content="检查"
+                                Click="OnCheckUpdateClicked" />
+                        </Grid>
+
+                        <ProgressBar
+                            x:Name="UpdateProgressBar"
+                            Minimum="0"
+                            Maximum="100"
+                            Value="0"
+                            Visibility="Collapsed" />
+
+                        <TextBlock x:Name="UpdateStatusText" Text="" Opacity="0.85" TextWrapping="Wrap" />
+
+                        <muxc:InfoBar
+                            x:Name="UpdateInfoBar"
+                            IsOpen="False"
+                            Severity="Informational"
+                            Title="更新"
+                            Message="">
+                            <muxc:InfoBar.ActionButton>
+                                <Button x:Name="UpdateNowButton" Content="立即更新" Click="OnUpdateNowClicked" />
+                            </muxc:InfoBar.ActionButton>
+                        </muxc:InfoBar>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+                    <StackPanel Spacing="12">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />

@@ -83,6 +83,8 @@ jobs:
 
       - name: Build WinUI3 + daemon + ffi (release)
         shell: pwsh
+        env:
+          CHAOS_VERSION: ${{ github.ref_name }}
         run: cargo xtask build-winui3 --release
 
       - name: Package chaos-ffi
@@ -119,8 +121,83 @@ jobs:
           if (!(Test-Path (Join-Path $outDir "chaos-daemon.exe"))) { throw "missing chaos-daemon.exe in output dir: $outDir" }
           if (!(Test-Path (Join-Path $outDir "chaos_ffi.dll"))) { throw "missing chaos_ffi.dll in output dir: $outDir" }
           if (!(Test-Path (Join-Path $outDir "FFmpeg"))) { throw "missing FFmpeg/ in output dir: $outDir" }
+          if (!(Test-Path (Join-Path $outDir "ChaosSeed.Updater.exe"))) { throw "missing ChaosSeed.Updater.exe in output dir: $outDir" }
+          if (!(Test-Path (Join-Path $outDir "chaos-version.txt"))) { throw "missing chaos-version.txt in output dir: $outDir" }
 
           Compress-Archive -Force -Path (Join-Path $outDir "*") -DestinationPath dist/chaos-winui3-windows-x86_64.zip
+
+      - name: Generate sha256 for chaos-winui3 zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hash = (Get-FileHash dist/chaos-winui3-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          $hash | Out-File -Encoding ascii dist/chaos-winui3-windows-x86_64.zip.sha256
+
+      - name: Build MSIX (WinUI3 Packaging)
+        shell: pwsh
+        env:
+          MSIX_PFX_BASE64: ${{ secrets.MSIX_PFX_BASE64 }}
+          MSIX_PFX_PASSWORD: ${{ secrets.MSIX_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:MSIX_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:MSIX_PFX_PASSWORD)) {
+            Write-Host "MSIX secrets missing; skipping MSIX packaging."
+            exit 0
+          }
+
+          $tag = "${{ github.ref_name }}"
+          if ($tag.StartsWith("v")) { $tag = $tag.Substring(1) }
+          $msixVer = "$tag.0"
+          Write-Host "MSIX version: $msixVer"
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "chaosseed-msix.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:MSIX_PFX_BASE64))
+
+          # Build the packaging project (produces .msix under AppPackages/)
+          msbuild chaos-winui3/ChaosSeed.WinUI3.Packaging/ChaosSeed.WinUI3.Packaging.wapproj `
+            /restore `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:AppxBundle=Never `
+            /p:PackageVersion=$msixVer `
+            /p:AppxPackageSigningEnabled=true `
+            /p:PackageCertificateKeyFile=$pfxPath `
+            /p:PackageCertificatePassword=$env:MSIX_PFX_PASSWORD
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          $msix = Get-ChildItem -Recurse -ErrorAction SilentlyContinue -Path "chaos-winui3/ChaosSeed.WinUI3.Packaging/AppPackages" -Filter "*.msix" | Select-Object -First 1
+          if (!$msix) { throw "failed to locate built .msix under AppPackages/" }
+          Copy-Item -Force $msix.FullName dist/ChaosSeed.WinUI3_x64.msix
+
+          # Export public cert (.cer) from PFX (DER encoded).
+          $cer = "dist/ChaosSeed.WinUI3.cer"
+          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfxPath, $env:MSIX_PFX_PASSWORD)
+          [IO.File]::WriteAllBytes($cer, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+
+          # Generate AppInstaller pointing at stable latest/download URLs.
+          $appInstallerUrl = "https://github.com/${{ github.repository }}/releases/latest/download/ChaosSeed.WinUI3.appinstaller"
+          $msixUrl = "https://github.com/${{ github.repository }}/releases/latest/download/ChaosSeed.WinUI3_x64.msix"
+          @"
+<?xml version="1.0" encoding="utf-8"?>
+<AppInstaller
+  xmlns="http://schemas.microsoft.com/appx/appinstaller/2017/2"
+  Version="$msixVer"
+  Uri="$appInstallerUrl">
+  <MainPackage
+    Name="ChaosSeed.WinUI3"
+    Publisher="CN=ChaosSeed"
+    Version="$msixVer"
+    Uri="$msixUrl" />
+  <UpdateSettings>
+    <OnLaunch HoursBetweenUpdateChecks="12" />
+  </UpdateSettings>
+</AppInstaller>
+"@ | Out-File -Encoding utf8 dist/ChaosSeed.WinUI3.appinstaller
+
+          # Optional diagnostics hash
+          (Get-FileHash dist/ChaosSeed.WinUI3_x64.msix -Algorithm SHA256).Hash.ToLower() | Out-File -Encoding ascii dist/ChaosSeed.WinUI3_x64.msix.sha256
 
       - name: Install frontend deps
         shell: pwsh
@@ -163,13 +240,24 @@ jobs:
 
           Compress-Archive -Force -Path $exePath -DestinationPath dist/chaos-tauri-windows-x86_64.zip
 
-      - name: Upload Release Assets
+      - name: Upload Release Assets (zip)
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/chaos-ffi-windows-x86_64.zip
             dist/chaos-winui3-windows-x86_64.zip
+            dist/chaos-winui3-windows-x86_64.zip.sha256
             dist/chaos-tauri-windows-x86_64.zip
+
+      - name: Upload Release Assets (MSIX)
+        if: ${{ secrets.MSIX_PFX_BASE64 != '' && secrets.MSIX_PFX_PASSWORD != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ChaosSeed.WinUI3_x64.msix
+            dist/ChaosSeed.WinUI3_x64.msix.sha256
+            dist/ChaosSeed.WinUI3.appinstaller
+            dist/ChaosSeed.WinUI3.cer
 
   ffi_linux:
     needs: create_release

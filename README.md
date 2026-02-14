@@ -211,7 +211,12 @@ cargo run -p chaos-core --example lyrics_search -- --title "Hello" --artist "Ade
 
 - `chaos-ffi-windows-x86_64.zip`
 - `chaos-winui3-windows-x86_64.zip`
+- `chaos-winui3-windows-x86_64.zip.sha256`（WinUI3 zip 自更新校验）
 - `chaos-tauri-windows-x86_64.zip`
+
+WinUI3 额外支持：
+- zip 便携版自更新（见 `docs/WINUI3_AUTO_UPDATE.md`）
+- 可选 MSIX + AppInstaller 更新通道（需要配置 CI 签名证书）
 
 推送示例（创建 tag 后一定要 push 到远端，CI 才会触发）：
 

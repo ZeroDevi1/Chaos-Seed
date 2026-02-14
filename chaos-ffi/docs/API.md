@@ -24,7 +24,7 @@
 返回：
 
 ```json
-{"version":"0.4.0","git":"unknown","api":7}
+{"version":"0.4.2","git":"unknown","api":7}
 ```
 
 当前为：

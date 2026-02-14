@@ -29,9 +29,23 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Build the external updater alongside WinUI3, but do not reference it at runtime. -->
+    <ProjectReference Include="..\ChaosSeed.Updater\ChaosSeed.Updater.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="FFmpeg\\**\\*" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\\**\\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Optional override injected by CI (tag name like v0.4.0). -->
+    <ChaosVersion Condition="'$(CHAOS_VERSION)' != ''">$(CHAOS_VERSION)</ChaosVersion>
+    <ChaosVersion Condition="'$(ChaosVersion)' == ''">dev</ChaosVersion>
+
+    <UpdaterProjectDir>$(MSBuildProjectDirectory)\..\ChaosSeed.Updater</UpdaterProjectDir>
+    <UpdaterOutDir>$(UpdaterProjectDir)\bin\x64\$(Configuration)\net8.0-windows\</UpdaterOutDir>
+  </PropertyGroup>
 
   <PropertyGroup>
     <RustTargetDir>$(SolutionDir)..\target</RustTargetDir>
@@ -50,5 +64,21 @@
     <Message Importance="high" Text="Copying chaos_ffi from $(ChaosFfiDll) to $(OutDir)" Condition="Exists('$(ChaosFfiDll)')" />
     <Copy SourceFiles="$(ChaosFfiDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('$(ChaosFfiDll)')" />
     <Message Importance="high" Text="chaos_ffi.dll not found at $(ChaosFfiDll). Build it first with: cargo build -p chaos-ffi (or cargo xtask build-winui3 --release)" Condition="!Exists('$(ChaosFfiDll)')" />
+  </Target>
+
+  <Target Name="WriteChaosVersion" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(OutDir)\chaos-version.txt"
+      Lines="$(ChaosVersion)"
+      Overwrite="true"
+      Encoding="ASCII" />
+  </Target>
+
+  <Target Name="CopyUpdaterToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <UpdaterFiles Include="$(UpdaterOutDir)\*.*" />
+    </ItemGroup>
+    <Message Importance="high" Text="Copying updater from $(UpdaterOutDir) to $(OutDir)" Condition="@(UpdaterFiles) != ''" />
+    <Copy SourceFiles="@(UpdaterFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="@(UpdaterFiles) != ''" />
   </Target>
 </Project>

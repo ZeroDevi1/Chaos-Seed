@@ -14,6 +14,12 @@ public static class ShellAppIdentityService
 
     public static void TryEnsureChaosSeedIdentity()
     {
+        if (AppIdentityService.IsPackaged)
+        {
+            // Packaged apps already have an identity + Start Menu entry.
+            return;
+        }
+
         try
         {
             var exePath = Environment.ProcessPath;

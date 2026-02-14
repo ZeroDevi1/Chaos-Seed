@@ -64,6 +64,17 @@ public sealed class SettingsService
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    // Persist changes without raising SettingsChanged. Useful for background bookkeeping fields
+    // (e.g., update-check timestamps) that should not trigger UI re-styling.
+    public void UpdateSilently(Action<AppSettings> mutator)
+    {
+        lock (_gate)
+        {
+            mutator(Current);
+            PersistLocked();
+        }
+    }
+
     private void PersistLocked()
     {
         var json = JsonSerializer.Serialize(Current);
