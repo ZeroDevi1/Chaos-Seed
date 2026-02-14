@@ -19,6 +19,10 @@ sync_to_win.sh
 /chaos-winui3/**/AppPackages
 *.user
 
+# Local MSIX signing certs (never commit private keys)
+*.msix.pfx
+*.msix.cer
+
 # WinUI3 player runtime deps (fetched by scripts/fetch_ffmpeg_win.ps1)
 /chaos-winui3/ChaosSeed.WinUI3/FFmpeg/**
 !/chaos-winui3/ChaosSeed.WinUI3/FFmpeg/.gitkeep
