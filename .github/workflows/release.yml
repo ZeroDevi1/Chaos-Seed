@@ -73,6 +73,9 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Setup MSBuild (VS)
+        uses: microsoft/setup-msbuild@v2
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
