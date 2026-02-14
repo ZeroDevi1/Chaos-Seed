@@ -3,6 +3,7 @@ name: release
 on:
   push:
     tags:
+      - "v*.*.*"
       - "*.*.*"
 
 permissions:
@@ -180,21 +181,21 @@ jobs:
           $appInstallerUrl = "https://github.com/${{ github.repository }}/releases/latest/download/ChaosSeed.WinUI3.appinstaller"
           $msixUrl = "https://github.com/${{ github.repository }}/releases/latest/download/ChaosSeed.WinUI3_x64.msix"
           @"
-<?xml version="1.0" encoding="utf-8"?>
-<AppInstaller
-  xmlns="http://schemas.microsoft.com/appx/appinstaller/2017/2"
-  Version="$msixVer"
-  Uri="$appInstallerUrl">
-  <MainPackage
-    Name="ChaosSeed.WinUI3"
-    Publisher="CN=ChaosSeed"
-    Version="$msixVer"
-    Uri="$msixUrl" />
-  <UpdateSettings>
-    <OnLaunch HoursBetweenUpdateChecks="12" />
-  </UpdateSettings>
-</AppInstaller>
-"@ | Out-File -Encoding utf8 dist/ChaosSeed.WinUI3.appinstaller
+          <?xml version="1.0" encoding="utf-8"?>
+          <AppInstaller
+            xmlns="http://schemas.microsoft.com/appx/appinstaller/2017/2"
+            Version="$msixVer"
+            Uri="$appInstallerUrl">
+            <MainPackage
+              Name="ChaosSeed.WinUI3"
+              Publisher="CN=ChaosSeed"
+              Version="$msixVer"
+              Uri="$msixUrl" />
+            <UpdateSettings>
+              <OnLaunch HoursBetweenUpdateChecks="12" />
+            </UpdateSettings>
+          </AppInstaller>
+          "@ | Out-File -Encoding utf8 dist/ChaosSeed.WinUI3.appinstaller
 
           # Optional diagnostics hash
           (Get-FileHash dist/ChaosSeed.WinUI3_x64.msix -Algorithm SHA256).Hash.ToLower() | Out-File -Encoding ascii dist/ChaosSeed.WinUI3_x64.msix.sha256
