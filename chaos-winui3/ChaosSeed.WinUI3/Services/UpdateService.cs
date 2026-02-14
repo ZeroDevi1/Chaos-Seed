@@ -27,7 +27,8 @@ public sealed class UpdateService
     {
         _http = new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(20),
+            // Updates can be ~100MB; keep this comfortably above "slow network" scenarios.
+            Timeout = TimeSpan.FromMinutes(10),
         };
         var ua = $"ChaosSeed.WinUI3/{GetCurrentVersion()}";
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(ua);
@@ -70,7 +71,7 @@ public sealed class UpdateService
 
         try
         {
-            await CheckAsync(force: false, ct);
+            await CheckAsync(force: false, ct).ConfigureAwait(false);
         }
         catch
         {
@@ -86,14 +87,14 @@ public sealed class UpdateService
             return LastResult;
         }
 
-        await _gate.WaitAsync(ct);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             SettingsService.Instance.UpdateSilently(s => s.AutoUpdateLastCheckUnixMs = now);
 
             using var req = new HttpRequestMessage(HttpMethod.Get, LatestReleaseApi);
-            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (resp.StatusCode == HttpStatusCode.Forbidden)
             {
                 // GitHub rate limit is the common case for anonymous clients.
@@ -106,8 +107,8 @@ public sealed class UpdateService
                 return LastResult;
             }
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
             var root = doc.RootElement;
 
             var tag = root.TryGetProperty("tag_name", out var tagEl) ? (tagEl.GetString() ?? "") : "";
@@ -179,10 +180,10 @@ public sealed class UpdateService
         );
         Directory.CreateDirectory(pendingDir);
 
-        var sha = await DownloadSha256Async(u.Sha256Url, ct);
+        var sha = await DownloadSha256Async(u.Sha256Url, ct).ConfigureAwait(false);
         var zipPath = Path.Combine(pendingDir, WinuiZipAsset);
 
-        await DownloadFileWithHashAsync(u.ZipUrl, zipPath, sha, progress, ct);
+        await DownloadFileWithHashAsync(u.ZipUrl, zipPath, sha, progress, ct).ConfigureAwait(false);
 
         var pending = new UpdatePending
         {
@@ -193,7 +194,9 @@ public sealed class UpdateService
         };
 
         var pendingJsonPath = Path.Combine(pendingDir, "pending.json");
-        await File.WriteAllTextAsync(pendingJsonPath, JsonSerializer.Serialize(pending, new JsonSerializerOptions { WriteIndented = true }), ct);
+        await File
+            .WriteAllTextAsync(pendingJsonPath, JsonSerializer.Serialize(pending, new JsonSerializerOptions { WriteIndented = true }), ct)
+            .ConfigureAwait(false);
 
         return pending;
     }
@@ -323,9 +326,9 @@ public sealed class UpdateService
     private async Task<string> DownloadSha256Async(string url, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct);
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
-        var txt = (await resp.Content.ReadAsStringAsync(ct)).Trim();
+        var txt = (await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false)).Trim();
 
         // The asset file is expected to be just the hex hash.
         txt = txt.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0];
@@ -352,38 +355,56 @@ public sealed class UpdateService
         }
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
 
         var total = resp.Content.Headers.ContentLength;
-        await using var src = await resp.Content.ReadAsStreamAsync(ct);
-        await using var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
+        await using var src = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
 
-        var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buf = new byte[1024 * 128];
         long readTotal = 0;
 
         var sw = Stopwatch.StartNew();
-        while (true)
+        var lastReport = TimeSpan.Zero;
+        var reportEvery = TimeSpan.FromMilliseconds(200);
+
+        await using (var dst = new FileStream(
+            tmp,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.Read,
+            bufferSize: 1024 * 128,
+            options: FileOptions.Asynchronous | FileOptions.SequentialScan
+        ))
         {
-            var n = await src.ReadAsync(buf.AsMemory(0, buf.Length), ct);
-            if (n <= 0)
+            while (true)
             {
-                break;
+                var n = await src.ReadAsync(buf.AsMemory(0, buf.Length), ct).ConfigureAwait(false);
+                if (n <= 0)
+                {
+                    break;
+                }
+
+                await dst.WriteAsync(buf.AsMemory(0, n), ct).ConfigureAwait(false);
+                hasher.AppendData(buf, 0, n);
+                readTotal += n;
+
+                if (progress is not null)
+                {
+                    // Throttle UI updates: reporting for every chunk can make WinUI feel unresponsive.
+                    var now = sw.Elapsed;
+                    if (now - lastReport >= reportEvery)
+                    {
+                        lastReport = now;
+                        var speed = now.TotalSeconds <= 0 ? 0 : (readTotal / now.TotalSeconds);
+                        progress.Report(new UpdateProgress { BytesDownloaded = readTotal, TotalBytes = total, BytesPerSecond = speed });
+                    }
+                }
             }
 
-            await dst.WriteAsync(buf.AsMemory(0, n), ct);
-            hasher.AppendData(buf, 0, n);
-            readTotal += n;
-
-            if (progress is not null)
-            {
-                var speed = sw.Elapsed.TotalSeconds <= 0 ? 0 : (readTotal / sw.Elapsed.TotalSeconds);
-                progress.Report(new UpdateProgress { BytesDownloaded = readTotal, TotalBytes = total, BytesPerSecond = speed });
-            }
-        }
-
-        await dst.FlushAsync(ct);
+            await dst.FlushAsync(ct).ConfigureAwait(false);
+        } // dispose dst before moving (releases tmp file lock)
 
         var got = ToHex(hasher.GetHashAndReset());
         if (!string.Equals(got, expectedSha256, StringComparison.OrdinalIgnoreCase))
@@ -392,8 +413,25 @@ public sealed class UpdateService
             throw new Exception($"sha256 mismatch: expected={expectedSha256} got={got}");
         }
 
-        File.Copy(tmp, outPath, overwrite: true);
-        try { File.Delete(tmp); } catch { }
+        // Replace destination atomically.
+        try
+        {
+            File.Move(tmp, outPath, overwrite: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort retry (e.g. antivirus briefly scanning the temp file).
+            await Task.Delay(200, ct).ConfigureAwait(false);
+            File.Move(tmp, outPath, overwrite: true);
+        }
+
+        // Ensure the last progress update reaches 100%.
+        if (progress is not null)
+        {
+            var now = sw.Elapsed;
+            var speed = now.TotalSeconds <= 0 ? 0 : (readTotal / now.TotalSeconds);
+            progress.Report(new UpdateProgress { BytesDownloaded = readTotal, TotalBytes = total, BytesPerSecond = speed });
+        }
     }
 
     public static string NormalizeVersion(string raw)

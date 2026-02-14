@@ -26,7 +26,7 @@
     <AppxBundle>Never</AppxBundle>
     <AppxBundlePlatforms>x64</AppxBundlePlatforms>
 
-    <!-- CI should pass /p:PackageVersion=0.4.3.0 (no leading 'v'). -->
+    <!-- CI should pass /p:PackageVersion=0.4.4.0 (no leading 'v'). -->
     <PackageVersion Condition="'$(PackageVersion)'==''">0.0.0.0</PackageVersion>
 
     <!-- We generate an AppInstaller file in CI so it can point at releases/latest/download/... -->
