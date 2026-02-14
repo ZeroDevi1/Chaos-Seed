@@ -11,6 +11,13 @@
   <PropertyGroup>
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
     <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <Configurations>Debug;Release</Configurations>
+    <Platforms>x64</Platforms>
+
+    <!-- When building this .wapproj directly (without a .sln), MSBuild requires OutputPath/BaseOutputPath. -->
+    <BaseOutputPath>bin\</BaseOutputPath>
+    <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
+    <BaseIntermediateOutputPath>obj\</BaseIntermediateOutputPath>
 
     <ProjectGuid>{6A5C34F7-7C76-4D9E-9F79-4A6F0BA35E28}</ProjectGuid>
     <TargetPlatformVersion>10.0.19041.0</TargetPlatformVersion>
@@ -19,7 +26,7 @@
     <AppxBundle>Never</AppxBundle>
     <AppxBundlePlatforms>x64</AppxBundlePlatforms>
 
-    <!-- CI should pass /p:PackageVersion=0.4.2.0 (no leading 'v'). -->
+    <!-- CI should pass /p:PackageVersion=0.4.3.0 (no leading 'v'). -->
     <PackageVersion Condition="'$(PackageVersion)'==''">0.0.0.0</PackageVersion>
 
     <!-- We generate an AppInstaller file in CI so it can point at releases/latest/download/... -->
