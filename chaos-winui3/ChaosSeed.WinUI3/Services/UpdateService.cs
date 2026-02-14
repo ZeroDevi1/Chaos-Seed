@@ -231,16 +231,29 @@ public sealed class UpdateService
         args.Append("--version ").Append(Quote(pending.Version)).Append(' ');
         args.Append("--parent-pid ").Append(pid.ToString(CultureInfo.InvariantCulture));
 
-        Process.Start(
-            new ProcessStartInfo
+        // Prefer ShellExecute to reduce the chance the updater is tied to the app's process/job lifetime.
+        // If this fails, fall back to direct process start.
+        try
+        {
+            _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = updaterExe,
+                Arguments = args.ToString(),
+                UseShellExecute = true,
+                WorkingDirectory = appDir,
+            });
+        }
+        catch
+        {
+            _ = Process.Start(new ProcessStartInfo
             {
                 FileName = updaterExe,
                 Arguments = args.ToString(),
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = appDir,
-            }
-        );
+            });
+        }
 
         Environment.Exit(0);
     }

@@ -7,13 +7,6 @@ using System.Text;
 
 static int Main(string[] args)
 {
-    var opt = Options.Parse(args);
-    if (opt is null)
-    {
-        Console.Error.WriteLine("Usage: ChaosSeed.Updater --app-dir <dir> --zip <path> --expected-sha256 <hex> --restart-exe <exe> --version <ver> --parent-pid <pid>");
-        return 2;
-    }
-
     var logPath = GetLogPath();
     Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
     using var log = new StreamWriter(new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
@@ -26,6 +19,19 @@ static int Main(string[] args)
         var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}";
         try { log.WriteLine(line); } catch { }
         try { Console.WriteLine(line); } catch { }
+    }
+
+    Info("starting updater");
+    Info("raw args: " + string.Join(" ", args.Select(QuoteArg)));
+
+    var opt = Options.Parse(args);
+    if (opt is null)
+    {
+        const string usage = "Usage: ChaosSeed.Updater --app-dir <dir> --zip <path> --expected-sha256 <hex> --restart-exe <exe> --version <ver> --parent-pid <pid>";
+        Info("invalid args; exiting");
+        Info(usage);
+        TryShowError($"Update failed: invalid arguments.\n\n{usage}\n\nLog:\n{logPath}");
+        return 2;
     }
 
     try
