@@ -138,12 +138,16 @@ jobs:
           $hash | Out-File -Encoding ascii dist/chaos-winui3-windows-x86_64.zip.sha256
 
       - name: Upload Release Assets (zip - ffi + winui3)
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/chaos-ffi-windows-x86_64.zip
-            dist/chaos-winui3-windows-x86_64.zip
-            dist/chaos-winui3-windows-x86_64.zip.sha256
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release upload "${{ github.ref_name }}" `
+            dist/chaos-ffi-windows-x86_64.zip `
+            dist/chaos-winui3-windows-x86_64.zip `
+            dist/chaos-winui3-windows-x86_64.zip.sha256 `
+            --clobber
 
       - name: Install frontend deps
         shell: pwsh
@@ -187,10 +191,12 @@ jobs:
           Compress-Archive -Force -Path $exePath -DestinationPath dist/chaos-tauri-windows-x86_64.zip
 
       - name: Upload Release Assets (zip - tauri)
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/chaos-tauri-windows-x86_64.zip
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release upload "${{ github.ref_name }}" dist/chaos-tauri-windows-x86_64.zip --clobber
 
       # Keep MSIX work last so zip assets still upload even if MSIX packaging fails.
       - name: Build MSIX (WinUI3 Packaging)
@@ -265,13 +271,17 @@ jobs:
 
       - name: Upload Release Assets (MSIX)
         if: ${{ steps.msix.outputs.built == 'true' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/ChaosSeed.WinUI3_x64.msix
-            dist/ChaosSeed.WinUI3_x64.msix.sha256
-            dist/ChaosSeed.WinUI3.appinstaller
-            dist/ChaosSeed.WinUI3.cer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release upload "${{ github.ref_name }}" `
+            dist/ChaosSeed.WinUI3_x64.msix `
+            dist/ChaosSeed.WinUI3_x64.msix.sha256 `
+            dist/ChaosSeed.WinUI3.appinstaller `
+            dist/ChaosSeed.WinUI3.cer `
+            --clobber
 
   ffi_linux:
     needs: create_release
