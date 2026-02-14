@@ -248,9 +248,16 @@ public sealed partial class MusicPage : Page
         return await EnsureOutDirAsync(ct);
     }
 
-    private string GetDefaultQualityId()
+    private string GetDefaultQualityTag()
     {
-        return GetSelectedComboTag(DefaultQualityCombo, "flac");
+        return GetSelectedComboTag(DefaultQualityCombo, "best");
+    }
+
+    private string GetRequestedQualityId()
+    {
+        var tag = GetDefaultQualityTag();
+        // "best" means: try FLAC first, then fall back per-track.
+        return string.Equals(tag, "best", StringComparison.Ordinal) ? "flac" : tag;
     }
 
     private static string ChooseBestQualityId(MusicQuality[] qualities, string fallback)
@@ -262,26 +269,255 @@ public sealed partial class MusicPage : Page
 
         // Prefer the user's default if available. Otherwise avoid returning a value not present in the dropdown,
         // which would make ComboBox show an empty selection.
-        if (!string.IsNullOrWhiteSpace(fallback)
-            && qualities.Any(x => string.Equals(x.Id, fallback, StringComparison.Ordinal)))
+        var fb = (fallback ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(fb))
         {
-            return fallback;
+            var hit = qualities.FirstOrDefault(x => string.Equals((x.Id ?? "").Trim(), fb, StringComparison.Ordinal));
+            if (!string.IsNullOrWhiteSpace(hit?.Id) || (hit is not null && hit.Id is not null))
+            {
+                return hit!.Id ?? "";
+            }
         }
 
         // best-effort, daemon will do final fallback per-track.
         var order = new[] { "flac", "mp3_320", "mp3_192", "mp3_128" };
         foreach (var q in order)
         {
-            if (qualities.Any(x => string.Equals(x.Id, q, StringComparison.Ordinal)))
+            var hit = qualities.FirstOrDefault(x => string.Equals((x.Id ?? "").Trim(), q, StringComparison.Ordinal));
+            if (!string.IsNullOrWhiteSpace(hit?.Id) || (hit is not null && hit.Id is not null))
             {
-                return q;
+                return hit!.Id ?? "";
             }
         }
 
         var best = qualities
+            .Where(x => !string.IsNullOrWhiteSpace(x.Id))
             .OrderByDescending(x => x.BitrateKbps ?? 0u)
             .FirstOrDefault();
-        return string.IsNullOrWhiteSpace(best?.Id) ? (qualities[0].Id ?? fallback) : best!.Id;
+        if (!string.IsNullOrWhiteSpace(best?.Id))
+        {
+            return best!.Id;
+        }
+
+        // Last resort: pick any existing id (even empty string) so ComboBox can still select an item.
+        return qualities[0].Id ?? "";
+    }
+
+    private static string InferQualityId(MusicQuality q)
+    {
+        var label = (q.Label ?? "").Trim();
+        var format = (q.Format ?? "").Trim().ToLowerInvariant();
+        var bitrate = q.BitrateKbps ?? 0u;
+
+        if (q.Lossless || format.Contains("flac") || label.Contains("FLAC", StringComparison.OrdinalIgnoreCase))
+        {
+            return "flac";
+        }
+
+        if (label.Contains("320", StringComparison.OrdinalIgnoreCase) || bitrate >= 320)
+        {
+            return "mp3_320";
+        }
+
+        if (label.Contains("192", StringComparison.OrdinalIgnoreCase) || bitrate >= 192)
+        {
+            return "mp3_192";
+        }
+
+        if (label.Contains("128", StringComparison.OrdinalIgnoreCase) || bitrate >= 128)
+        {
+            return "mp3_128";
+        }
+
+        if (format.Contains("mp3"))
+        {
+            return "mp3_128";
+        }
+
+        return "";
+    }
+
+    private static MusicQuality[] NormalizeQualitiesForUi(MusicQuality[]? qualities)
+    {
+        if (qualities is null || qualities.Length == 0)
+        {
+            return new[]
+            {
+                new MusicQuality
+                {
+                    Id = "best",
+                    Label = "最高（自动）",
+                    Format = "",
+                    BitrateKbps = null,
+                    Lossless = false,
+                },
+            };
+        }
+
+        foreach (var q in qualities)
+        {
+            if (q is null)
+            {
+                continue;
+            }
+
+            q.Id = (q.Id ?? "").Trim();
+            q.Label = (q.Label ?? "").Trim();
+            q.Format = (q.Format ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(q.Id))
+            {
+                var inferred = InferQualityId(q);
+                if (!string.IsNullOrWhiteSpace(inferred))
+                {
+                    q.Id = inferred;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(q.Label))
+            {
+                q.Label = q.Id switch
+                {
+                    "flac" => "FLAC",
+                    "mp3_320" => "MP3 320",
+                    "mp3_192" => "MP3 192",
+                    "mp3_128" => "MP3 128",
+                    "best" => "最高（自动）",
+                    _ => q.Label ?? "",
+                };
+            }
+
+            if (string.IsNullOrWhiteSpace(q.Format))
+            {
+                q.Format = q.Id switch
+                {
+                    "flac" => "flac",
+                    "mp3_320" => "mp3",
+                    "mp3_192" => "mp3",
+                    "mp3_128" => "mp3",
+                    _ => q.Format ?? "",
+                };
+            }
+        }
+
+        // De-dup by id (prefer higher bitrate / lossless).
+        var map = new Dictionary<string, MusicQuality>(StringComparer.Ordinal);
+        foreach (var q in qualities)
+        {
+            var id = (q?.Id ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                continue;
+            }
+
+            if (!map.TryGetValue(id, out var existing))
+            {
+                map[id] = q!;
+                continue;
+            }
+
+            var eb = existing.BitrateKbps ?? 0u;
+            var qb = q!.BitrateKbps ?? 0u;
+            if (q.Lossless && !existing.Lossless)
+            {
+                map[id] = q;
+            }
+            else if (qb > eb)
+            {
+                map[id] = q;
+            }
+        }
+
+        if (map.Count == 0)
+        {
+            return new[]
+            {
+                new MusicQuality
+                {
+                    Id = "best",
+                    Label = "最高（自动）",
+                    Format = "",
+                    BitrateKbps = null,
+                    Lossless = false,
+                },
+            };
+        }
+
+        var order = new[] { "flac", "mp3_320", "mp3_192", "mp3_128" };
+        var outList = new List<MusicQuality>();
+        foreach (var id in order)
+        {
+            if (map.TryGetValue(id, out var q))
+            {
+                outList.Add(q);
+                map.Remove(id);
+            }
+        }
+        outList.AddRange(map.Values.OrderByDescending(x => x.BitrateKbps ?? 0u));
+        return outList.ToArray();
+    }
+
+    private static void NormalizeTrackForUi(MusicTrack t)
+    {
+        if (t is null)
+        {
+            return;
+        }
+
+        t.Service = (t.Service ?? "").Trim();
+        t.Id = (t.Id ?? "").Trim();
+        t.Title = (t.Title ?? "").Trim();
+        t.Album = string.IsNullOrWhiteSpace(t.Album) ? null : t.Album.Trim();
+        t.CoverUrl = string.IsNullOrWhiteSpace(t.CoverUrl) ? null : t.CoverUrl.Trim();
+
+        t.Qualities = NormalizeQualitiesForUi(t.Qualities);
+    }
+
+    private string ResolveQualityIdForTrackVm(MusicTrackVm vm)
+    {
+        var desired = (vm.SelectedQualityId ?? "").Trim();
+        if (string.Equals(desired, "best", StringComparison.Ordinal))
+        {
+            return GetRequestedQualityId();
+        }
+        if (!string.IsNullOrWhiteSpace(desired))
+        {
+            var hit = vm.Qualities.FirstOrDefault(x => string.Equals((x.Id ?? "").Trim(), desired, StringComparison.Ordinal));
+            if (hit is not null)
+            {
+                return hit.Id ?? "";
+            }
+        }
+
+        return ChooseBestQualityId(vm.Qualities ?? Array.Empty<MusicQuality>(), GetRequestedQualityId());
+    }
+
+    private void OnDefaultQualityChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (_restoringState)
+        {
+            return;
+        }
+
+        // Keep current per-track selection stable unless it becomes invalid (e.g. user selects FLAC but track has MP3 only).
+        var fallback = GetRequestedQualityId();
+        foreach (var vm in EnumerateAllTrackVms())
+        {
+            if (vm.Qualities.Length == 0)
+            {
+                continue;
+            }
+
+            var desired = (vm.SelectedQualityId ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(desired)
+                && vm.Qualities.Any(x => string.Equals((x.Id ?? "").Trim(), desired, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+            vm.SelectedQualityId = ChooseBestQualityId(vm.Qualities, fallback);
+        }
     }
 
     private void SetInfoBar(InfoBar bar, InfoBarSeverity severity, string title, string? message)
@@ -394,7 +630,7 @@ public sealed partial class MusicPage : Page
                 ServiceTag = GetSelectedComboTag(ServiceCombo, "qq"),
                 SearchModeTag = GetSelectedComboTag(SearchModeCombo, "track"),
                 Keyword = (KeywordBox.Text ?? "").Trim(),
-                DefaultQualityTag = GetSelectedComboTag(DefaultQualityCombo, "flac"),
+                DefaultQualityTag = GetSelectedComboTag(DefaultQualityCombo, "best"),
                 SearchPage = _searchPage,
                 PagingEnabled = PagingPanel.Visibility == Visibility.Visible && (GetSelectedComboTag(ServiceCombo, "qq") != "all"),
                 CanPrev = PrevPageBtn.IsEnabled,
@@ -439,10 +675,22 @@ public sealed partial class MusicPage : Page
             TrackResults.Clear();
             foreach (var t in state.Tracks ?? Array.Empty<MusicTrack>())
             {
+                NormalizeTrackForUi(t);
                 var key = $"{t.Service}:{t.Id}";
-                var sel = (state.TrackQualityByKey is not null && state.TrackQualityByKey.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v))
-                    ? v
-                    : ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetDefaultQualityId());
+                string sel;
+                if (state.TrackQualityByKey is not null
+                    && state.TrackQualityByKey.TryGetValue(key, out var desired)
+                    && !string.IsNullOrWhiteSpace(desired))
+                {
+                    desired = desired.Trim();
+                    var hit = (t.Qualities ?? Array.Empty<MusicQuality>())
+                        .FirstOrDefault(x => string.Equals((x.Id ?? "").Trim(), desired, StringComparison.Ordinal));
+                    sel = hit?.Id ?? ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetRequestedQualityId());
+                }
+                else
+                {
+                    sel = ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetRequestedQualityId());
+                }
                 TrackResults.Add(MusicTrackVm.From(t, sel));
             }
 
@@ -471,12 +719,22 @@ public sealed partial class MusicPage : Page
             DetailTrackResults.Clear();
             foreach (var t in state.DetailTracks ?? Array.Empty<MusicTrack>())
             {
+                NormalizeTrackForUi(t);
                 var key = $"{t.Service}:{t.Id}";
-                var sel = (state.DetailTrackQualityByKey is not null
-                           && state.DetailTrackQualityByKey.TryGetValue(key, out var v)
-                           && !string.IsNullOrWhiteSpace(v))
-                    ? v
-                    : ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetDefaultQualityId());
+                string sel;
+                if (state.DetailTrackQualityByKey is not null
+                    && state.DetailTrackQualityByKey.TryGetValue(key, out var desired)
+                    && !string.IsNullOrWhiteSpace(desired))
+                {
+                    desired = desired.Trim();
+                    var hit = (t.Qualities ?? Array.Empty<MusicQuality>())
+                        .FirstOrDefault(x => string.Equals((x.Id ?? "").Trim(), desired, StringComparison.Ordinal));
+                    sel = hit?.Id ?? ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetRequestedQualityId());
+                }
+                else
+                {
+                    sel = ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetRequestedQualityId());
+                }
                 DetailTrackResults.Add(MusicTrackVm.From(t, sel));
             }
             DetailAlbumResults.Clear();
@@ -651,12 +909,13 @@ public sealed partial class MusicPage : Page
 
                     foreach (var t in res ?? Array.Empty<MusicTrack>())
                     {
+                        NormalizeTrackForUi(t);
                         var key = $"{t.Service}:{t.Id}";
                         if (!seen.Add(key))
                         {
                             continue;
                         }
-                        var sel = ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetDefaultQualityId());
+                        var sel = ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetRequestedQualityId());
                         TrackResults.Add(MusicTrackVm.From(t, sel));
                     }
                 }
@@ -1000,7 +1259,7 @@ public sealed partial class MusicPage : Page
             var s = SettingsService.Instance.Current;
             var options = new MusicDownloadOptions
             {
-                QualityId = string.IsNullOrWhiteSpace(vm.SelectedQualityId) ? GetDefaultQualityId() : vm.SelectedQualityId,
+                QualityId = ResolveQualityIdForTrackVm(vm),
                 OutDir = outDir,
                 PathTemplate = string.IsNullOrWhiteSpace(s.MusicPathTemplate) ? null : s.MusicPathTemplate,
                 Overwrite = s.MusicDownloadOverwrite,
@@ -1048,7 +1307,7 @@ public sealed partial class MusicPage : Page
 
             var options = new MusicDownloadOptions
             {
-                QualityId = GetDefaultQualityId(),
+                QualityId = GetRequestedQualityId(),
                 OutDir = outDir,
                 PathTemplate = string.IsNullOrWhiteSpace(s.MusicPathTemplate) ? null : s.MusicPathTemplate,
                 Overwrite = s.MusicDownloadOverwrite,
@@ -1097,7 +1356,7 @@ public sealed partial class MusicPage : Page
 
             var options = new MusicDownloadOptions
             {
-                QualityId = GetDefaultQualityId(),
+                QualityId = GetRequestedQualityId(),
                 OutDir = outDir,
                 PathTemplate = string.IsNullOrWhiteSpace(s.MusicPathTemplate) ? null : s.MusicPathTemplate,
                 Overwrite = s.MusicDownloadOverwrite,
@@ -1172,7 +1431,8 @@ public sealed partial class MusicPage : Page
             DetailTrackResults.Clear();
             foreach (var t in tracks ?? Array.Empty<MusicTrack>())
             {
-                var sel = ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetDefaultQualityId());
+                NormalizeTrackForUi(t);
+                var sel = ChooseBestQualityId(t.Qualities ?? Array.Empty<MusicQuality>(), GetRequestedQualityId());
                 DetailTrackResults.Add(MusicTrackVm.From(t, sel));
             }
             DetailAlbumResults.Clear();
@@ -1339,10 +1599,9 @@ public sealed partial class MusicPage : Page
             return;
         }
 
-        // Preview is executed by daemon; make sure daemon has provider config (netease/kugou need it).
-        await DaemonClient.Instance.MusicConfigSetAsync(BuildProviderConfigFromUi(), ct);
+        await EnsureConfigAppliedAsync(ct);
 
-        var desired = string.IsNullOrWhiteSpace(vm.SelectedQualityId) ? GetDefaultQualityId() : vm.SelectedQualityId;
+        var desired = ResolveQualityIdForTrackVm(vm);
         var candidates = new List<string?>
         {
             desired,

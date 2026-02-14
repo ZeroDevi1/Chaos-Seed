@@ -1,7 +1,10 @@
 using System;
+using System.Linq;
 using ChaosSeed.WinUI3.Models.Music;
+using Windows.Media;
 using Windows.Media.Core;
 using Windows.Media.Playback;
+using Windows.Storage.Streams;
 
 namespace ChaosSeed.WinUI3.Services;
 
@@ -18,6 +21,20 @@ public sealed class MusicPreviewPlayerService
             AudioCategory = MediaPlayerAudioCategory.Media,
             IsLoopingEnabled = true,
         };
+
+        try
+        {
+            var smtc = _player.SystemMediaTransportControls;
+            smtc.IsEnabled = true;
+            smtc.IsPlayEnabled = true;
+            smtc.IsPauseEnabled = true;
+            smtc.IsStopEnabled = true;
+        }
+        catch
+        {
+            // ignore
+        }
+
         _player.MediaEnded += (_, _) =>
         {
             if (!_player.IsLoopingEnabled)
@@ -48,6 +65,17 @@ public sealed class MusicPreviewPlayerService
                     return;
                 }
                 IsPlaying = playing;
+
+                try
+                {
+                    var smtc = _player.SystemMediaTransportControls;
+                    smtc.PlaybackStatus = playing ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused;
+                }
+                catch
+                {
+                    // ignore
+                }
+
                 RaiseChanged();
             };
         }
@@ -147,7 +175,11 @@ public sealed class MusicPreviewPlayerService
         IsOpen = true;
 
         _player.IsLoopingEnabled = true;
-        _player.Source = MediaSource.CreateFromUri(new Uri(url));
+
+        var mediaSource = MediaSource.CreateFromUri(new Uri(url));
+        var item = new MediaPlaybackItem(mediaSource);
+        TryApplySmtcMetadata(item, track);
+        _player.Source = item;
         _player.Play();
         IsPlaying = true;
         RaiseChanged();
@@ -237,8 +269,70 @@ public sealed class MusicPreviewPlayerService
             CurrentKey = null;
             Track = null;
             Url = null;
+
+            try
+            {
+                var du = _player.SystemMediaTransportControls.DisplayUpdater;
+                du.ClearAll();
+                du.Update();
+            }
+            catch
+            {
+                // ignore
+            }
         }
         RaiseChanged();
+    }
+
+    private void TryApplySmtcMetadata(MediaPlaybackItem item, MusicTrack track)
+    {
+        try
+        {
+            var props = item.GetDisplayProperties();
+            props.Type = MediaPlaybackType.Music;
+            props.MusicProperties.Title = (track.Title ?? "").Trim();
+            props.MusicProperties.Artist = string.Join(" / ", (track.Artists ?? Array.Empty<string>()).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()));
+            props.MusicProperties.AlbumTitle = (track.Album ?? "").Trim();
+
+            var cover = (track.CoverUrl ?? "").Trim();
+            if (Uri.TryCreate(cover, UriKind.Absolute, out var coverUri))
+            {
+                props.Thumbnail = RandomAccessStreamReference.CreateFromUri(coverUri);
+            }
+
+            item.ApplyDisplayProperties(props);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        try
+        {
+            var smtc = _player.SystemMediaTransportControls;
+            smtc.IsEnabled = true;
+            smtc.IsPlayEnabled = true;
+            smtc.IsPauseEnabled = true;
+            smtc.IsStopEnabled = true;
+
+            var du = smtc.DisplayUpdater;
+            du.Type = MediaPlaybackType.Music;
+            du.MusicProperties.Title = (track.Title ?? "").Trim();
+            du.MusicProperties.Artist = string.Join(" / ", (track.Artists ?? Array.Empty<string>()).Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()));
+            du.MusicProperties.AlbumTitle = (track.Album ?? "").Trim();
+
+            var cover = (track.CoverUrl ?? "").Trim();
+            if (Uri.TryCreate(cover, UriKind.Absolute, out var coverUri))
+            {
+                du.Thumbnail = RandomAccessStreamReference.CreateFromUri(coverUri);
+            }
+
+            du.Update();
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private void RaiseChanged()

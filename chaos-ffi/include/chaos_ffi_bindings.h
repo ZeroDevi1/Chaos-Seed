@@ -10,6 +10,38 @@
 
 typedef void (*ChaosDanmakuCallback)(const char *event_json_utf8, void *user_data);
 
+char *chaos_music_config_set_json(const char *config_json_utf8);
+
+char *chaos_music_search_tracks_json(const char *params_json_utf8);
+
+char *chaos_music_search_albums_json(const char *params_json_utf8);
+
+char *chaos_music_search_artists_json(const char *params_json_utf8);
+
+char *chaos_music_album_tracks_json(const char *params_json_utf8);
+
+char *chaos_music_artist_albums_json(const char *params_json_utf8);
+
+char *chaos_music_track_play_url_json(const char *params_json_utf8);
+
+char *chaos_music_qq_login_qr_create_json(const char *login_type_utf8);
+
+char *chaos_music_qq_login_qr_poll_json(const char *session_id_utf8);
+
+char *chaos_music_qq_refresh_cookie_json(const char *cookie_json_utf8);
+
+char *chaos_music_kugou_login_qr_create_json(const char *login_type_utf8);
+
+char *chaos_music_kugou_login_qr_poll_json(const char *session_id_utf8);
+
+char *chaos_music_download_start_json(const char *start_params_json_utf8);
+
+char *chaos_music_download_status_json(const char *session_id_utf8);
+
+char *chaos_music_download_cancel_json(const char *session_id_utf8);
+
+char *chaos_music_download_blocking_json(const char *start_params_json_utf8);
+
 uint32_t chaos_ffi_api_version(void);
 
 char *chaos_ffi_version_json(void);

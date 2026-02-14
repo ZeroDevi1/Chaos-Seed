@@ -17,18 +17,18 @@
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-返回 API 版本号。当前为 `6`。
+返回 API 版本号。当前为 `7`。
 
 ### `char* chaos_ffi_version_json(void)`
 
 返回：
 
 ```json
-{"version":"0.4.0","git":"unknown","api":6}
+{"version":"0.4.0","git":"unknown","api":7}
 ```
 
 当前为：
-- `api = 6`（包含“歌曲下载”相关接口）。
+- `api = 7`（补齐 music: `trackPlayUrl` + 下载任务 start/status/cancel）。
 
 ### `char* chaos_ffi_last_error_json(void)`
 
@@ -129,6 +129,12 @@ char* chaos_now_playing_snapshot_json(
 
 其中 `params_json_utf8` 为对应的 params DTO（如 `MusicSearchParams` / `MusicAlbumTracksParams`）。
 
+### 播放 URL（预览）
+
+- `char* chaos_music_track_play_url_json(const char* params_json_utf8)` -> `MusicTrackPlayUrlResult`
+
+其中 `params_json_utf8` 为 `MusicTrackPlayUrlParams` JSON。
+
 ### 登录（QQ 音乐）
 
 - `char* chaos_music_qq_login_qr_create_json(const char* login_type_utf8)`：`login_type_utf8 = "qq" | "wechat"`，返回 `MusicLoginQr`（含二维码 base64）。
@@ -145,6 +151,18 @@ char* chaos_now_playing_snapshot_json(
 #### `char* chaos_music_download_blocking_json(const char* start_params_json_utf8)`
 
 输入：`MusicDownloadStartParams` JSON；返回：`MusicDownloadStatus` JSON（包含每个 job 的结果与错误信息）。
+
+说明：
+- `options.pathTemplate`：若提供则使用模板生成文件名（与 daemon 行为对齐）。
+- 下载音频成功后，会 best-effort 额外下载同名 `.lrc`（不影响音频下载结果）。
+
+### 下载（任务 / 可轮询）
+
+适用于 UI 或移动端：Start 立即返回 `sessionId`，然后通过轮询 `status` 获取进度；可随时 `cancel`。
+
+- `char* chaos_music_download_start_json(const char* start_params_json_utf8)` -> `MusicDownloadStartResult`
+- `char* chaos_music_download_status_json(const char* session_id_utf8)` -> `MusicDownloadStatus`
+- `char* chaos_music_download_cancel_json(const char* session_id_utf8)` -> `OkReply`
 
 ## 字幕（Thunder）
 

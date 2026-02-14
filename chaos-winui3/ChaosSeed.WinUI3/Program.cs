@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Runtime.InteropServices;
+using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using WinRT;
@@ -18,6 +19,9 @@ public static class Program
 
         // For WinUI 3 unpackaged apps: validate Windows App Runtime and dependencies before starting XAML.
         XamlCheckProcessRequirements();
+
+        // Best-effort: register AppUserModelID + Start Menu shortcut so SMTC/GSMTC can show app name/icon.
+        ShellAppIdentityService.TryEnsureChaosSeedIdentity();
 
         Application.Start(p =>
         {

@@ -85,6 +85,9 @@ internal static partial class ChaosFfi
     internal static partial IntPtr chaos_music_artist_albums_json(string params_json_utf8);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_track_play_url_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_music_qq_login_qr_create_json(string login_type_utf8);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
@@ -98,6 +101,15 @@ internal static partial class ChaosFfi
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_music_kugou_login_qr_poll_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_download_start_json(string start_params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_download_status_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_music_download_cancel_json(string session_id_utf8);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_music_download_blocking_json(string start_params_json_utf8);

@@ -15,16 +15,39 @@ use libc::{c_char, c_void};
 use chaos_core::live_directory;
 use chaos_core::{danmaku, livestream, lyrics, music, now_playing, subtitle};
 use chaos_proto::{
-    LiveDirCategory, LiveDirRoomCard, LiveDirRoomListResult, LiveDirSubCategory,
     // music (FFI JSON shape follows chaos-proto)
-    KugouUserInfo, MusicAlbum, MusicAlbumTracksParams, MusicArtist, MusicArtistAlbumsParams,
-    MusicAuthState, MusicDownloadJobResult, MusicDownloadStartParams, MusicDownloadStatus,
-    MusicDownloadTarget, MusicDownloadTotals, MusicJobState, MusicLoginQr,
-    MusicLoginQrPollResult, MusicLoginQrState, MusicLoginType, MusicProviderConfig, MusicSearchParams,
-    MusicService, MusicTrack, OkReply, QqMusicCookie,
+    KugouUserInfo,
+    LiveDirCategory,
+    LiveDirRoomCard,
+    LiveDirRoomListResult,
+    LiveDirSubCategory,
+    MusicAlbum,
+    MusicAlbumTracksParams,
+    MusicArtist,
+    MusicArtistAlbumsParams,
+    MusicAuthState,
+    MusicDownloadJobResult,
+    MusicDownloadStartParams,
+    MusicDownloadStartResult,
+    MusicDownloadStatus,
+    MusicDownloadTarget,
+    MusicDownloadTotals,
+    MusicJobState,
+    MusicLoginQr,
+    MusicLoginQrPollResult,
+    MusicLoginQrState,
+    MusicLoginType,
+    MusicProviderConfig,
+    MusicSearchParams,
+    MusicService,
+    MusicTrack,
+    MusicTrackPlayUrlParams,
+    MusicTrackPlayUrlResult,
+    OkReply,
+    QqMusicCookie,
 };
 
-const API_VERSION: u32 = 6;
+const API_VERSION: u32 = 7;
 
 fn ensure_rustls_provider() {
     static ONCE: OnceLock<()> = OnceLock::new();
@@ -354,6 +377,68 @@ fn parse_login_type(s: &str) -> Result<MusicLoginType, ()> {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_track_play_url_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: MusicTrackPlayUrlParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let track_id = params.track_id.trim().to_string();
+        if track_id.is_empty() {
+            set_last_error("trackId is empty", None);
+            return Err(());
+        }
+
+        let quality_id = params
+            .quality_id
+            .unwrap_or_else(|| "mp3_128".to_string())
+            .trim()
+            .to_string();
+        if quality_id.is_empty() {
+            set_last_error("qualityId is empty", None);
+            return Err(());
+        }
+
+        let auth = map_music_auth_to_core(params.auth);
+        let svc = map_music_service_to_core(params.service);
+
+        let client = {
+            let st = music_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.client.clone()
+        };
+
+        let (url, ext) = runtime()
+            .block_on(async move {
+                client
+                    .track_download_url(svc, &track_id, &quality_id, &auth)
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+            .map_err(|e| {
+                set_last_error("music track play url failed", Some(e));
+            })?;
+
+        let out = MusicTrackPlayUrlResult { url, ext };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize play url", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_track_play_url_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn chaos_music_qq_login_qr_create_json(
     login_type_utf8: *const c_char,
 ) -> *mut c_char {
@@ -379,8 +464,7 @@ pub extern "C" fn chaos_music_qq_login_qr_create_json(
 
         let session_id = gen_session_id("qqlogin");
         let created_at_unix_ms = now_unix_ms();
-        let base64 =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+        let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
 
         {
             let st = music_state();
@@ -422,11 +506,11 @@ pub extern "C" fn chaos_music_qq_login_qr_create_json(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn chaos_music_qq_login_qr_poll_json(
-    session_id_utf8: *const c_char,
-) -> *mut c_char {
+pub extern "C" fn chaos_music_qq_login_qr_poll_json(session_id_utf8: *const c_char) -> *mut c_char {
     let res = std::panic::catch_unwind(|| -> Result<String, ()> {
-        let sid = require_cstr(session_id_utf8, "session_id_utf8")?.trim().to_string();
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?
+            .trim()
+            .to_string();
         if sid.is_empty() {
             set_last_error("session_id_utf8 is empty", None);
             return Err(());
@@ -441,7 +525,12 @@ pub extern "C" fn chaos_music_qq_login_qr_poll_json(
                 set_last_error("session not found", None);
                 return Err(());
             };
-            (s.login_type, s.identifier.clone(), s.http.clone(), s.created_at_ms)
+            (
+                s.login_type,
+                s.identifier.clone(),
+                s.http.clone(),
+                s.created_at_ms,
+            )
         };
 
         if now_unix_ms().saturating_sub(created_at_ms) > 5 * 60 * 1000 {
@@ -572,7 +661,9 @@ pub extern "C" fn chaos_music_qq_login_qr_poll_json(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn chaos_music_qq_refresh_cookie_json(cookie_json_utf8: *const c_char) -> *mut c_char {
+pub extern "C" fn chaos_music_qq_refresh_cookie_json(
+    cookie_json_utf8: *const c_char,
+) -> *mut c_char {
     let res = std::panic::catch_unwind(|| -> Result<String, ()> {
         let json = require_cstr(cookie_json_utf8, "cookie_json_utf8")?;
         let cookie: QqMusicCookie = serde_json::from_str(json).map_err(|e| {
@@ -584,7 +675,10 @@ pub extern "C" fn chaos_music_qq_refresh_cookie_json(cookie_json_utf8: *const c_
             set_last_error("failed to init qq login client", Some(e.to_string()));
         })?;
         let out = runtime()
-            .block_on(music::providers::qq_login::refresh_cookie(&http, &core_cookie))
+            .block_on(music::providers::qq_login::refresh_cookie(
+                &http,
+                &core_cookie,
+            ))
             .map_err(|e| {
                 set_last_error("qq refresh cookie failed", Some(e.to_string()));
             })?;
@@ -703,7 +797,9 @@ pub extern "C" fn chaos_music_kugou_login_qr_poll_json(
     session_id_utf8: *const c_char,
 ) -> *mut c_char {
     let res = std::panic::catch_unwind(|| -> Result<String, ()> {
-        let sid = require_cstr(session_id_utf8, "session_id_utf8")?.trim().to_string();
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?
+            .trim()
+            .to_string();
         if sid.is_empty() {
             set_last_error("session_id_utf8 is empty", None);
             return Err(());
@@ -814,6 +910,514 @@ pub extern "C" fn chaos_music_kugou_login_qr_poll_json(
     }
 }
 
+async fn try_download_lyrics_for_track(
+    http: &reqwest::Client,
+    track: &MusicTrack,
+    audio_path: &std::path::Path,
+    overwrite: bool,
+) -> Result<(), String> {
+    // Best-effort: lyrics download should not fail the audio download job.
+    let title = (track.title.as_str()).trim();
+    if title.is_empty() {
+        return Ok(());
+    }
+
+    let artist = track
+        .artists
+        .iter()
+        .filter(|s| !s.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" / ");
+
+    let term = if artist.trim().is_empty() {
+        lyrics::model::LyricsSearchTerm::Keyword {
+            keyword: title.to_string(),
+        }
+    } else {
+        lyrics::model::LyricsSearchTerm::Info {
+            title: title.to_string(),
+            artist,
+            album: track.album.clone().filter(|s| !s.trim().is_empty()),
+        }
+    };
+
+    let mut req = lyrics::model::LyricsSearchRequest::new(term);
+    req.duration_ms = track.duration_ms;
+    req.limit = 1;
+
+    let opt = lyrics::model::LyricsSearchOptions {
+        timeout_ms: 8000,
+        strict_match: false,
+        services: vec![
+            lyrics::model::LyricsService::QQMusic,
+            lyrics::model::LyricsService::Netease,
+            lyrics::model::LyricsService::LrcLib,
+        ],
+    };
+
+    let mut items = lyrics::core::search_with_http(http, &req, opt)
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(best) = items.pop() else {
+        return Ok(());
+    };
+    if best.lyrics_original.trim().is_empty() {
+        return Ok(());
+    }
+
+    let lrc_path = audio_path.with_extension("lrc");
+    if !overwrite && lrc_path.exists() {
+        return Ok(());
+    }
+
+    let mut content = best.lyrics_original;
+    if let Some(t) = best.lyrics_translation {
+        if !t.trim().is_empty() {
+            content.push_str("\n\n");
+            content.push_str(&t);
+        }
+    }
+    tokio::fs::write(&lrc_path, content)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_download_start_json(
+    start_params_json_utf8: *const c_char,
+) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(start_params_json_utf8, "start_params_json_utf8")?;
+        let params: MusicDownloadStartParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid start_params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let MusicDownloadStartParams {
+            config,
+            auth,
+            target,
+            options,
+        } = params;
+
+        let out_dir = options.out_dir.trim().to_string();
+        if out_dir.is_empty() {
+            set_last_error("options.outDir is empty", None);
+            return Err(());
+        }
+        let quality_id = options.quality_id.trim().to_string();
+        if quality_id.is_empty() {
+            set_last_error("options.qualityId is empty", None);
+            return Err(());
+        }
+
+        let cfg_core = map_music_provider_config_to_core(config);
+        let client = {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            locked.cfg = cfg_core.clone();
+            locked.client.set_config(cfg_core.clone());
+            locked.client.clone()
+        };
+
+        let session_id = gen_session_id("musicdl");
+        let sid = session_id.clone();
+
+        runtime()
+            .block_on(async move {
+                let opts = options;
+                let out_dir = PathBuf::from(out_dir);
+
+                let mut auth = map_music_auth_to_core(auth);
+
+                let target_service = match &target {
+                    MusicDownloadTarget::Track { track } => track.service,
+                    MusicDownloadTarget::Album { service, .. } => *service,
+                    MusicDownloadTarget::ArtistAll { service, .. } => *service,
+                };
+                if matches!(target_service, MusicService::Netease) && auth.netease_cookie.is_none()
+                {
+                    if let Ok(c) = music::providers::netease::fetch_anonymous_cookie(
+                        &client.http,
+                        &cfg_core,
+                        client.timeout,
+                    )
+                    .await
+                    {
+                        auth.netease_cookie = Some(c);
+                    }
+                }
+
+                let mut items: Vec<(MusicTrack, Option<u32>)> = Vec::new();
+                match target {
+                    MusicDownloadTarget::Track { track } => items.push((track, None)),
+                    MusicDownloadTarget::Album { service, album_id } => {
+                        let tracks = client
+                            .album_tracks(map_music_service_to_core(service), &album_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        for (idx, t) in tracks.into_iter().enumerate() {
+                            items.push((map_music_track_to_proto(t), Some((idx as u32) + 1)));
+                        }
+                    }
+                    MusicDownloadTarget::ArtistAll { service, artist_id } => {
+                        let albums = client
+                            .artist_albums(map_music_service_to_core(service), &artist_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let mut seen = std::collections::HashSet::<String>::new();
+                        for alb in albums {
+                            let album_title = alb.title.clone();
+                            let tracks = client
+                                .album_tracks(map_music_service_to_core(service), &alb.id)
+                                .await
+                                .unwrap_or_default();
+                            for (idx, mut t) in tracks.into_iter().enumerate() {
+                                if !seen.insert(t.id.clone()) {
+                                    continue;
+                                }
+                                if t.album.is_none() {
+                                    t.album = Some(album_title.clone());
+                                }
+                                items.push((map_music_track_to_proto(t), Some((idx as u32) + 1)));
+                            }
+                        }
+                    }
+                }
+
+                let total = u32::try_from(items.len()).unwrap_or(u32::MAX);
+                let status = MusicDownloadStatus {
+                    done: total == 0,
+                    totals: MusicDownloadTotals {
+                        total,
+                        done: 0,
+                        failed: 0,
+                        skipped: 0,
+                        canceled: 0,
+                    },
+                    jobs: items
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (t, _))| MusicDownloadJobResult {
+                            index: i as u32,
+                            track_id: Some(t.id.clone()),
+                            state: MusicJobState::Pending,
+                            path: None,
+                            bytes: None,
+                            error: None,
+                        })
+                        .collect(),
+                };
+
+                let status = Arc::new(tokio::sync::Mutex::new(status));
+                let cancel = Arc::new(AtomicBool::new(false));
+
+                let concurrency = opts.concurrency.max(1).min(16) as usize;
+                let retries = opts.retries.min(10);
+                let overwrite = opts.overwrite;
+                let path_template = opts
+                    .path_template
+                    .as_deref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+
+                let st = Arc::clone(&status);
+                let cancel_flag = Arc::clone(&cancel);
+                let req_quality = quality_id;
+
+                let handle = tokio::spawn(async move {
+                    if items.is_empty() {
+                        let mut s = st.lock().await;
+                        s.done = true;
+                        return;
+                    }
+
+                    let (tx, rx) = tokio::sync::mpsc::channel::<(u32, MusicTrack, Option<u32>)>(
+                        items.len().max(1),
+                    );
+                    for (idx, (t, no)) in items.into_iter().enumerate() {
+                        let _ = tx.send((idx as u32, t, no)).await;
+                    }
+                    drop(tx);
+                    let rx = Arc::new(tokio::sync::Mutex::new(rx));
+
+                    let mut joinset = tokio::task::JoinSet::new();
+                    for _ in 0..concurrency {
+                        let rx = Arc::clone(&rx);
+                        let st = Arc::clone(&st);
+                        let cancel = Arc::clone(&cancel_flag);
+                        let client = client.clone();
+                        let auth = auth.clone();
+                        let out_dir = out_dir.clone();
+                        let req_quality = req_quality.clone();
+                        let path_template = path_template.clone();
+                        joinset.spawn(async move {
+                            loop {
+                                if cancel.load(Ordering::Relaxed) {
+                                    return;
+                                }
+                                let next = {
+                                    let mut locked = rx.lock().await;
+                                    locked.recv().await
+                                };
+                                let Some((index, track, track_no)) = next else {
+                                    return;
+                                };
+
+                                {
+                                    let mut s = st.lock().await;
+                                    if let Some(job) = s.jobs.get_mut(index as usize) {
+                                        job.state = MusicJobState::Running;
+                                    }
+                                }
+
+                                let core_svc = map_music_service_to_core(track.service);
+                                let chosen_quality = choose_quality_id(&track, &req_quality)
+                                    .unwrap_or_else(|| req_quality.clone());
+
+                                let res: Result<(PathBuf, Option<u64>, Option<String>), String> =
+                                    async {
+                                        let (url, ext) = client
+                                            .track_download_url(
+                                                core_svc,
+                                                &track.id,
+                                                &chosen_quality,
+                                                &auth,
+                                            )
+                                            .await
+                                            .map_err(|e| e.to_string())?;
+
+                                        let path = if let Some(tpl) = path_template.as_deref() {
+                                            music::util::build_track_path_by_template(
+                                                &out_dir,
+                                                tpl,
+                                                &track.artists,
+                                                track.album.as_deref(),
+                                                track_no,
+                                                &track.title,
+                                                &ext,
+                                            )
+                                        } else {
+                                            music::util::build_track_path(
+                                                &out_dir,
+                                                &track.artists,
+                                                track.album.as_deref(),
+                                                track_no,
+                                                &track.title,
+                                                &ext,
+                                            )
+                                        };
+
+                                        if path.exists() && !overwrite {
+                                            return Ok((
+                                                path,
+                                                None,
+                                                Some("skipped: target exists".to_string()),
+                                            ));
+                                        }
+                                        let bytes = music::download::download_url_to_file(
+                                            &client.http,
+                                            &url,
+                                            &path,
+                                            client.timeout,
+                                            retries,
+                                            overwrite,
+                                        )
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                        Ok((path, Some(bytes), None))
+                                    }
+                                    .await;
+
+                                match res {
+                                    Ok((path, bytes, skipped_msg)) => {
+                                        if skipped_msg.is_none() && bytes.is_some() {
+                                            let _ = try_download_lyrics_for_track(
+                                                &client.http,
+                                                &track,
+                                                &path,
+                                                overwrite,
+                                            )
+                                            .await;
+                                        }
+                                        let mut s = st.lock().await;
+                                        let mut inc_skipped: u32 = 0;
+                                        let mut inc_done: u32 = 0;
+                                        if let Some(job) = s.jobs.get_mut(index as usize) {
+                                            job.path = Some(path.to_string_lossy().to_string());
+                                            job.bytes = bytes;
+                                            job.error = skipped_msg;
+                                            if job.error.is_some() {
+                                                job.state = MusicJobState::Skipped;
+                                                inc_skipped = 1;
+                                            } else {
+                                                job.state = MusicJobState::Done;
+                                                inc_done = 1;
+                                            }
+                                        }
+                                        s.totals.skipped =
+                                            s.totals.skipped.saturating_add(inc_skipped);
+                                        s.totals.done = s.totals.done.saturating_add(inc_done);
+                                    }
+                                    Err(e) => {
+                                        let mut s = st.lock().await;
+                                        let mut inc_failed: u32 = 0;
+                                        if let Some(job) = s.jobs.get_mut(index as usize) {
+                                            job.state = MusicJobState::Failed;
+                                            job.error = Some(e);
+                                            inc_failed = 1;
+                                        }
+                                        s.totals.failed =
+                                            s.totals.failed.saturating_add(inc_failed);
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    while joinset.join_next().await.is_some() {}
+                    let mut s = st.lock().await;
+                    s.done = true;
+                });
+
+                {
+                    let st = music_state();
+                    let mut locked = st.lock().map_err(|_| "music state poisoned".to_string())?;
+                    locked.downloads.insert(
+                        sid.clone(),
+                        MusicDownloadSession {
+                            status,
+                            cancel,
+                            handle,
+                        },
+                    );
+                }
+
+                Ok::<(), String>(())
+            })
+            .map_err(|e| {
+                set_last_error("music download start failed", Some(e));
+            })?;
+
+        let out = MusicDownloadStartResult { session_id };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error(
+                "failed to serialize download start result",
+                Some(e.to_string()),
+            );
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_download_start_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_download_status_json(session_id_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?
+            .trim()
+            .to_string();
+        if sid.is_empty() {
+            set_last_error("session_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        let status = {
+            let st = music_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            let Some(sess) = locked.downloads.get(&sid) else {
+                set_last_error("download session not found", None);
+                return Err(());
+            };
+            Arc::clone(&sess.status)
+        };
+
+        let out = runtime().block_on(async move { status.lock().await.clone() });
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize download status", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_download_status_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_music_download_cancel_json(session_id_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?
+            .trim()
+            .to_string();
+        if sid.is_empty() {
+            set_last_error("session_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        let (status, cancel) = {
+            let st = music_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("music state poisoned", None);
+            })?;
+            let Some(sess) = locked.downloads.get_mut(&sid) else {
+                set_last_error("download session not found", None);
+                return Err(());
+            };
+            sess.handle.abort();
+            (Arc::clone(&sess.status), Arc::clone(&sess.cancel))
+        };
+
+        cancel.store(true, Ordering::Relaxed);
+
+        runtime().block_on(async move {
+            let mut st = status.lock().await;
+            if !st.done {
+                let mut canceled: u32 = 0;
+                for job in st.jobs.iter_mut() {
+                    if matches!(job.state, MusicJobState::Pending | MusicJobState::Running) {
+                        job.state = MusicJobState::Canceled;
+                        canceled = canceled.saturating_add(1);
+                    }
+                }
+                st.totals.canceled = st.totals.canceled.saturating_add(canceled);
+                st.done = true;
+            }
+        });
+
+        let out = OkReply { ok: true };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize cancel reply", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_music_download_cancel_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn chaos_music_download_blocking_json(
     start_params_json_utf8: *const c_char,
@@ -824,7 +1428,14 @@ pub extern "C" fn chaos_music_download_blocking_json(
             set_last_error("invalid start_params_json_utf8", Some(e.to_string()));
         })?;
 
-        let cfg_core = map_music_provider_config_to_core(params.config);
+        let MusicDownloadStartParams {
+            config,
+            auth,
+            target,
+            options,
+        } = params;
+
+        let cfg_core = map_music_provider_config_to_core(config);
         let client = {
             let st = music_state();
             let mut locked = st.lock().map_err(|_| {
@@ -837,23 +1448,24 @@ pub extern "C" fn chaos_music_download_blocking_json(
 
         let out = runtime()
             .block_on(async move {
-                let out_dir = params.options.out_dir.trim().to_string();
+                let out_dir = options.out_dir.trim().to_string();
                 if out_dir.is_empty() {
                     return Err("options.outDir is empty".to_string());
                 }
-                let requested_quality = params.options.quality_id.trim().to_string();
+                let requested_quality = options.quality_id.trim().to_string();
                 if requested_quality.is_empty() {
                     return Err("options.qualityId is empty".to_string());
                 }
 
-                let mut auth = map_music_auth_to_core(params.auth);
+                let mut auth = map_music_auth_to_core(auth);
 
-                let target_service = match &params.target {
+                let target_service = match &target {
                     MusicDownloadTarget::Track { track } => track.service,
                     MusicDownloadTarget::Album { service, .. } => *service,
                     MusicDownloadTarget::ArtistAll { service, .. } => *service,
                 };
-                if matches!(target_service, MusicService::Netease) && auth.netease_cookie.is_none() {
+                if matches!(target_service, MusicService::Netease) && auth.netease_cookie.is_none()
+                {
                     if let Ok(c) = music::providers::netease::fetch_anonymous_cookie(
                         &client.http,
                         &cfg_core,
@@ -866,7 +1478,7 @@ pub extern "C" fn chaos_music_download_blocking_json(
                 }
 
                 let mut tracks: Vec<(MusicTrack, Option<u32>)> = Vec::new();
-                match params.target {
+                match target {
                     MusicDownloadTarget::Track { track } => tracks.push((track, None)),
                     MusicDownloadTarget::Album { service, album_id } => {
                         let list = client
@@ -903,8 +1515,8 @@ pub extern "C" fn chaos_music_download_blocking_json(
                 }
 
                 let out_dir = PathBuf::from(out_dir);
-                let overwrite = params.options.overwrite;
-                let retries = params.options.retries.min(10);
+                let overwrite = options.overwrite;
+                let retries = options.retries.min(10);
 
                 let total = u32::try_from(tracks.len()).unwrap_or(u32::MAX);
                 let mut status = MusicDownloadStatus {
@@ -930,6 +1542,13 @@ pub extern "C" fn chaos_music_download_blocking_json(
                         .collect(),
                 };
 
+                let path_template = options
+                    .path_template
+                    .as_deref()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+
                 for (idx, (track, track_no)) in tracks.into_iter().enumerate() {
                     if let Some(job) = status.jobs.get_mut(idx) {
                         job.state = MusicJobState::Running;
@@ -943,14 +1562,26 @@ pub extern "C" fn chaos_music_download_blocking_json(
                         .track_download_url(core_svc, &track.id, &chosen_quality, &auth)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let path = music::util::build_track_path(
-                        &out_dir,
-                        &track.artists,
-                        track.album.as_deref(),
-                        track_no,
-                        &track.title,
-                        &ext,
-                    );
+                    let path = if let Some(tpl) = path_template.as_deref() {
+                        music::util::build_track_path_by_template(
+                            &out_dir,
+                            tpl,
+                            &track.artists,
+                            track.album.as_deref(),
+                            track_no,
+                            &track.title,
+                            &ext,
+                        )
+                    } else {
+                        music::util::build_track_path(
+                            &out_dir,
+                            &track.artists,
+                            track.album.as_deref(),
+                            track_no,
+                            &track.title,
+                            &ext,
+                        )
+                    };
                     if path.exists() && !overwrite {
                         if let Some(job) = status.jobs.get_mut(idx) {
                             job.state = MusicJobState::Skipped;
@@ -971,6 +1602,13 @@ pub extern "C" fn chaos_music_download_blocking_json(
                     .await
                     {
                         Ok(bytes) => {
+                            let _ = try_download_lyrics_for_track(
+                                &client.http,
+                                &track,
+                                &path,
+                                overwrite,
+                            )
+                            .await;
                             if let Some(job) = status.jobs.get_mut(idx) {
                                 job.state = MusicJobState::Done;
                                 job.path = Some(path.to_string_lossy().to_string());
@@ -1294,11 +1932,19 @@ struct KugouLoginSession {
 }
 
 #[derive(Debug)]
+struct MusicDownloadSession {
+    status: Arc<tokio::sync::Mutex<MusicDownloadStatus>>,
+    cancel: Arc<AtomicBool>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Debug)]
 struct MusicFfiState {
     client: music::client::MusicClient,
     cfg: music::model::ProviderConfig,
     qq_sessions: HashMap<String, QqLoginSession>,
     kugou_sessions: HashMap<String, KugouLoginSession>,
+    downloads: HashMap<String, MusicDownloadSession>,
 }
 
 fn music_state() -> &'static Mutex<MusicFfiState> {
@@ -1311,6 +1957,7 @@ fn music_state() -> &'static Mutex<MusicFfiState> {
             cfg,
             qq_sessions: HashMap::new(),
             kugou_sessions: HashMap::new(),
+            downloads: HashMap::new(),
         })
     })
 }

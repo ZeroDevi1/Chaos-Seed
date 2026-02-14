@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <Content Include="FFmpeg\\**\\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\\**\\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

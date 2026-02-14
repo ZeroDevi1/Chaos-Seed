@@ -10,7 +10,7 @@ public sealed class FfiMusicBackend : IMusicBackend
     private readonly SemaphoreSlim _ffiGate = new(1, 1);
 
     public string Name => "FFI";
-    public string? InitNotice => "提示：歌曲下载任务始终由 daemon 执行（WinUI3 下发任务 + 轮询进度）。";
+    public string? InitNotice => null;
 
     public async Task ConfigSetAsync(MusicProviderConfig cfg, CancellationToken ct)
     {
@@ -53,8 +53,12 @@ public sealed class FfiMusicBackend : IMusicBackend
         => InvokeArrayAsync<MusicAlbum>("artistAlbums", json => ChaosFfi.chaos_music_artist_albums_json(json), p, ct);
 
     public Task<MusicTrackPlayUrlResult> TrackPlayUrlAsync(MusicTrackPlayUrlParams p, CancellationToken ct)
-        // Preview is always served via daemon (same as download execution).
-        => DaemonClient.Instance.MusicTrackPlayUrlAsync(p, ct);
+        => InvokeObjectAsync<MusicTrackPlayUrlResult>(
+            "trackPlayUrl",
+            json => ChaosFfi.chaos_music_track_play_url_json(json),
+            p,
+            ct
+        );
 
     public async Task<MusicLoginQr> QqLoginQrCreateAsync(string loginType, CancellationToken ct)
     {
@@ -195,15 +199,29 @@ public sealed class FfiMusicBackend : IMusicBackend
         }
     }
 
-    // Download is always executed by daemon (by design).
     public Task<MusicDownloadStartResult> DownloadStartAsync(MusicDownloadStartParams p, CancellationToken ct)
-        => DaemonClient.Instance.MusicDownloadStartAsync(p, ct);
+        => InvokeObjectAsync<MusicDownloadStartResult>(
+            "downloadStart",
+            json => ChaosFfi.chaos_music_download_start_json(json),
+            p,
+            ct
+        );
 
     public Task<MusicDownloadStatus> DownloadStatusAsync(string sessionId, CancellationToken ct)
-        => DaemonClient.Instance.MusicDownloadStatusAsync(sessionId, ct);
+        => InvokeSessionAsync<MusicDownloadStatus>(
+            "downloadStatus",
+            sid => ChaosFfi.chaos_music_download_status_json(sid),
+            sessionId,
+            ct
+        );
 
     public Task CancelDownloadAsync(string sessionId, CancellationToken ct)
-        => DaemonClient.Instance.MusicDownloadCancelAsync(sessionId, ct);
+        => InvokeSessionAsync<OkReply>(
+            "downloadCancel",
+            sid => ChaosFfi.chaos_music_download_cancel_json(sid),
+            sessionId,
+            ct
+        );
 
     public void Dispose()
     {
@@ -235,6 +253,71 @@ public sealed class FfiMusicBackend : IMusicBackend
                 return s!;
             }, ct);
             return JsonConvert.DeserializeObject<T[]>(outJson) ?? Array.Empty<T>();
+        }
+        finally
+        {
+            _ffiGate.Release();
+        }
+    }
+
+    private async Task<T> InvokeObjectAsync<T>(
+        string opName,
+        Func<string, IntPtr> ffiFunc,
+        object payload,
+        CancellationToken ct
+    )
+    {
+        if (payload is null) throw new ArgumentNullException(nameof(payload));
+        await _ffiGate.WaitAsync(ct);
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            var json = JsonConvert.SerializeObject(payload);
+            var outJson = await Task.Run(() =>
+            {
+                var p = ffiFunc(json);
+                var s = ChaosFfi.TakeString(p);
+                if (string.IsNullOrWhiteSpace(s))
+                {
+                    var err = ChaosFfi.TakeLastErrorJson();
+                    throw new InvalidOperationException(FormatFfiError(err, $"music.{opName} failed"));
+                }
+                return s!;
+            }, ct);
+            return JsonConvert.DeserializeObject<T>(outJson) ?? throw new InvalidOperationException($"invalid {typeof(T).Name} json");
+        }
+        finally
+        {
+            _ffiGate.Release();
+        }
+    }
+
+    private async Task<T> InvokeSessionAsync<T>(
+        string opName,
+        Func<string, IntPtr> ffiFunc,
+        string sessionId,
+        CancellationToken ct
+    )
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid)) throw new ArgumentException("empty sessionId", nameof(sessionId));
+
+        await _ffiGate.WaitAsync(ct);
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            var outJson = await Task.Run(() =>
+            {
+                var p = ffiFunc(sid);
+                var s = ChaosFfi.TakeString(p);
+                if (string.IsNullOrWhiteSpace(s))
+                {
+                    var err = ChaosFfi.TakeLastErrorJson();
+                    throw new InvalidOperationException(FormatFfiError(err, $"music.{opName} failed"));
+                }
+                return s!;
+            }, ct);
+            return JsonConvert.DeserializeObject<T>(outJson) ?? throw new InvalidOperationException($"invalid {typeof(T).Name} json");
         }
         finally
         {

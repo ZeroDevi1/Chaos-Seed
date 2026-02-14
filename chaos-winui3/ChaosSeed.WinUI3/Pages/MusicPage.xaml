@@ -27,10 +27,10 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Spacing="12">
-                    <TextBlock Text="歌曲" FontSize="28" FontWeight="SemiBold" />
-                    <TextBlock Text="搜索单曲/专辑/歌手，登录并下载（下载任务由 daemon 执行）。" Opacity="0.8" />
-                </StackPanel>
+                    <StackPanel Grid.Row="0" Spacing="12">
+                        <TextBlock Text="歌曲" FontSize="28" FontWeight="SemiBold" />
+                        <TextBlock Text="搜索单曲/专辑/歌手，登录并下载（下载任务由后端执行，可轮询进度/取消）。" Opacity="0.8" />
+                    </StackPanel>
 
                 <Grid Grid.Row="1" x:Name="CardsGrid" ColumnSpacing="12" RowSpacing="12">
                     <Grid.ColumnDefinitions>
@@ -185,7 +185,8 @@
 
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <TextBlock Text="默认音质" Opacity="0.7" VerticalAlignment="Center" />
-                            <ComboBox x:Name="DefaultQualityCombo" Width="160">
+                            <ComboBox x:Name="DefaultQualityCombo" Width="160" SelectionChanged="OnDefaultQualityChanged">
+                                <ComboBoxItem Content="最高（自动）" Tag="best" />
                                 <ComboBoxItem Content="FLAC" Tag="flac" />
                                 <ComboBoxItem Content="MP3 320" Tag="mp3_320" />
                                 <ComboBoxItem Content="MP3 192" Tag="mp3_192" />
