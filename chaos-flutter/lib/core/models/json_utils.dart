@@ -1,7 +1,9 @@
 T? pick<T>(Map<String, dynamic> json, List<String> keys) {
   for (final k in keys) {
     final v = json[k];
-    if (v is T) return v;
+    // Important: when T is `dynamic`, `null is dynamic` is true, which would short-circuit
+    // multi-key probing (e.g. trying `roomId` then `room_id`). We only accept non-null values.
+    if (v != null && v is T) return v;
   }
   return null;
 }
@@ -10,6 +12,7 @@ String pickString(Map<String, dynamic> json, List<String> keys,
     {String fallback = ''}) {
   final v = pick<dynamic>(json, keys);
   if (v is String) return v;
+  if (v is num) return v.toString();
   return fallback;
 }
 

@@ -113,16 +113,28 @@ class FfiChaosBackend implements ChaosBackend {
 
   @override
   Future<LiveOpenResult> openLive(String input, {String? variantId}) async {
-    final man = _lastManifest ?? await decodeManifest(input);
+    // `_lastManifest` is a global cache shared across features. If the input differs
+    // (or the cached manifest is incomplete), we must decode again.
+    var man = _lastManifest;
+    final inTrim = input.trim();
+    final manTrim = (man?.rawInput ?? '').trim();
+    if (man == null || manTrim.isEmpty || manTrim != inTrim || man.roomId.trim().isEmpty) {
+      man = await decodeManifest(input);
+    }
     final picked = _pickVariant(man, variantId);
 
     LivestreamVariant finalV = picked;
     final hasUrl = (picked.url != null && picked.url!.trim().isNotEmpty) ||
         picked.backupUrls.isNotEmpty;
     if (!hasUrl) {
+      final rid = man.roomId.trim();
+      if (rid.isEmpty) {
+        // Should never happen (core returns canonical room_id), but keep a clearer error here.
+        throw StateError('roomId 为空：请先重新解析直播间后再切换清晰度');
+      }
       final resolvedJson = await _runner.call('live.resolveVariant2', {
         'site': man.site,
-        'roomId': man.roomId,
+        'roomId': rid,
         'variantId': picked.id,
       }) as String;
       finalV = LivestreamVariant.fromJson(

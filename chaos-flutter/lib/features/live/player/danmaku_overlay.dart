@@ -53,6 +53,15 @@ class DanmakuOverlay extends StatefulWidget {
 class _DanmakuOverlayState extends State<DanmakuOverlay> {
   DanmakuController? _danmaku;
 
+  bool _deviceIsPortrait(BuildContext context) {
+    // `Video(controls: ...)` may wrap the controls in a MediaQuery whose `size`
+    // equals the video box (often landscape 16:9 even when the device is portrait).
+    // For "portrait live" behavior we must look at the actual device view size.
+    final v = View.of(context);
+    final logical = v.physicalSize / v.devicePixelRatio;
+    return logical.height >= logical.width;
+  }
+
   void _safeUpdateOption() {
     final c = _danmaku;
     if (c == null) return;
@@ -85,7 +94,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
       bottom: widget.padding.bottom,
       child: LayoutBuilder(
         builder: (context, c) {
-          final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
+          final portrait = _deviceIsPortrait(context);
           final screen = DanmakuScreen(
             createdController: (dc) {
               _danmaku = dc;
