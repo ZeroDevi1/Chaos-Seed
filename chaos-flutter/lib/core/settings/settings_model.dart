@@ -42,6 +42,13 @@ class AppSettings {
   // Android 端用于 QQ 音乐扫码登录后缓存 cookie（JSON 字符串）。
   final String? qqMusicCookieJson;
 
+  // Player (Android).
+  final bool pipHideDanmu;
+  final double danmuFontSize;
+  final double danmuOpacity;
+  final double danmuArea;
+  final int danmuSpeedSeconds;
+
   const AppSettings({
     required this.themeMode,
     required this.backdropMode,
@@ -58,6 +65,11 @@ class AppSettings {
     required this.musicDownloadRetries,
     required this.musicPathTemplate,
     required this.qqMusicCookieJson,
+    required this.pipHideDanmu,
+    required this.danmuFontSize,
+    required this.danmuOpacity,
+    required this.danmuArea,
+    required this.danmuSpeedSeconds,
   });
 
   factory AppSettings.defaults() {
@@ -79,6 +91,11 @@ class AppSettings {
       musicPathTemplate:
           '{}{{artist}}/{{album}}/{{title}} - {{artist}}.{{ext}}',
       qqMusicCookieJson: null,
+      pipHideDanmu: true,
+      danmuFontSize: 18,
+      danmuOpacity: 0.85,
+      danmuArea: 0.6,
+      danmuSpeedSeconds: 8,
     );
   }
 
@@ -98,6 +115,11 @@ class AppSettings {
     int? musicDownloadRetries,
     Object? musicPathTemplate = _unset,
     Object? qqMusicCookieJson = _unset,
+    bool? pipHideDanmu,
+    double? danmuFontSize,
+    double? danmuOpacity,
+    double? danmuArea,
+    int? danmuSpeedSeconds,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -122,6 +144,11 @@ class AppSettings {
       qqMusicCookieJson: qqMusicCookieJson == _unset
           ? this.qqMusicCookieJson
           : qqMusicCookieJson as String?,
+      pipHideDanmu: pipHideDanmu ?? this.pipHideDanmu,
+      danmuFontSize: danmuFontSize ?? this.danmuFontSize,
+      danmuOpacity: danmuOpacity ?? this.danmuOpacity,
+      danmuArea: danmuArea ?? this.danmuArea,
+      danmuSpeedSeconds: danmuSpeedSeconds ?? this.danmuSpeedSeconds,
     );
   }
 }

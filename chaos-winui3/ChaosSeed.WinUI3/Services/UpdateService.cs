@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -210,6 +211,9 @@ public sealed class UpdateService
 
         var appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var updaterExe = Path.Combine(appDir, "ChaosSeed.Updater.exe");
+        var updaterDll = Path.Combine(appDir, "ChaosSeed.Updater.dll");
+        var updaterDeps = Path.Combine(appDir, "ChaosSeed.Updater.deps.json");
+        var updaterRuntimeConfig = Path.Combine(appDir, "ChaosSeed.Updater.runtimeconfig.json");
         if (!File.Exists(updaterExe))
         {
             throw new FileNotFoundException("Missing ChaosSeed.Updater.exe next to WinUI executable.", updaterExe);
@@ -223,6 +227,17 @@ public sealed class UpdateService
         try { DaemonClient.Instance.Dispose(); } catch { }
 
         var pid = Environment.ProcessId;
+
+        // 修复：如果发布包/安装目录只包含 ChaosSeed.Updater.exe（缺失 ChaosSeed.Updater.dll），
+        // .NET apphost 启动会直接失败（事件日志提示找不到 Updater.dll）。
+        // 这种情况下，回退到“脚本更新器”：解压 zip 到临时目录，退出当前进程后由 PowerShell 覆盖拷贝并重启。
+        if (!File.Exists(updaterDll) || !File.Exists(updaterDeps) || !File.Exists(updaterRuntimeConfig))
+        {
+            ApplyViaPowerShellFallback(pending, appDir, pid);
+            Environment.Exit(0);
+            return;
+        }
+
         var args = new StringBuilder();
         args.Append("--app-dir ").Append(Quote(appDir)).Append(' ');
         args.Append("--zip ").Append(Quote(pending.ZipPath)).Append(' ');
@@ -256,6 +271,70 @@ public sealed class UpdateService
         }
 
         Environment.Exit(0);
+    }
+
+    private static void ApplyViaPowerShellFallback(UpdatePending pending, string appDir, int parentPid)
+    {
+        var tempRoot = Path.Combine(
+            Path.GetTempPath(),
+            "ChaosSeed.WinUI3",
+            "updates",
+            "apply",
+            pending.Version,
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(tempRoot);
+
+        // 解压更新包到临时目录（不要解到 appDir，避免文件锁/覆盖问题）。
+        // 注意：ps1 也会放在 tempRoot，避免拷贝 payload 时把脚本本身带进安装目录。
+        var payloadDir = Path.Combine(tempRoot, "payload");
+        Directory.CreateDirectory(payloadDir);
+        ZipFile.ExtractToDirectory(pending.ZipPath, payloadDir, overwriteFiles: true);
+
+        // 生成一个临时 ps1：等待主进程退出 -> 覆盖拷贝 -> 重启应用。
+        // 注意：Copy-Item 不会删除旧文件（与 Updater 的 “精确替换” 不完全一致），但能兜底修复更新链路。
+        var ps1 = Path.Combine(tempRoot, "apply_update.ps1");
+        File.WriteAllText(
+            ps1,
+            """
+param(
+  [int]$ParentPid,
+  [string]$SrcDir,
+  [string]$DstDir,
+  [string]$RestartExe
+)
+$ErrorActionPreference = 'Stop'
+
+try { Wait-Process -Id $ParentPid -ErrorAction SilentlyContinue } catch { }
+Start-Sleep -Milliseconds 300
+
+Copy-Item -Path (Join-Path $SrcDir '*') -Destination $DstDir -Recurse -Force
+
+$exePath = Join-Path $DstDir $RestartExe
+if (Test-Path $exePath) {
+  Start-Process -FilePath $exePath -WorkingDirectory $DstDir
+}
+""",
+            Encoding.ASCII
+        );
+
+        _ = Process.Start(new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments =
+                "-NoProfile -ExecutionPolicy Bypass -File "
+                + Quote(ps1)
+                + " -ParentPid "
+                + parentPid.ToString(CultureInfo.InvariantCulture)
+                + " -SrcDir "
+                + Quote(payloadDir)
+                + " -DstDir "
+                + Quote(appDir)
+                + " -RestartExe "
+                + Quote("ChaosSeed.WinUI3.exe"),
+            UseShellExecute = true,
+            WorkingDirectory = tempRoot,
+        });
     }
 
     public static string GetCurrentVersion()

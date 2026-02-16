@@ -18,6 +18,11 @@ class SettingsService {
   static const _kMusicRetries = 'settings.music.download.retries';
   static const _kMusicPathTemplate = 'settings.music.download.pathTemplate';
   static const _kQqCookieJson = 'settings.music.qq.cookieJson';
+  static const _kPipHideDanmu = 'settings.player.pipHideDanmu';
+  static const _kDanmuFontSize = 'settings.player.danmu.fontSize';
+  static const _kDanmuOpacity = 'settings.player.danmu.opacity';
+  static const _kDanmuArea = 'settings.player.danmu.area';
+  static const _kDanmuSpeedSeconds = 'settings.player.danmu.speedSeconds';
 
   Future<AppSettings> load() async {
     final sp = await SharedPreferences.getInstance();
@@ -46,6 +51,12 @@ class SettingsService {
       musicPathTemplate:
           sp.getString(_kMusicPathTemplate) ?? d.musicPathTemplate,
       qqMusicCookieJson: sp.getString(_kQqCookieJson) ?? d.qqMusicCookieJson,
+      pipHideDanmu: sp.getBool(_kPipHideDanmu) ?? d.pipHideDanmu,
+      danmuFontSize: sp.getDouble(_kDanmuFontSize) ?? d.danmuFontSize,
+      danmuOpacity: sp.getDouble(_kDanmuOpacity) ?? d.danmuOpacity,
+      danmuArea: sp.getDouble(_kDanmuArea) ?? d.danmuArea,
+      danmuSpeedSeconds:
+          sp.getInt(_kDanmuSpeedSeconds) ?? d.danmuSpeedSeconds,
     );
   }
 
@@ -78,6 +89,12 @@ class SettingsService {
     } else {
       await sp.setString(_kQqCookieJson, s.qqMusicCookieJson!);
     }
+
+    await sp.setBool(_kPipHideDanmu, s.pipHideDanmu);
+    await sp.setDouble(_kDanmuFontSize, s.danmuFontSize);
+    await sp.setDouble(_kDanmuOpacity, s.danmuOpacity);
+    await sp.setDouble(_kDanmuArea, s.danmuArea);
+    await sp.setInt(_kDanmuSpeedSeconds, s.danmuSpeedSeconds);
   }
 
   static BackendMode? _parseBackendMode(String? raw) {

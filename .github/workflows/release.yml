@@ -126,6 +126,7 @@ jobs:
           if (!(Test-Path (Join-Path $outDir "chaos_ffi.dll"))) { throw "missing chaos_ffi.dll in output dir: $outDir" }
           if (!(Test-Path (Join-Path $outDir "FFmpeg"))) { throw "missing FFmpeg/ in output dir: $outDir" }
           if (!(Test-Path (Join-Path $outDir "ChaosSeed.Updater.exe"))) { throw "missing ChaosSeed.Updater.exe in output dir: $outDir" }
+          if (!(Test-Path (Join-Path $outDir "ChaosSeed.Updater.dll"))) { throw "missing ChaosSeed.Updater.dll in output dir: $outDir" }
           if (!(Test-Path (Join-Path $outDir "chaos-version.txt"))) { throw "missing chaos-version.txt in output dir: $outDir" }
 
           Compress-Archive -Force -Path (Join-Path $outDir "*") -DestinationPath dist/chaos-winui3-windows-x86_64.zip
