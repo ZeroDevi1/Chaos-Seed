@@ -45,6 +45,15 @@ class FfiChaosBackend(
         isLenient = true
     }
 
+    // Requests to Rust should include defaults (kotlinx.serialization omits them by default).
+    // Without this, fields like `pageSize=20` can be omitted and Rust falls back to 0 -> clamped to 1.
+    private val jsonEncode = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+        explicitNulls = false
+    }
+
     // Decode manifest cache (mirrors Flutter).
     @Volatile
     private var lastManifest: LivestreamDecodeManifestResult? = null
@@ -177,12 +186,12 @@ class FfiChaosBackend(
     }
 
     override suspend fun musicConfigSet(cfg: MusicProviderConfig) {
-        val raw = json.encodeToString(MusicProviderConfig.serializer(), cfg)
+        val raw = jsonEncode.encodeToString(MusicProviderConfig.serializer(), cfg)
         callString { ChaosFfi.api().chaos_music_config_set_json(raw) }
     }
 
     override suspend fun searchTracks(p: MusicSearchParams): List<MusicTrack> {
-        val raw = json.encodeToString(MusicSearchParams.serializer(), p)
+        val raw = jsonEncode.encodeToString(MusicSearchParams.serializer(), p)
         val s = callString { ChaosFfi.api().chaos_music_search_tracks_json(raw) }
         return json.decodeFromString(s)
     }
@@ -198,7 +207,7 @@ class FfiChaosBackend(
     }
 
     override suspend fun downloadStart(p: MusicDownloadStartParams): MusicDownloadStartResult {
-        val raw = json.encodeToString(MusicDownloadStartParams.serializer(), p)
+        val raw = jsonEncode.encodeToString(MusicDownloadStartParams.serializer(), p)
         val s = callString { ChaosFfi.api().chaos_music_download_start_json(raw) }
         return json.decodeFromString(s)
     }

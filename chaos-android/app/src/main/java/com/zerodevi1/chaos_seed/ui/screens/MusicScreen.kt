@@ -33,10 +33,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,13 +83,13 @@ fun MusicScreen(
     var svc by remember { mutableStateOf(MusicService.Qq) }
     var q by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
-    var loadingMore by remember { mutableStateOf(false) }
+    var pagingLoading by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var tracks by remember { mutableStateOf<List<MusicTrack>>(emptyList()) }
-    var searchPage by remember { mutableStateOf(1) }
     var hasMore by remember { mutableStateOf(true) }
     var lastQuery by remember { mutableStateOf<String?>(null) }
     var lastSvc by remember { mutableStateOf<MusicService?>(null) }
+    var currentPage by remember { mutableStateOf(1) }
 
     var showQqLogin by remember { mutableStateOf(false) }
 
@@ -114,13 +112,13 @@ fun MusicScreen(
 
     fun search() {
         val kw = q.trim()
-        if (kw.isEmpty() || loading || loadingMore) return
+        if (kw.isEmpty() || loading || pagingLoading) return
         scope.launch {
             loading = true
             err = null
             tracks = emptyList()
-            searchPage = 1
             hasMore = true
+            currentPage = 1
             lastQuery = kw
             lastSvc = svc
             try {
@@ -133,10 +131,11 @@ fun MusicScreen(
                         pageSize = pageSize,
                     ),
                 )
-                tracks = items
+                tracks = items.distinctBy { it.service.name + ":" + it.id }
                 // Backend doesn't return hasMore; infer by page size.
                 hasMore = items.size >= pageSize
-                searchPage = 2
+                currentPage = 1
+                listState.scrollToItem(0)
             } catch (e: Exception) {
                 err = e.toString()
             } finally {
@@ -145,48 +144,44 @@ fun MusicScreen(
         }
     }
 
-    fun loadMore() {
+    fun gotoPage(page: Int) {
         val kw = (lastQuery ?: q).trim()
         if (kw.isEmpty()) return
-        if (!hasMore || loading || loadingMore) return
-        if (lastSvc != null && lastSvc != svc) return
+        if (page < 1) return
+        if (loading || pagingLoading) return
+        if (lastSvc != null && lastSvc != svc) {
+            scope.launch { snackbar.showSnackbar("来源已变更，请重新搜索") }
+            return
+        }
+        if (lastQuery != null && lastQuery != kw) {
+            scope.launch { snackbar.showSnackbar("关键词已变更，请重新搜索") }
+            return
+        }
+        if (page == currentPage) return
 
         scope.launch {
-            loadingMore = true
+            pagingLoading = true
             try {
                 backend.musicConfigSet(cfgFromSettings())
                 val items = backend.searchTracks(
                     MusicSearchParams(
                         service = svc,
                         keyword = kw,
-                        page = searchPage,
+                        page = page,
                         pageSize = pageSize,
                     ),
                 )
-
-                // Append unique by (service,id) to avoid duplicates if backend jitter/repeats.
-                val seen = tracks.associateBy { it.service.name + ":" + it.id }.toMutableMap()
-                for (t in items) {
-                    seen.putIfAbsent(t.service.name + ":" + t.id, t)
-                }
-                tracks = seen.values.toList()
-
+                tracks = items.distinctBy { it.service.name + ":" + it.id }
                 hasMore = items.size >= pageSize
-                if (hasMore) searchPage += 1
+                currentPage = page
+                if (items.isNotEmpty()) {
+                    listState.scrollToItem(0)
+                }
             } catch (e: Exception) {
-                snackbar.showSnackbar("加载更多失败：${e.message ?: e::class.java.simpleName}")
+                snackbar.showSnackbar("翻页失败：${e.message ?: e::class.java.simpleName}")
             } finally {
-                loadingMore = false
+                pagingLoading = false
             }
-        }
-    }
-
-    // Infinite scroll paging: when reaching the end, load next page.
-    LaunchedEffect(listState, tracks.size, hasMore, loading, loadingMore) {
-        if (!hasMore || loading || loadingMore) return@LaunchedEffect
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
-        if (tracks.isNotEmpty() && lastVisible >= tracks.size - 4) {
-            loadMore()
         }
     }
 
@@ -333,15 +328,18 @@ fun MusicScreen(
                 Spacer(Modifier.width(8.dp))
                 FilledTonalButton(
                     onClick = { search() },
-                    enabled = !loading && !loadingMore,
+                    enabled = !loading && !pagingLoading,
                 ) { Text("搜索") }
             }
 
             if (err != null) ErrorCard(message = err!!, onDismiss = { err = null })
-            if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (loading || pagingLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             if (!loading && err == null && tracks.isNotEmpty()) {
-                val more = if (hasMore) "（可继续加载）" else ""
-                Text("结果：${tracks.size}$more", modifier = Modifier.padding(top = 2.dp))
+                val hint = when {
+                    hasMore -> "（可下一页）"
+                    else -> "（已到最后一页）"
+                }
+                Text("结果：${tracks.size} · 第 $currentPage 页$hint", modifier = Modifier.padding(top = 2.dp))
             }
 
             val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -364,17 +362,23 @@ fun MusicScreen(
                     }
                 }
                 item {
-                    when {
-                        loadingMore -> Text("加载更多中...", modifier = Modifier.padding(vertical = 12.dp))
-                        hasMore && tracks.isNotEmpty() -> TextButton(
-                            onClick = { loadMore() },
-                            enabled = !loading && !loadingMore,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("加载更多") }
-                        !hasMore && tracks.isNotEmpty() -> Text(
-                            "没有更多了",
-                            modifier = Modifier.padding(vertical = 12.dp),
-                        )
+                    if (lastQuery != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            OutlinedButton(
+                                onClick = { gotoPage(currentPage - 1) },
+                                enabled = currentPage > 1 && !loading && !pagingLoading,
+                            ) { Text("上一页") }
+                            Text("第 $currentPage 页", modifier = Modifier.padding(top = 10.dp))
+                            OutlinedButton(
+                                onClick = { gotoPage(currentPage + 1) },
+                                enabled = hasMore && !loading && !pagingLoading,
+                            ) { Text("下一页") }
+                        }
                     }
                 }
                 item { Spacer(Modifier.height(12.dp)) }
