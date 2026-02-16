@@ -1,0 +1,12 @@
+Chaos Seed (chaos-android) - Third Party Notices
+================================================
+
+This app can optionally use libmpv (MPV) for video playback via:
+  - dev.jdtech.mpv:libmpv:0.5.1
+
+The libmpv AAR bundles native libraries including mpv and FFmpeg components.
+Depending on your distribution, you may need to comply with GPL/LGPL and other
+licenses. See docs/LEGAL_MPV.md in the repository for our compliance notes.
+
+This file is a placeholder for the full notices bundle.
+

@@ -1,0 +1,4 @@
+<resources>
+    <!-- Window theme only; Compose provides Material 3 theming. -->
+    <style name="Theme.ChaosSeed" parent="android:Theme.DeviceDefault.NoActionBar" />
+</resources>

@@ -1,0 +1,10 @@
+.gradle/
+.kotlin/
+local.properties
+**/build/
+.idea/
+*.iml
+.DS_Store
+
+# Built native libs should be produced by tools/build_android_ffi.sh
+app/src/main/jniLibs/**/*.so
