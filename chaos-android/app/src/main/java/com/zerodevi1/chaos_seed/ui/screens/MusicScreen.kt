@@ -135,7 +135,9 @@ fun MusicScreen(
                 // Backend doesn't return hasMore; infer by page size.
                 hasMore = items.size >= pageSize
                 currentPage = 1
-                listState.scrollToItem(0)
+                if (items.isNotEmpty()) {
+                    listState.scrollToItem(0)
+                }
             } catch (e: Exception) {
                 err = e.toString()
             } finally {
