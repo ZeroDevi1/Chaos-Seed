@@ -14,6 +14,16 @@ daemon 启动参数：
 chaos-daemon.exe --pipe-name <PIPE_NAME> --auth-token <TOKEN>
 ```
 
+也支持通过 **stdio** 运行（便于非 .NET 客户端/跨语言接入）：
+
+```txt
+chaos-daemon.exe --stdio --auth-token <TOKEN>
+```
+
+注意：
+- stdio 模式下，**stdout 仅用于 JSON-RPC/LSP 协议帧**；日志请走 stderr（daemon 侧已尽量遵循）。
+- 传输层仍是 **LSP Content-Length framing**（每条 JSON 外包 `Content-Length: ...\r\n\r\n<json>`）。
+
 连接成功后，客户端必须先调用一次 `daemon.ping` 完成鉴权：
 
 - 在 daemon **未鉴权**前，除 `daemon.ping` 外的所有方法会返回 `Unauthorized`（`code = -32001`）。

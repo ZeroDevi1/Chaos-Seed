@@ -17,6 +17,7 @@
 |---|---|---|
 | `README.md` | `Home.md` | `Home` |
 | `docs/BUILD_WINUI3.md` | `BUILD_WINUI3.md` | `BUILD_WINUI3` |
+| `docs/BUILD_CHAOS_FLUTTER.md` | `BUILD_CHAOS_FLUTTER.md` | `BUILD_CHAOS_FLUTTER` |
 | `chaos-ffi/docs/API.md` | `FFI_API.md` | `FFI_API` |
 | `chaos-ffi/docs/CSharp.md` | `FFI_CSharp.md` | `FFI_CSharp` |
 | `chaos-ffi/docs/BUILD.md` | `FFI_BUILD.md` | `FFI_BUILD` |

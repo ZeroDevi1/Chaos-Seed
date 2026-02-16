@@ -108,6 +108,10 @@ Windows 上一键构建：
 cargo xtask build-winui3 --release
 ```
 
+### Flutter（chaos-flutter）
+
+文档：`docs/BUILD_CHAOS_FLUTTER.md`
+
 ### 弹幕 Overlay 透明悬浮窗（Win11）
 
 WinUI3 的 XAML `Transparent` 在 Win11 上通常无法做到“桌面真透”，所以本项目的弹幕页 “打开 Overlay 悬浮窗” 默认使用 **Win32 layered window** 实现真透明（只绘制文字/表情图，背景透出桌面/游戏画面）。

@@ -1,5 +1,8 @@
+mod cli;
+
 #[cfg(windows)]
 mod win {
+    use crate::cli::{CliOptions, TransportMode};
     use chaos_app::ChaosApp;
     use chaos_core::{lyrics, music, now_playing};
     use chaos_daemon::run_jsonrpc_over_lsp;
@@ -27,7 +30,10 @@ mod win {
         atomic::{AtomicBool, Ordering},
     };
     use std::path::PathBuf;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::io::{AsyncRead, AsyncWrite, Stdin, Stdout};
     use tokio::sync::mpsc;
     use tokio::sync::Mutex;
     use tokio::fs;
@@ -1353,48 +1359,105 @@ mod win {
     }
 
     pub async fn main() -> anyhow::Result<()> {
-        let mut pipe_name: Option<String> = None;
-        let mut auth_token: Option<String> = None;
+        // Single object that supports tokio::io::split for LSP framing.
+        struct StdioTransport {
+            stdin: Stdin,
+            stdout: Stdout,
+        }
 
-        let mut args = env::args().skip(1);
-        while let Some(a) = args.next() {
-            match a.as_str() {
-                "--pipe-name" => pipe_name = args.next(),
-                "--auth-token" => auth_token = args.next(),
-                _ => {}
+        impl AsyncRead for StdioTransport {
+            fn poll_read(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &mut tokio::io::ReadBuf<'_>,
+            ) -> Poll<std::io::Result<()>> {
+                Pin::new(&mut self.stdin).poll_read(cx, buf)
             }
         }
 
-        let pipe_name = pipe_name.ok_or_else(|| anyhow::anyhow!("missing --pipe-name"))?;
-        let auth_token = auth_token.ok_or_else(|| anyhow::anyhow!("missing --auth-token"))?;
+        impl AsyncWrite for StdioTransport {
+            fn poll_write(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+                buf: &[u8],
+            ) -> Poll<std::io::Result<usize>> {
+                Pin::new(&mut self.stdout).poll_write(cx, buf)
+            }
 
-        let full_name = if pipe_name.starts_with(r"\\.\pipe\") {
-            pipe_name
-        } else {
-            format!(r"\\.\pipe\{pipe_name}")
-        };
+            fn poll_flush(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<std::io::Result<()>> {
+                Pin::new(&mut self.stdout).poll_flush(cx)
+            }
 
-        let server = tokio::net::windows::named_pipe::ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(full_name)?;
+            fn poll_shutdown(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<std::io::Result<()>> {
+                Pin::new(&mut self.stdout).poll_shutdown(cx)
+            }
+        }
 
-        server.connect().await?;
+        async fn run_stdio(auth_token: &str) -> anyhow::Result<()> {
+            // When running over stdio, stdout must be reserved for JSON-RPC frames.
+            // Any logs should go to stderr.
+            let rw = StdioTransport {
+                stdin: tokio::io::stdin(),
+                stdout: tokio::io::stdout(),
+            };
 
-        let app = std::sync::Arc::new(ChaosApp::new().map_err(|e| anyhow::anyhow!("{e}"))?);
-        let music = Arc::new(MusicManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
-        let svc = Svc { app, music };
+            let app = Arc::new(ChaosApp::new().map_err(|e| anyhow::anyhow!("{e}"))?);
+            let music = Arc::new(MusicManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
+            let svc = Svc { app, music };
 
-        run_jsonrpc_over_lsp(&svc, server, &auth_token)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            run_jsonrpc_over_lsp(&svc, rw, auth_token)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(())
+        }
 
-        Ok(())
+        async fn run_named_pipe(pipe_name: &str, auth_token: &str) -> anyhow::Result<()> {
+            let full_name = if pipe_name.starts_with(r"\\.\pipe\") {
+                pipe_name.to_string()
+            } else {
+                format!(r"\\.\pipe\{pipe_name}")
+            };
+
+            let server = tokio::net::windows::named_pipe::ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(full_name)?;
+            server.connect().await?;
+
+            let app = Arc::new(ChaosApp::new().map_err(|e| anyhow::anyhow!("{e}"))?);
+            let music = Arc::new(MusicManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
+            let svc = Svc { app, music };
+
+            run_jsonrpc_over_lsp(&svc, server, auth_token)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Ok(())
+        }
+
+        let opt = CliOptions::parse(env::args().skip(1)).map_err(|e| anyhow::anyhow!("{e}"))?;
+        match opt.transport {
+            TransportMode::Stdio => run_stdio(&opt.auth_token).await,
+            TransportMode::NamedPipe { pipe_name } => run_named_pipe(&pipe_name, &opt.auth_token).await,
+        }
     }
 }
 
 #[cfg(not(windows))]
 fn main() {
     eprintln!("chaos-daemon is Windows-only. Build and run it on Windows.");
+}
+
+// Keep CLI parsing code covered (and avoid dead_code warnings) on non-Windows builds.
+// This does not change runtime behavior since `chaos-daemon` still exits early on non-Windows.
+#[cfg(not(windows))]
+#[allow(dead_code)]
+fn _cli_parse_smoke_test_for_non_windows_builds() {
+    let _ = crate::cli::CliOptions::parse(["--stdio", "--auth-token", "token"]);
 }
 
 #[cfg(windows)]

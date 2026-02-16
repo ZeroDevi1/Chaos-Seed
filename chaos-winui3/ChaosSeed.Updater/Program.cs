@@ -7,7 +7,8 @@ using System.Text;
 
 static int Main(string[] args)
 {
-    var logPath = GetLogPath();
+    var logAppName = Options.PeekAppNameOrDefault(args);
+    var logPath = GetLogPath(logAppName);
     Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
     using var log = new StreamWriter(new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
     {
@@ -27,7 +28,7 @@ static int Main(string[] args)
     var opt = Options.Parse(args);
     if (opt is null)
     {
-        const string usage = "Usage: ChaosSeed.Updater --app-dir <dir> --zip <path> --expected-sha256 <hex> --restart-exe <exe> --version <ver> --parent-pid <pid>";
+        const string usage = "Usage: ChaosSeed.Updater [--app-name <NAME>] --app-dir <dir> --zip <path> --expected-sha256 <hex> --restart-exe <exe> --version <ver> --parent-pid <pid>";
         Info("invalid args; exiting");
         Info(usage);
         TryShowError($"Update failed: invalid arguments.\n\n{usage}\n\nLog:\n{logPath}");
@@ -43,7 +44,8 @@ static int Main(string[] args)
             return 0;
         }
 
-        using var mutex = new Mutex(initiallyOwned: true, name: "ChaosSeed.Updater", out var isNew);
+        var mutexName = "ChaosSeed.Updater." + SanitizeMutexComponent(opt.AppName);
+        using var mutex = new Mutex(initiallyOwned: true, name: mutexName, out var isNew);
         if (!isNew)
         {
             Info("another updater instance is running; exiting");
@@ -51,6 +53,7 @@ static int Main(string[] args)
         }
 
         Info($"updater log: {logPath}");
+        Info($"appName={opt.AppName}");
         Info($"appDir={opt.AppDir}");
         Info($"zip={opt.ZipPath}");
         Info($"version={opt.Version}");
@@ -109,7 +112,7 @@ static int Main(string[] args)
         }
 
         // Best-effort: keep pending updates small.
-        TryCleanupPendingUpdates(opt.Version, Info);
+        TryCleanupPendingUpdates(opt.AppName, opt.Version, Info);
 
         Info("starting updated app...");
         var exePath = Path.Combine(opt.AppDir, opt.RestartExe);
@@ -298,24 +301,48 @@ static void TryDeleteDir(string dir)
     }
 }
 
-static string GetLogPath()
+static string GetLogPath(string appName)
 {
     var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     if (string.IsNullOrWhiteSpace(root))
     {
         root = Path.GetTempPath();
     }
-    var dir = Path.Combine(root, "ChaosSeed.WinUI3", "logs");
+
+    var safe = string.IsNullOrWhiteSpace(appName) ? "ChaosSeed.WinUI3" : appName.Trim();
+    var dir = Path.Combine(root, safe, "logs");
     return Path.Combine(dir, $"updater-{DateTime.Now:yyyyMMdd-HHmmss}.log");
 }
 
-static void TryCleanupPendingUpdates(string keepVersion, Action<string> info)
+static string SanitizeMutexComponent(string s)
+{
+    if (string.IsNullOrWhiteSpace(s))
+    {
+        return "default";
+    }
+    var b = new StringBuilder(s.Length);
+    foreach (var ch in s.Trim())
+    {
+        if (char.IsLetterOrDigit(ch) || ch == '.' || ch == '-' || ch == '_')
+        {
+            b.Append(ch);
+        }
+        else
+        {
+            b.Append('_');
+        }
+    }
+    return b.Length == 0 ? "default" : b.ToString();
+}
+
+static void TryCleanupPendingUpdates(string appName, string keepVersion, Action<string> info)
 {
     try
     {
+        var safe = string.IsNullOrWhiteSpace(appName) ? "ChaosSeed.WinUI3" : appName.Trim();
         var root = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ChaosSeed.WinUI3",
+            safe,
             "updates",
             "pending"
         );
@@ -357,6 +384,7 @@ static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint typ
 
 sealed class Options
 {
+    public string AppName { get; init; } = "ChaosSeed.WinUI3";
     public string AppDir { get; init; } = "";
     public string ZipPath { get; init; } = "";
     public string ExpectedSha256 { get; init; } = "";
@@ -365,8 +393,58 @@ sealed class Options
     public int ParentPid { get; init; }
     public bool Relocated { get; init; }
 
+    public static string PeekAppNameOrDefault(string[] args)
+    {
+        // Best-effort: we want logs to go under the right app folder even if args are invalid.
+        var appName = PeekArg(args, "--app-name");
+        if (!string.IsNullOrWhiteSpace(appName))
+        {
+            return appName.Trim();
+        }
+
+        var restartExe = PeekArg(args, "--restart-exe");
+        var inferred = InferAppNameFromRestartExe(restartExe);
+        return inferred ?? "ChaosSeed.WinUI3";
+    }
+
+    private static string? PeekArg(string[] args, string key)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (!string.Equals(args[i], key, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            if (i + 1 < args.Length)
+            {
+                return args[i + 1];
+            }
+            return null;
+        }
+        return null;
+    }
+
+    private static string? InferAppNameFromRestartExe(string? restartExe)
+    {
+        if (string.IsNullOrWhiteSpace(restartExe))
+        {
+            return null;
+        }
+        try
+        {
+            var file = Path.GetFileName(restartExe.Trim());
+            var name = Path.GetFileNameWithoutExtension(file);
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public static Options? Parse(string[] args)
     {
+        string? appName = null;
         string? appDir = null;
         string? zip = null;
         string? sha = null;
@@ -381,6 +459,9 @@ sealed class Options
             string? Next() => i + 1 < args.Length ? args[++i] : null;
             switch (a)
             {
+                case "--app-name":
+                    appName = Next();
+                    break;
                 case "--app-dir":
                     appDir = Next();
                     break;
@@ -415,6 +496,10 @@ sealed class Options
             return null;
         }
 
+        appName = string.IsNullOrWhiteSpace(appName)
+            ? InferAppNameFromRestartExe(restartExe) ?? "ChaosSeed.WinUI3"
+            : appName.Trim();
+
         appDir = appDir.Trim().TrimEnd(Path.DirectorySeparatorChar);
         if (!Directory.Exists(appDir))
         {
@@ -427,6 +512,7 @@ sealed class Options
 
         return new Options
         {
+            AppName = appName,
             AppDir = appDir,
             ZipPath = zip,
             ExpectedSha256 = sha,

@@ -53,6 +53,7 @@ copy "README.md" "Home.md"
 
 # Docs
 copy "docs/BUILD_WINUI3.md" "BUILD_WINUI3.md"
+copy "docs/BUILD_CHAOS_FLUTTER.md" "BUILD_CHAOS_FLUTTER.md"
 
 # FFI docs (renamed for clearer Wiki page names)
 copy "chaos-ffi/docs/API.md" "FFI_API.md"
@@ -71,6 +72,7 @@ copy "DEVLOG.md" "DEVLOG.md"
 cat >"${out_dir}/_Sidebar.md" <<'EOF'
 - [[Home]]
 - [[BUILD_WINUI3]]
+- [[BUILD_CHAOS_FLUTTER]]
 - [[FFI_API]]
 - [[FFI_CSharp]]
 - [[FFI_BUILD]]
