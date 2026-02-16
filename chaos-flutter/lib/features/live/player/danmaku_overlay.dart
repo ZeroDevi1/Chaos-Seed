@@ -83,14 +83,30 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
     return Positioned.fill(
       top: widget.padding.top,
       bottom: widget.padding.bottom,
-      child: DanmakuScreen(
-        createdController: (c) {
-          _danmaku = c;
-          widget.onControllerReady(c);
-          // 初次 option 已通过 DanmakuScreen.option 传入，这里只做一次安全兜底更新。
-          _safeUpdateOption();
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
+          final screen = DanmakuScreen(
+            createdController: (dc) {
+              _danmaku = dc;
+              widget.onControllerReady(dc);
+              // 初次 option 已通过 DanmakuScreen.option 传入，这里只做一次安全兜底更新。
+              _safeUpdateOption();
+            },
+            option: widget.settings.toOption(),
+          );
+
+          if (!portrait) return screen;
+
+          // 竖屏状态下，把弹幕限制在画面的下半部分渲染（对齐 simple_live 的竖屏直播间体验）。
+          return Align(
+            alignment: Alignment.bottomCenter,
+            child: SizedBox(
+              height: c.maxHeight * 0.5,
+              child: ClipRect(child: screen),
+            ),
+          );
         },
-        option: widget.settings.toOption(),
       ),
     );
   }
