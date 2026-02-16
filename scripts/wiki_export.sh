@@ -54,6 +54,9 @@ copy "README.md" "Home.md"
 # Docs
 copy "docs/BUILD_WINUI3.md" "BUILD_WINUI3.md"
 copy "docs/BUILD_CHAOS_FLUTTER.md" "BUILD_CHAOS_FLUTTER.md"
+copy "docs/WINUI3_AUTO_UPDATE.md" "WINUI3_AUTO_UPDATE.md"
+copy "docs/LEGAL_MPV.md" "LEGAL_MPV.md"
+copy "docs/WIKI_SYNC.md" "WIKI_SYNC.md"
 
 # FFI docs (renamed for clearer Wiki page names)
 copy "chaos-ffi/docs/API.md" "FFI_API.md"
@@ -73,11 +76,14 @@ cat >"${out_dir}/_Sidebar.md" <<'EOF'
 - [[Home]]
 - [[BUILD_WINUI3]]
 - [[BUILD_CHAOS_FLUTTER]]
+- [[WINUI3_AUTO_UPDATE]]
+- [[LEGAL_MPV]]
 - [[FFI_API]]
 - [[FFI_CSharp]]
 - [[FFI_BUILD]]
 - [[Daemon_API]]
 - [[Daemon_CSharp]]
+- [[WIKI_SYNC]]
 - [[TODO]]
 - [[TODO_NEXT]]
 - [[DEVLOG]]

@@ -18,11 +18,14 @@
 | `README.md` | `Home.md` | `Home` |
 | `docs/BUILD_WINUI3.md` | `BUILD_WINUI3.md` | `BUILD_WINUI3` |
 | `docs/BUILD_CHAOS_FLUTTER.md` | `BUILD_CHAOS_FLUTTER.md` | `BUILD_CHAOS_FLUTTER` |
+| `docs/WINUI3_AUTO_UPDATE.md` | `WINUI3_AUTO_UPDATE.md` | `WINUI3_AUTO_UPDATE` |
+| `docs/LEGAL_MPV.md` | `LEGAL_MPV.md` | `LEGAL_MPV` |
 | `chaos-ffi/docs/API.md` | `FFI_API.md` | `FFI_API` |
 | `chaos-ffi/docs/CSharp.md` | `FFI_CSharp.md` | `FFI_CSharp` |
 | `chaos-ffi/docs/BUILD.md` | `FFI_BUILD.md` | `FFI_BUILD` |
 | `chaos-daemon/docs/API.md` | `Daemon_API.md` | `Daemon_API` |
 | `chaos-daemon/docs/CSharp.md` | `Daemon_CSharp.md` | `Daemon_CSharp` |
+| `docs/WIKI_SYNC.md` | `WIKI_SYNC.md` | `WIKI_SYNC` |
 | `TODO.md` | `TODO.md` | `TODO` |
 | `TODO_NEXT.md` | `TODO_NEXT.md` | `TODO_NEXT` |
 | `DEVLOG.md` | `DEVLOG.md` | `DEVLOG` |

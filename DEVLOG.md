@@ -152,7 +152,7 @@
   - 新增 music JSON API：`chaos_music_*`（config/search/login/download_blocking），并更新 `docs/API.md` / `docs/CSharp.md`。
 - WinUI 3：
   - 新增「歌曲」页：搜索（单曲/专辑/歌手）、扫码登录/刷新 Cookie、选择音质、下载队列与进度轮询/取消。
-  - 新增手动验收脚本：`docs/WinUI3_MusicPage_ManualTest.md`。
+  - 手动验收脚本：已移除（避免在仓库内维护重复文档）。
 
 ### 测试与回归
 - 新增 core 侧 music 相关单测（文件名 sanitize、QQ cookie 容错反序列化、QQ 签名等），以及 daemon RPC dispatch 相关测试。
