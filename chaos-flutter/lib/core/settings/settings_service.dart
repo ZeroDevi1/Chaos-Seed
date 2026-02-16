@@ -27,6 +27,16 @@ class SettingsService {
   Future<AppSettings> load() async {
     final sp = await SharedPreferences.getInstance();
     final d = AppSettings.defaults();
+    final rawTpl = sp.getString(_kMusicPathTemplate) ?? d.musicPathTemplate;
+    final normalizedTpl = _normalizePathTemplate(rawTpl);
+    // Migration: strip WinUI3/XAML escape prefix "{}" if present.
+    if (rawTpl != normalizedTpl) {
+      if (normalizedTpl == null || normalizedTpl.trim().isEmpty) {
+        await sp.remove(_kMusicPathTemplate);
+      } else {
+        await sp.setString(_kMusicPathTemplate, normalizedTpl);
+      }
+    }
     return AppSettings(
       themeMode: _parseThemeMode(sp.getString(_kThemeMode)) ?? d.themeMode,
       backdropMode: sp.getString(_kBackdropMode) ?? d.backdropMode,
@@ -48,8 +58,7 @@ class SettingsService {
       musicDownloadConcurrency:
           sp.getInt(_kMusicConcurrency) ?? d.musicDownloadConcurrency,
       musicDownloadRetries: sp.getInt(_kMusicRetries) ?? d.musicDownloadRetries,
-      musicPathTemplate:
-          sp.getString(_kMusicPathTemplate) ?? d.musicPathTemplate,
+      musicPathTemplate: normalizedTpl,
       qqMusicCookieJson: sp.getString(_kQqCookieJson) ?? d.qqMusicCookieJson,
       pipHideDanmu: sp.getBool(_kPipHideDanmu) ?? d.pipHideDanmu,
       danmuFontSize: sp.getDouble(_kDanmuFontSize) ?? d.danmuFontSize,
@@ -111,5 +120,17 @@ class SettingsService {
       if (v.name == raw) return v;
     }
     return null;
+  }
+
+  static String? _normalizePathTemplate(String? raw) {
+    final s = (raw ?? '').trim();
+    if (s.isEmpty) return null;
+    // WinUI3/XAML 中经常会用 "{}" 前缀来转义花括号（避免被解析成 MarkupExtension）。
+    // Flutter/Rust 不需要这个前缀，直接使用 "{{...}}" 即可。
+    if (s.startsWith('{}')) {
+      final t = s.substring(2).trim();
+      return t.isEmpty ? null : t;
+    }
+    return s;
   }
 }

@@ -88,8 +88,9 @@ class AppSettings {
       neteaseAnonymousCookieUrl: '/register/anonimous',
       musicDownloadConcurrency: 3,
       musicDownloadRetries: 2,
-      musicPathTemplate:
-          '{}{{artist}}/{{album}}/{{title}} - {{artist}}.{{ext}}',
+      // 注意：WinUI3 的 XAML 里常用前缀 "{}" 来转义花括号（避免被当成 MarkupExtension）。
+      // Flutter/Rust 模板不需要该转义，因此这里不要带 "{}"。
+      musicPathTemplate: '{{artist}}/{{album}}/{{title}} - {{artist}}.{{ext}}',
       qqMusicCookieJson: null,
       pipHideDanmu: true,
       danmuFontSize: 18,

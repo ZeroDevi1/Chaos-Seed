@@ -4,10 +4,12 @@ import 'dart:io';
 
 import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 import '../../core/backend/chaos_backend.dart';
 import '../../core/backend/ffi_backend.dart';
+import '../../core/models/lyrics.dart';
 import '../../core/models/music.dart';
 import '../../core/settings/settings_controller.dart';
 import '../widgets/material_error_card.dart';
@@ -118,9 +120,7 @@ class _MusicPageState extends State<MusicPage> {
               (t.qualities.isNotEmpty ? t.qualities.first.id : 'standard'),
           outDir: outDir,
           pathTemplate:
-              (settings.settings.musicPathTemplate ?? '').trim().isEmpty
-                  ? null
-                  : settings.settings.musicPathTemplate,
+              _sanitizePathTemplate(settings.settings.musicPathTemplate),
           overwrite: false,
           concurrency: settings.settings.musicDownloadConcurrency,
           retries: settings.settings.musicDownloadRetries,
@@ -128,6 +128,8 @@ class _MusicPageState extends State<MusicPage> {
       );
 
       final res = await widget.backend.downloadStart(params);
+      // 下载完成后确保歌词也落盘（.lrc）。Rust 侧已做 best-effort，这里再做一次兜底重试。
+      unawaited(_ensureLyricsForSingleTrack(sessionId: res.sessionId, track: t));
       if (!mounted) return;
       final msg = '下载开始: sessionId=${res.sessionId}';
       if (Platform.isWindows) {
@@ -154,6 +156,90 @@ class _MusicPageState extends State<MusicPage> {
     } finally {
       if (!mounted) return;
       setState(() => _loading = false);
+    }
+  }
+
+  static String? _sanitizePathTemplate(String? raw) {
+    final s = (raw ?? '').trim();
+    if (s.isEmpty) return null;
+    // WinUI3/XAML 常用 "{}" 前缀转义花括号；Flutter/Rust 不需要。
+    if (s.startsWith('{}')) return s.substring(2).trim();
+    return s;
+  }
+
+  Future<void> _ensureLyricsForSingleTrack({
+    required String sessionId,
+    required MusicTrack track,
+  }) async {
+    // 仅在后台执行，不影响 UI 主流程。
+    // 目标：找到下载产物的音频文件路径，然后写入同名 .lrc。
+    try {
+      final deadline = DateTime.now().add(const Duration(minutes: 10));
+      MusicDownloadStatus? last;
+      while (DateTime.now().isBefore(deadline)) {
+        await Future.delayed(const Duration(seconds: 1));
+        try {
+          last = await widget.backend.downloadStatus(sessionId);
+        } catch (_) {
+          continue;
+        }
+        if (last.done) break;
+      }
+      if (last == null) return;
+
+      String? audioPath;
+      for (final j in last.jobs) {
+        final state = (j['state'] as String?) ?? '';
+        final path = (j['path'] as String?) ?? '';
+        if (path.trim().isEmpty) continue;
+        if (state.toLowerCase() == 'done') {
+          audioPath = path;
+          break;
+        }
+      }
+      if (audioPath == null) return;
+
+      final lrcPath = p.setExtension(audioPath, '.lrc');
+      if (await File(lrcPath).exists()) return;
+
+      final title = track.title.trim();
+      if (title.isEmpty) return;
+      final artist = track.artists.join(' / ').trim().isEmpty
+          ? null
+          : track.artists.join(' / ').trim();
+
+      final items = await widget.backend.lyricsSearch(LyricsSearchParams(
+        title: title,
+        album: (track.album ?? '').trim().isEmpty ? null : track.album!.trim(),
+        artist: artist,
+        durationMs: track.durationMs ?? 0,
+        limit: 5,
+        strictMatch: false,
+        services: const ['qq', 'netease', 'lrclib'],
+        timeoutMs: 8000,
+      ));
+
+      final picked = items
+          .where((e) => e.lyricsOriginal.trim().isNotEmpty)
+          .toList(growable: false);
+      if (picked.isEmpty) return;
+      final best = [...picked]
+        ..sort((a, b) {
+          final q = b.quality.compareTo(a.quality);
+          if (q != 0) return q;
+          return b.matchPercentage.compareTo(a.matchPercentage);
+        });
+      final top = best.first;
+
+      var content = top.lyricsOriginal;
+      final tr = (top.lyricsTranslation ?? '').trim();
+      if (tr.isNotEmpty) {
+        content = '$content\n\n$tr';
+      }
+
+      await File(lrcPath).writeAsString(content, flush: true);
+    } catch (_) {
+      // ignore: lyrics is best-effort
     }
   }
 
