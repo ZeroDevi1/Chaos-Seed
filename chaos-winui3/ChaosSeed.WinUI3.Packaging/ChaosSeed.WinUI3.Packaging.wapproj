@@ -42,7 +42,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ChaosSeed.WinUI3\ChaosSeed.WinUI3.csproj" />
+    <!-- Packaging project is .NET Framework; the WinUI3 app is net8. This reference is for packaging/entrypoint,
+         not for compile-time assembly reference. Mark as non-assembly reference to avoid TF incompat checks. -->
+    <ProjectReference Include="..\ChaosSeed.WinUI3\ChaosSeed.WinUI3.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Import
