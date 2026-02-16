@@ -5,10 +5,14 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
+static bool NoUi;
+
 static int Main(string[] args)
 {
+    NoUi = EnvFlagEnabled("CHAOS_UPDATER_NO_UI") || HasFlag(args, "--no-ui");
+
     var logAppName = Options.PeekAppNameOrDefault(args);
-    var logPath = GetLogPath(logAppName);
+    var logPath = GetLogPath(logAppName, args);
     Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
     using var log = new StreamWriter(new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
     {
@@ -301,7 +305,7 @@ static void TryDeleteDir(string dir)
     }
 }
 
-static string GetLogPath(string appName)
+static string GetLogPath(string appName, string[] args)
 {
     var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     if (string.IsNullOrWhiteSpace(root))
@@ -309,8 +313,46 @@ static string GetLogPath(string appName)
         root = Path.GetTempPath();
     }
 
+    // Allow overriding log location for diagnostics/CI.
+    // - CHAOS_UPDATER_LOG_DIR: directory to place updater logs under
+    // - CHAOS_UPDATER_LOG_PATH: full path to the log file to write
+    // - --log-dir <dir>: same as env var
+    // - --log-path <path>: same as env var
+    var logPathOverride = (Environment.GetEnvironmentVariable("CHAOS_UPDATER_LOG_PATH") ?? "").Trim();
+    var logDirOverride = (Environment.GetEnvironmentVariable("CHAOS_UPDATER_LOG_DIR") ?? "").Trim();
+
+    var fromArgsLogPath = PeekArg(args, "--log-path");
+    if (!string.IsNullOrWhiteSpace(fromArgsLogPath))
+    {
+        logPathOverride = fromArgsLogPath.Trim();
+    }
+    var fromArgsLogDir = PeekArg(args, "--log-dir");
+    if (!string.IsNullOrWhiteSpace(fromArgsLogDir))
+    {
+        logDirOverride = fromArgsLogDir.Trim();
+    }
+
+    if (!string.IsNullOrWhiteSpace(logPathOverride))
+    {
+        try
+        {
+            var dir0 = Path.GetDirectoryName(logPathOverride);
+            if (!string.IsNullOrWhiteSpace(dir0))
+            {
+                Directory.CreateDirectory(dir0);
+            }
+            return logPathOverride;
+        }
+        catch
+        {
+            // fall through to default
+        }
+    }
+
     var safe = string.IsNullOrWhiteSpace(appName) ? "ChaosSeed.WinUI3" : appName.Trim();
-    var dir = Path.Combine(root, safe, "logs");
+    var dir = !string.IsNullOrWhiteSpace(logDirOverride)
+        ? logDirOverride
+        : Path.Combine(root, safe, "logs");
     return Path.Combine(dir, $"updater-{DateTime.Now:yyyyMMdd-HHmmss}.log");
 }
 
@@ -333,6 +375,45 @@ static string SanitizeMutexComponent(string s)
         }
     }
     return b.Length == 0 ? "default" : b.ToString();
+}
+
+static bool EnvFlagEnabled(string name)
+{
+    var v = (Environment.GetEnvironmentVariable(name) ?? "").Trim();
+    if (string.IsNullOrWhiteSpace(v)) return false;
+    return string.Equals(v, "1", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(v, "true", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(v, "yes", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(v, "on", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool HasFlag(string[] args, string flag)
+{
+    for (var i = 0; i < args.Length; i++)
+    {
+        if (string.Equals(args[i], flag, StringComparison.Ordinal))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static string? PeekArg(string[] args, string key)
+{
+    for (var i = 0; i < args.Length; i++)
+    {
+        if (!string.Equals(args[i], key, StringComparison.Ordinal))
+        {
+            continue;
+        }
+        if (i + 1 < args.Length)
+        {
+            return args[i + 1];
+        }
+        return null;
+    }
+    return null;
 }
 
 static void TryCleanupPendingUpdates(string appName, string keepVersion, Action<string> info)
@@ -369,6 +450,10 @@ static void TryCleanupPendingUpdates(string appName, string keepVersion, Action<
 
 static void TryShowError(string msg)
 {
+    if (NoUi)
+    {
+        return;
+    }
     try
     {
         _ = MessageBoxW(IntPtr.Zero, msg, "ChaosSeed Updater", 0x00000010 /* MB_ICONERROR */);

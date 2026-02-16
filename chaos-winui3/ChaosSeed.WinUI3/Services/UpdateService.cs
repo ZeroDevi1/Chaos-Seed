@@ -238,6 +238,15 @@ public sealed class UpdateService
             return;
         }
 
+        // If the updater files exist but are corrupted/incorrect (e.g. replaced by a stub after a failed update),
+        // fall back to the PowerShell updater so users can still recover.
+        if (!UpdaterLooksHealthy(updaterDll))
+        {
+            ApplyViaPowerShellFallback(pending, appDir, pid);
+            Environment.Exit(0);
+            return;
+        }
+
         var args = new StringBuilder();
         args.Append("--app-dir ").Append(Quote(appDir)).Append(' ');
         args.Append("--zip ").Append(Quote(pending.ZipPath)).Append(' ');
@@ -604,6 +613,59 @@ if (Test-Path $exePath) {
             s = s.Replace("\"", "\"\"");
         }
         return $"\"{s}\"";
+    }
+
+    private static bool UpdaterLooksHealthy(string updaterDllPath)
+    {
+        try
+        {
+            var fi = new FileInfo(updaterDllPath);
+            if (!fi.Exists || fi.Length < 8 * 1024)
+            {
+                return false;
+            }
+
+            // Check for a stable string in the updater's IL (UTF-16LE in metadata).
+            var bytes = File.ReadAllBytes(updaterDllPath);
+            return ContainsUtf16Le(bytes, "Usage: ChaosSeed.Updater");
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ContainsUtf16Le(byte[] haystack, string needle)
+    {
+        if (haystack.Length == 0 || string.IsNullOrEmpty(needle))
+        {
+            return false;
+        }
+
+        var n = Encoding.Unicode.GetBytes(needle);
+        if (n.Length == 0 || n.Length > haystack.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i <= haystack.Length - n.Length; i++)
+        {
+            var ok = true;
+            for (var j = 0; j < n.Length; j++)
+            {
+                if (haystack[i + j] != n[j])
+                {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
