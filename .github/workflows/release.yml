@@ -121,6 +121,44 @@ jobs:
           }
           if (!$outDir) { throw "failed to locate WinUI3 output directory (missing ChaosSeed.WinUI3.exe)" }
 
+          function Ensure-UpdaterRuntimeFiles([string]$outDir) {
+            $need = @(
+              "ChaosSeed.Updater.dll",
+              "ChaosSeed.Updater.deps.json",
+              "ChaosSeed.Updater.runtimeconfig.json"
+            )
+
+            $missing = @()
+            foreach ($n in $need) {
+              if (!(Test-Path (Join-Path $outDir $n))) { $missing += $n }
+            }
+            if ($missing.Count -eq 0) { return }
+
+            # In some CI/build layouts the updater outputs end up under a RID folder (win-x64) or aren't copied
+            # into the WinUI3 output directory automatically. We locate the freshest build outputs and copy them.
+            $searchRoots = @(
+              "chaos-winui3/ChaosSeed.Updater/bin",
+              "chaos-winui3/ChaosSeed.WinUI3/bin"
+            )
+
+            foreach ($n in $missing) {
+              $src = $null
+              foreach ($root in $searchRoots) {
+                if (!(Test-Path $root)) { continue }
+                $probe = Get-ChildItem -Recurse -ErrorAction SilentlyContinue -Path $root -Filter $n |
+                  Sort-Object LastWriteTime -Descending |
+                  Select-Object -First 1
+                if ($probe) { $src = $probe.FullName; break }
+              }
+              if (!$src) {
+                throw "missing $n in output dir: $outDir (also not found under: $($searchRoots -join ', '))"
+              }
+              Copy-Item -Force -Path $src -Destination (Join-Path $outDir $n)
+            }
+          }
+
+          Ensure-UpdaterRuntimeFiles $outDir
+
           # Sanity-check key runtime dependencies expected by FFI/daemon playback.
           if (!(Test-Path (Join-Path $outDir "chaos-daemon.exe"))) { throw "missing chaos-daemon.exe in output dir: $outDir" }
           if (!(Test-Path (Join-Path $outDir "chaos_ffi.dll"))) { throw "missing chaos_ffi.dll in output dir: $outDir" }

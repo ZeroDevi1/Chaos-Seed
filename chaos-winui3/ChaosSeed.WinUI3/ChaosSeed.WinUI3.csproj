@@ -45,6 +45,8 @@
 
     <UpdaterProjectDir>$(MSBuildProjectDirectory)\..\ChaosSeed.Updater</UpdaterProjectDir>
     <UpdaterOutDir>$(UpdaterProjectDir)\bin\x64\$(Configuration)\net8.0-windows\</UpdaterOutDir>
+    <!-- Some builds output under a RID folder (e.g. net8.0-windows\win-x64\). -->
+    <UpdaterOutDirRid>$(UpdaterOutDir)win-x64\</UpdaterOutDirRid>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -77,6 +79,7 @@
   <Target Name="CopyUpdaterToOutput" AfterTargets="Build">
     <ItemGroup>
       <UpdaterFiles Include="$(UpdaterOutDir)\*.*" />
+      <UpdaterFiles Include="$(UpdaterOutDirRid)\*.*" Condition="Exists('$(UpdaterOutDirRid)')" />
     </ItemGroup>
     <Message Importance="high" Text="Copying updater from $(UpdaterOutDir) to $(OutDir)" Condition="@(UpdaterFiles) != ''" />
     <Copy SourceFiles="@(UpdaterFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="@(UpdaterFiles) != ''" />
