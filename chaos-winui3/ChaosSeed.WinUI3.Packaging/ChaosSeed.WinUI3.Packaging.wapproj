@@ -14,6 +14,10 @@
     <Configurations>Debug;Release</Configurations>
     <Platforms>x64</Platforms>
 
+    <!-- Without an explicit TargetFrameworkVersion, MSBuild can default to v4.0 which is not present on
+         GitHub-hosted runners (causing MSB3644). WinUI3 packaging projects are compatible with .NET 4.8. -->
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+
     <!-- When building this .wapproj directly (without a .sln), MSBuild requires OutputPath/BaseOutputPath. -->
     <BaseOutputPath>bin\</BaseOutputPath>
     <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
