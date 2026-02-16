@@ -108,3 +108,10 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
+
+configurations.all {
+    resolutionStrategy {
+        // 强制所有模块使用 5.15.0，防止传递依赖引入旧版本
+        force("net.java.dev.jna:jna:5.15.0")
+    }
+}
