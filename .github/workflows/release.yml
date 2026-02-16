@@ -76,15 +76,6 @@ jobs:
       - name: Setup MSBuild (VS)
         uses: microsoft/setup-msbuild@v2
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Enable Corepack (pnpm)
-        shell: pwsh
-        run: corepack enable
-
       - name: Build WinUI3 + daemon + ffi (release)
         shell: pwsh
         env:
@@ -189,55 +180,6 @@ jobs:
             dist/chaos-winui3-windows-x86_64.zip `
             dist/chaos-winui3-windows-x86_64.zip.sha256 `
             --clobber
-
-      - name: Install frontend deps
-        shell: pwsh
-        run: pnpm -C chaos-tauri install --frozen-lockfile
-
-      - name: Build chaos-tauri (no-bundle)
-        shell: pwsh
-        run: pnpm -C chaos-tauri run tauri:build:nobundle
-
-      - name: Package chaos-tauri
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-
-          # Cargo uses the workspace root `target/` by default (even when building from subdirectories),
-          # so we probe both the workspace and crate-local target paths.
-          $bundleCandidates = @(
-            (Join-Path "target/release" "bundle"),
-            (Join-Path "chaos-tauri/src-tauri/target/release" "bundle")
-          )
-          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if ($bundleDir) {
-            Compress-Archive -Force -Path $bundleDir -DestinationPath dist/chaos-tauri-windows-x86_64.zip
-            exit 0
-          }
-
-          $exeCandidates = @(
-            (Join-Path "target/release" "chaos-tauri.exe"),
-            (Join-Path "chaos-tauri/src-tauri/target/release" "chaos-tauri.exe")
-          )
-          $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (!$exePath) {
-            $exe = Get-ChildItem -Recurse -ErrorAction SilentlyContinue -Path "target/release","chaos-tauri/src-tauri/target/release" -Filter "*.exe" | Select-Object -First 1
-            if ($null -ne $exe) { $exePath = $exe.FullName }
-          }
-          if (!$exePath) {
-            throw "no exe found under target/release or chaos-tauri/src-tauri/target/release"
-          }
-
-          Compress-Archive -Force -Path $exePath -DestinationPath dist/chaos-tauri-windows-x86_64.zip
-
-      - name: Upload Release Assets (zip - tauri)
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          gh release upload "${{ github.ref_name }}" dist/chaos-tauri-windows-x86_64.zip --clobber
 
       # Keep MSIX work last so zip assets still upload even if MSIX packaging fails.
       - name: Build MSIX (WinUI3 Packaging)
@@ -400,12 +342,26 @@ jobs:
         with:
           files: dist/chaos-ffi-macos-universal2.tar.gz
 
-  ffi_android:
+  android:
     needs: create_release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
 
       - name: Setup Rust (1.93.0)
         uses: dtolnay/rust-toolchain@stable
@@ -459,6 +415,51 @@ jobs:
           mkpkg "x86_64" "target/x86_64-linux-android/release/libchaos_ffi.so"
           mkpkg "armeabi-v7a" "target/armv7-linux-androideabi/release/libchaos_ffi.so"
 
+      - name: Copy chaos-ffi into Android app jniLibs
+        run: |
+          set -euo pipefail
+          out="chaos-android/app/src/main/jniLibs"
+          mkdir -p "$out/arm64-v8a" "$out/x86_64" "$out/armeabi-v7a"
+          cp -f target/aarch64-linux-android/release/libchaos_ffi.so "$out/arm64-v8a/libchaos_ffi.so"
+          cp -f target/x86_64-linux-android/release/libchaos_ffi.so "$out/x86_64/libchaos_ffi.so"
+          cp -f target/armv7-linux-androideabi/release/libchaos_ffi.so "$out/armeabi-v7a/libchaos_ffi.so"
+
+      - name: Build chaos-android (release APK)
+        run: |
+          set -euo pipefail
+          cd chaos-android
+          chmod +x ./gradlew
+          ./gradlew :app:assembleRelease --no-daemon
+
+          mkdir -p ../dist
+          apk="$(ls -1 app/build/outputs/apk/release/*.apk 2>/dev/null | head -n 1 || true)"
+          if [ -z "$apk" ]; then
+            echo "ERROR: release APK not found under chaos-android/app/build/outputs/apk/release/" >&2
+            exit 1
+          fi
+          cp -f "$apk" ../dist/chaos-android-release.apk
+
+      - name: Copy chaos-ffi into chaos-flutter jniLibs
+        run: |
+          set -euo pipefail
+          out="chaos-flutter/android/app/src/main/jniLibs"
+          mkdir -p "$out/arm64-v8a" "$out/x86_64" "$out/armeabi-v7a"
+          cp -f target/aarch64-linux-android/release/libchaos_ffi.so "$out/arm64-v8a/libchaos_ffi.so"
+          cp -f target/x86_64-linux-android/release/libchaos_ffi.so "$out/x86_64/libchaos_ffi.so"
+          cp -f target/armv7-linux-androideabi/release/libchaos_ffi.so "$out/armeabi-v7a/libchaos_ffi.so"
+
+      - name: Build chaos-flutter (Android release APK)
+        run: |
+          set -euo pipefail
+          cd chaos-flutter
+          flutter pub get
+          flutter build apk --release
+
+          mkdir -p ../dist
+          apk="build/app/outputs/flutter-apk/app-release.apk"
+          test -f "$apk"
+          cp -f "$apk" ../dist/chaos-flutter-android-release.apk
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
@@ -466,3 +467,5 @@ jobs:
             dist/chaos-ffi-android-arm64-v8a.tar.gz
             dist/chaos-ffi-android-x86_64.tar.gz
             dist/chaos-ffi-android-armeabi-v7a.tar.gz
+            dist/chaos-android-release.apk
+            dist/chaos-flutter-android-release.apk
