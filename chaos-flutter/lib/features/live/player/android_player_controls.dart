@@ -236,93 +236,112 @@ class _AndroidPlayerControlsState extends State<AndroidPlayerControls> {
           right: padding.right + 12,
           bottom: padding.bottom,
         ),
-        child: Row(
-          children: [
-            IconButton(
-              onPressed: () async {
-                widget.controller.resetHideTimer();
-                if (widget.player.state.playing) {
-                  await widget.player.pause();
-                } else {
-                  await widget.player.play();
-                }
-              },
-              icon: Icon(
-                widget.player.state.playing ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
-              ),
-            ),
-            IconButton(
-              onPressed: () async {
-                widget.controller.resetHideTimer();
-                await widget.onToggleMute();
-              },
-              icon: Icon(
-                widget.muted ? Icons.volume_off : Icons.volume_up,
-                color: Colors.white,
-              ),
-            ),
-            IconButton(
-              onPressed: () {
-                widget.controller.resetHideTimer();
-                widget.onToggleDanmaku();
-              },
-              icon: ImageIcon(
-                AssetImage(
-                  // same as simple_live: off -> open icon; on -> close icon
-                  widget.danmakuEnabled
-                      ? 'assets/icons/icon_danmaku_close.png'
-                      : 'assets/icons/icon_danmaku_open.png',
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final isPortrait =
+                MediaQuery.orientationOf(context) == Orientation.portrait;
+            final compact = isPortrait || c.maxWidth < 420;
+
+            return Row(
+              children: [
+                IconButton(
+                  onPressed: () async {
+                    widget.controller.resetHideTimer();
+                    if (widget.player.state.playing) {
+                      await widget.player.pause();
+                    } else {
+                      await widget.player.play();
+                    }
+                  },
+                  icon: Icon(
+                    widget.player.state.playing ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white,
+                  ),
                 ),
-                size: 24,
-                color: Colors.white,
-              ),
-            ),
-            IconButton(
-              onPressed: () {
-                widget.controller.resetHideTimer();
-                widget.onShowDanmakuSettings();
-              },
-              icon: const ImageIcon(
-                AssetImage('assets/icons/icon_danmaku_setting.png'),
-                size: 24,
-                color: Colors.white,
-              ),
-            ),
-            const Expanded(child: Center()),
-            TextButton(
-              onPressed: () async {
-                widget.controller.resetHideTimer();
-                await widget.onShowPlaySourceSheet();
-              },
-              child: Text(
-                qualityLabel,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
-              ),
-            ),
-            TextButton(
-              onPressed: () async {
-                widget.controller.resetHideTimer();
-                await widget.onShowPlaySourceSheet();
-              },
-              child: Text(
-                lineLabel,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
-              ),
-            ),
-            IconButton(
-              onPressed: () {
-                widget.controller.resetHideTimer();
-                widget.onToggleFullScreen();
-              },
-              icon: Icon(
-                widget.controller.fullScreen
-                    ? Icons.fullscreen_exit
-                    : Icons.fullscreen,
-                color: Colors.white,
-              ),
-            ),
-          ],
+                IconButton(
+                  onPressed: () async {
+                    widget.controller.resetHideTimer();
+                    await widget.onToggleMute();
+                  },
+                  icon: Icon(
+                    widget.muted ? Icons.volume_off : Icons.volume_up,
+                    color: Colors.white,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () {
+                    widget.controller.resetHideTimer();
+                    widget.onToggleDanmaku();
+                  },
+                  icon: ImageIcon(
+                    AssetImage(
+                      // same as simple_live: off -> open icon; on -> close icon
+                      widget.danmakuEnabled
+                          ? 'assets/icons/icon_danmaku_close.png'
+                          : 'assets/icons/icon_danmaku_open.png',
+                    ),
+                    size: 24,
+                    color: Colors.white,
+                  ),
+                ),
+                IconButton(
+                  onPressed: () {
+                    widget.controller.resetHideTimer();
+                    widget.onShowDanmakuSettings();
+                  },
+                  icon: const ImageIcon(
+                    AssetImage('assets/icons/icon_danmaku_setting.png'),
+                    size: 24,
+                    color: Colors.white,
+                  ),
+                ),
+                const Spacer(),
+                if (compact)
+                  IconButton(
+                    tooltip: '清晰度/线路',
+                    onPressed: () async {
+                      widget.controller.resetHideTimer();
+                      await widget.onShowPlaySourceSheet();
+                    },
+                    icon: const Icon(Icons.hd, color: Colors.white),
+                  )
+                else ...[
+                  TextButton(
+                    onPressed: () async {
+                      widget.controller.resetHideTimer();
+                      await widget.onShowPlaySourceSheet();
+                    },
+                    child: Text(
+                      qualityLabel,
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      widget.controller.resetHideTimer();
+                      await widget.onShowPlaySourceSheet();
+                    },
+                    child: Text(
+                      lineLabel,
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    ),
+                  ),
+                ],
+                IconButton(
+                  onPressed: () {
+                    widget.controller.resetHideTimer();
+                    widget.onToggleFullScreen();
+                  },
+                  icon: Icon(
+                    widget.controller.fullScreen
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );

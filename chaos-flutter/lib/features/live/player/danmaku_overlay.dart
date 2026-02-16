@@ -53,11 +53,26 @@ class DanmakuOverlay extends StatefulWidget {
 class _DanmakuOverlayState extends State<DanmakuOverlay> {
   DanmakuController? _danmaku;
 
+  void _safeUpdateOption() {
+    final c = _danmaku;
+    if (c == null) return;
+    // canvas_danmaku 的 DanmakuScreen 会在 initState 早期触发 createdController，
+    // 此时内部 AnimationController 可能尚未初始化；直接 updateOption 会抛 LateInitializationError。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        c.updateOption(widget.settings.toOption());
+      } catch (_) {
+        // ignore: best-effort update
+      }
+    });
+  }
+
   @override
   void didUpdateWidget(covariant DanmakuOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_danmaku != null && oldWidget.settings != widget.settings) {
-      _danmaku!.updateOption(widget.settings.toOption());
+      _safeUpdateOption();
     }
   }
 
@@ -71,12 +86,12 @@ class _DanmakuOverlayState extends State<DanmakuOverlay> {
       child: DanmakuScreen(
         createdController: (c) {
           _danmaku = c;
-          c.updateOption(widget.settings.toOption());
           widget.onControllerReady(c);
+          // 初次 option 已通过 DanmakuScreen.option 传入，这里只做一次安全兜底更新。
+          _safeUpdateOption();
         },
         option: widget.settings.toOption(),
       ),
     );
   }
 }
-
