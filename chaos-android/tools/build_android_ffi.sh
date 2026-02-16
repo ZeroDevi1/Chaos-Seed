@@ -67,6 +67,9 @@ if ! cargo ndk --version >/dev/null 2>&1; then
   exit 1
 fi
 
+# Keep original flags so we don't append duplicates per-ABI.
+ORIG_RUSTFLAGS="${RUSTFLAGS:-}"
+
 # Ensure the Rust std for Android target is installed for the active toolchain
 # (this repo pins toolchain via rust-toolchain.toml).
 TOOLCHAIN="$(rustup show active-toolchain 2>/dev/null | awk '{print $1}')"
@@ -83,6 +86,13 @@ for ABI in "${TARGETS[@]}"; do
   fi
 
   echo "==> Building chaos-ffi for ABI=$ABI profile=$PROFILE"
+  
+  # ==============================
+  # [新增] 强制设置链接器参数以支持 16KB Page Size
+  # ==============================
+  # -C link-arg=-Wl,-z,max-page-size=16384 : 告诉链接器将最大页大小设为 16KB
+  export RUSTFLAGS="${ORIG_RUSTFLAGS} -C link-arg=-Wl,-z,max-page-size=16384"
+
   if [ "$PROFILE" = "release" ]; then
     cargo ndk -t "$ABI" -o "$OUT_DIR" build -p chaos-ffi --release
   else
@@ -92,4 +102,3 @@ done
 
 echo "==> Done. Output under: $OUT_DIR"
 echo "    e.g. $OUT_DIR/arm64-v8a/libchaos_ffi.so"
-

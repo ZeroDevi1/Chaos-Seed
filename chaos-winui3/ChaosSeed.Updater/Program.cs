@@ -5,6 +5,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
+internal static class Program
+{
 static bool NoUi;
 
 static int Main(string[] args)
@@ -466,6 +468,8 @@ static void TryShowError(string msg)
 
 [DllImport("user32.dll", CharSet = CharSet.Unicode)]
 static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+}
 
 sealed class Options
 {
