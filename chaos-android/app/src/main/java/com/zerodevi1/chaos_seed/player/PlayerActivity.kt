@@ -30,10 +30,12 @@ class PlayerActivity : ComponentActivity(), PlayerSessionController {
     private val vm: PlayerViewModel by viewModels()
 
     private var pipMode by mutableStateOf(false)
+    private var lastOrientation: Int = Configuration.ORIENTATION_UNDEFINED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        lastOrientation = resources.configuration.orientation
 
         PlayerSessionRegistry.register(this)
 
@@ -76,6 +78,15 @@ class PlayerActivity : ComponentActivity(), PlayerSessionController {
                 )
             }
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        if (newConfig.orientation != lastOrientation) {
+            // Detach ASAP so mpv stops queueing buffers to the old Surface/BufferQueue during rotation.
+            vm.detachSurface()
+            lastOrientation = newConfig.orientation
+        }
+        super.onConfigurationChanged(newConfig)
     }
 
     override fun onDestroy() {

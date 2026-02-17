@@ -4,6 +4,7 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -18,6 +19,10 @@ fun PlayerSurface(
     val ctx = LocalContext.current
     val onReady = rememberUpdatedState(onSurfaceReady)
     val onDestroyed = rememberUpdatedState(onSurfaceDestroyed)
+
+    DisposableEffect(Unit) {
+        onDispose { onDestroyed.value() }
+    }
 
     AndroidView(
         modifier = modifier,
@@ -47,4 +52,3 @@ fun PlayerSurface(
         },
     )
 }
-

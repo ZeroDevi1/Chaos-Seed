@@ -11,6 +11,7 @@ import '../../core/backend/chaos_backend.dart';
 import '../../core/backend/ffi_backend.dart';
 import '../../core/models/lyrics.dart';
 import '../../core/models/music.dart';
+import '../../core/platform/android_bridge.dart';
 import '../../core/settings/settings_controller.dart';
 import '../widgets/material_error_card.dart';
 import 'qq_login_dialog.dart';
@@ -129,7 +130,11 @@ class _MusicPageState extends State<MusicPage> {
 
       final res = await widget.backend.downloadStart(params);
       // 下载完成后确保歌词也落盘（.lrc）。Rust 侧已做 best-effort，这里再做一次兜底重试。
-      unawaited(_ensureLyricsForSingleTrack(sessionId: res.sessionId, track: t));
+      unawaited(_ensureLyricsForSingleTrack(
+        sessionId: res.sessionId,
+        track: t,
+        outDir: outDir,
+      ));
       if (!mounted) return;
       final msg = '下载开始: sessionId=${res.sessionId}';
       if (Platform.isWindows) {
@@ -170,6 +175,7 @@ class _MusicPageState extends State<MusicPage> {
   Future<void> _ensureLyricsForSingleTrack({
     required String sessionId,
     required MusicTrack track,
+    required String outDir,
   }) async {
     // 仅在后台执行，不影响 UI 主流程。
     // 目标：找到下载产物的音频文件路径，然后写入同名 .lrc。
@@ -200,44 +206,82 @@ class _MusicPageState extends State<MusicPage> {
       if (audioPath == null) return;
 
       final lrcPath = p.setExtension(audioPath, '.lrc');
-      if (await File(lrcPath).exists()) return;
+      if (!await File(lrcPath).exists()) {
+        try {
+          final title = track.title.trim();
+          if (title.isNotEmpty) {
+            final artist = track.artists.join(' / ').trim().isEmpty
+                ? null
+                : track.artists.join(' / ').trim();
 
-      final title = track.title.trim();
-      if (title.isEmpty) return;
-      final artist = track.artists.join(' / ').trim().isEmpty
-          ? null
-          : track.artists.join(' / ').trim();
+            final items = await widget.backend.lyricsSearch(LyricsSearchParams(
+              title: title,
+              album: (track.album ?? '').trim().isEmpty
+                  ? null
+                  : track.album!.trim(),
+              artist: artist,
+              durationMs: track.durationMs ?? 0,
+              limit: 5,
+              strictMatch: false,
+              services: const ['qq', 'netease', 'lrclib'],
+              timeoutMs: 8000,
+            ));
 
-      final items = await widget.backend.lyricsSearch(LyricsSearchParams(
-        title: title,
-        album: (track.album ?? '').trim().isEmpty ? null : track.album!.trim(),
-        artist: artist,
-        durationMs: track.durationMs ?? 0,
-        limit: 5,
-        strictMatch: false,
-        services: const ['qq', 'netease', 'lrclib'],
-        timeoutMs: 8000,
-      ));
+            final picked = items
+                .where((e) => e.lyricsOriginal.trim().isNotEmpty)
+                .toList(growable: false);
+            if (picked.isNotEmpty) {
+              final best = [...picked]
+                ..sort((a, b) {
+                  final q = b.quality.compareTo(a.quality);
+                  if (q != 0) return q;
+                  return b.matchPercentage.compareTo(a.matchPercentage);
+                });
+              final top = best.first;
 
-      final picked = items
-          .where((e) => e.lyricsOriginal.trim().isNotEmpty)
-          .toList(growable: false);
-      if (picked.isEmpty) return;
-      final best = [...picked]
-        ..sort((a, b) {
-          final q = b.quality.compareTo(a.quality);
-          if (q != 0) return q;
-          return b.matchPercentage.compareTo(a.matchPercentage);
-        });
-      final top = best.first;
+              var content = top.lyricsOriginal;
+              final tr = (top.lyricsTranslation ?? '').trim();
+              if (tr.isNotEmpty) {
+                content = '$content\n\n$tr';
+              }
 
-      var content = top.lyricsOriginal;
-      final tr = (top.lyricsTranslation ?? '').trim();
-      if (tr.isNotEmpty) {
-        content = '$content\n\n$tr';
+              await File(lrcPath).writeAsString(content, flush: true);
+            }
+          }
+        } catch (_) {
+          // ignore
+        }
       }
 
-      await File(lrcPath).writeAsString(content, flush: true);
+      // Android 10+ Scoped Storage: the downloader may fall back to app-scoped dir.
+      // Export into public Downloads/ChaosSeed via MediaStore so the user can find it.
+      if (Platform.isAndroid) {
+        final public = await AndroidBridge.getPublicDownloadsDir();
+        final publicChaosSeed =
+            (public == null || public.trim().isEmpty) ? null : p.join(public, 'ChaosSeed');
+        final alreadyPublic = publicChaosSeed != null &&
+            (p.equals(p.normalize(outDir), p.normalize(publicChaosSeed)) ||
+                p.isWithin(p.normalize(publicChaosSeed), p.normalize(audioPath)));
+        if (alreadyPublic) return;
+
+        final exported = await AndroidBridge.exportIntoDownloads(
+          outDir: outDir,
+          sourcePath: audioPath,
+          overwrite: false,
+        );
+        final exportedLrc = (await File(lrcPath).exists())
+            ? await AndroidBridge.exportIntoDownloads(
+                outDir: outDir,
+                sourcePath: lrcPath,
+                overwrite: false,
+              )
+            : null;
+        final msg = exported?.displayPath ?? exportedLrc?.displayPath;
+        if (msg != null && mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('已保存到：$msg')));
+        }
+      }
     } catch (_) {
       // ignore: lyrics is best-effort
     }

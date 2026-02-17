@@ -1,6 +1,7 @@
 package com.zerodevi1.chaos_seed.ui.screens
 
 import android.content.Context
+import android.os.Environment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,12 +57,14 @@ import com.zerodevi1.chaos_seed.core.model.MusicTrack
 import com.zerodevi1.chaos_seed.core.model.MusicJobState
 import com.zerodevi1.chaos_seed.core.model.QqMusicCookie
 import com.zerodevi1.chaos_seed.core.storage.AndroidDownloadDir
+import com.zerodevi1.chaos_seed.core.storage.PublicDownloadsExporter
 import com.zerodevi1.chaos_seed.settings.SettingsViewModel
 import com.zerodevi1.chaos_seed.ui.components.QqLoginDialog
 import com.zerodevi1.chaos_seed.ui.components.ErrorCard
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import java.io.FileNotFoundException
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -187,52 +190,123 @@ fun MusicScreen(
         }
     }
 
-    fun ensureLyrics(sessionId: String, track: MusicTrack) {
+    fun postProcessDownload(sessionId: String, track: MusicTrack, outDir: String, context: Context) {
         // Best-effort; runs in background.
         scope.launch {
-            runCatching {
-                val deadline = System.currentTimeMillis() + 10 * 60_000L
-                var audioPath: String? = null
+            val deadline = System.currentTimeMillis() + 10 * 60_000L
+            val audioPath = try {
+                var p: String? = null
                 while (System.currentTimeMillis() < deadline) {
                     val st = backend.downloadStatus(sessionId)
                     if (st.done) {
-                        audioPath = st.jobs.firstOrNull { it.state == MusicJobState.Done }?.path
+                        p = st.jobs.firstOrNull { it.state == MusicJobState.Done }?.path
                             ?: st.jobs.firstOrNull { !it.path.isNullOrBlank() }?.path
                         break
                     }
                     delay(1000)
                 }
-                val ap = audioPath?.trim().orEmpty()
-                if (ap.isEmpty()) return@runCatching
-                val lrcPath = ap.substringBeforeLast('.') + ".lrc"
-                if (File(lrcPath).exists()) return@runCatching
+                p
+            } catch (_: Exception) {
+                null
+            }
 
-                val title = track.title.trim()
-                if (title.isEmpty()) return@runCatching
-                val artist = track.artists.joinToString(" / ").trim().ifBlank { null }
-                val items = backend.lyricsSearch(
-                    LyricsSearchParams(
-                        title = title,
-                        album = track.album?.trim()?.ifBlank { null },
-                        artist = artist,
-                        durationMs = track.durationMs ?: 0L,
-                        limit = 5,
-                        strictMatch = false,
-                        services = listOf("qq", "netease", "lrclib"),
-                        timeoutMs = 8_000,
-                    ),
-                )
-                val picked = items.filter { it.lyricsOriginal.trim().isNotEmpty() }
-                if (picked.isEmpty()) return@runCatching
-                val best = picked.sortedWith(
-                    compareByDescending<com.zerodevi1.chaos_seed.core.model.LyricsSearchResult> { it.quality }
-                        .thenByDescending { it.matchPercentage },
-                ).first()
+            val ap = audioPath?.trim().orEmpty()
+            if (ap.isEmpty()) return@launch
+            val lrcPath = ap.substringBeforeLast('.') + ".lrc"
 
-                var content = best.lyricsOriginal
-                val tr = best.lyricsTranslation?.trim().orEmpty()
-                if (tr.isNotEmpty()) content = content + "\n\n" + tr
-                File(lrcPath).writeText(content)
+            // Ensure lyrics best-effort (do not block export on errors).
+            if (!File(lrcPath).exists()) {
+                try {
+                    val title = track.title.trim()
+                    if (title.isNotEmpty()) {
+                        val artist = track.artists.joinToString(" / ").trim().ifBlank { null }
+                        val items = backend.lyricsSearch(
+                            LyricsSearchParams(
+                                title = title,
+                                album = track.album?.trim()?.ifBlank { null },
+                                artist = artist,
+                                durationMs = track.durationMs ?: 0L,
+                                limit = 5,
+                                strictMatch = false,
+                                services = listOf("qq", "netease", "lrclib"),
+                                timeoutMs = 8_000,
+                            ),
+                        )
+                        val picked = items.filter { it.lyricsOriginal.trim().isNotEmpty() }
+                        if (picked.isNotEmpty()) {
+                            val best = picked.sortedWith(
+                                compareByDescending<com.zerodevi1.chaos_seed.core.model.LyricsSearchResult> { it.quality }
+                                    .thenByDescending { it.matchPercentage },
+                            ).first()
+
+                            var content = best.lyricsOriginal
+                            val tr = best.lyricsTranslation?.trim().orEmpty()
+                            if (tr.isNotEmpty()) content = content + "\n\n" + tr
+                            File(lrcPath).writeText(content)
+                        }
+                    }
+                } catch (_: Exception) {
+                    // ignore
+                }
+            }
+
+            val audioFile = File(ap)
+            if (!audioFile.exists()) return@launch
+
+            val publicRoot = runCatching {
+                File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                    "ChaosSeed",
+                ).canonicalFile
+            }.getOrNull()
+            if (publicRoot != null) {
+                val audioCanon = runCatching { audioFile.canonicalFile }.getOrNull()
+                if (audioCanon != null && audioCanon.path.startsWith(publicRoot.path)) {
+                    val rel = runCatching {
+                        audioCanon.relativeTo(publicRoot).invariantSeparatorsPath
+                    }.getOrNull()
+                    val display = if (rel.isNullOrBlank()) {
+                        "Downloads/ChaosSeed/${audioFile.name}"
+                    } else {
+                        "Downloads/ChaosSeed/$rel"
+                    }
+                    snackbar.showSnackbar("已保存到：$display")
+                    return@launch
+                }
+            }
+
+            val out = File(outDir)
+            val exportedAudio = try {
+                PublicDownloadsExporter.exportIntoChaosSeedDownloads(context, out, audioFile, overwrite = false)
+            } catch (e: Exception) {
+                val msg = when (e) {
+                    is FileNotFoundException -> "保存失败：文件不存在"
+                    else -> "保存失败：${e.message ?: e::class.java.simpleName}"
+                }
+                snackbar.showSnackbar(msg)
+                return@launch
+            }
+
+            // Export lyrics as a companion file if available.
+            val lrcFile = File(lrcPath)
+            val exportedLrc = if (lrcFile.exists()) {
+                try {
+                    PublicDownloadsExporter.exportIntoChaosSeedDownloads(context, out, lrcFile, overwrite = false)
+                } catch (_: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+
+            val savedMsg = when {
+                !exportedAudio.skipped -> "已保存到：${exportedAudio.displayPath}"
+                else -> "已存在：${exportedAudio.displayPath}"
+            }
+            snackbar.showSnackbar(savedMsg)
+
+            if (exportedLrc != null && !exportedLrc.skipped) {
+                snackbar.showSnackbar("已保存歌词：${exportedLrc.displayPath}")
             }
         }
     }
@@ -273,7 +347,7 @@ fun MusicScreen(
 
                 val res = backend.downloadStart(params)
                 snackbar.showSnackbar("下载开始: sessionId=${res.sessionId}")
-                ensureLyrics(res.sessionId, t)
+                postProcessDownload(res.sessionId, t, outDir, context)
             } catch (e: Exception) {
                 err = e.toString()
             } finally {

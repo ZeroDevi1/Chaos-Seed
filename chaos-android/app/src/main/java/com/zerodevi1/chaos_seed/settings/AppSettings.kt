@@ -19,6 +19,14 @@ data class AppSettings(
     val playerEngine: PlayerEngineType = PlayerEngineType.Exo,
     val pipHideDanmaku: Boolean = true,
     val danmakuEnabled: Boolean = true,
+    // Danmu (Android player)
+    val danmuFontSizeSp: Float = 18f,
+    val danmuOpacity: Float = 0.85f,
+    val danmuArea: Float = 0.6f,
+    val danmuSpeedSeconds: Int = 8,
+    val danmuStrokeWidthDp: Float = 1.0f,
+    val danmuBlockWordsEnabled: Boolean = false,
+    val danmuBlockWordsRaw: String = "",
     // Music
     val qqMusicCookieJson: String? = null,
     val kugouBaseUrl: String? = null,

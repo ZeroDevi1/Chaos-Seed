@@ -31,6 +31,34 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.setDanmakuEnabled(v) }
     }
 
+    fun setDanmuFontSizeSp(v: Float) {
+        viewModelScope.launch { repo.setDanmuFontSizeSp(v) }
+    }
+
+    fun setDanmuOpacity(v: Float) {
+        viewModelScope.launch { repo.setDanmuOpacity(v) }
+    }
+
+    fun setDanmuArea(v: Float) {
+        viewModelScope.launch { repo.setDanmuArea(v) }
+    }
+
+    fun setDanmuSpeedSeconds(v: Int) {
+        viewModelScope.launch { repo.setDanmuSpeedSeconds(v) }
+    }
+
+    fun setDanmuStrokeWidthDp(v: Float) {
+        viewModelScope.launch { repo.setDanmuStrokeWidthDp(v) }
+    }
+
+    fun setDanmuBlockWordsEnabled(v: Boolean) {
+        viewModelScope.launch { repo.setDanmuBlockWordsEnabled(v) }
+    }
+
+    fun setDanmuBlockWordsRaw(v: String) {
+        viewModelScope.launch { repo.setDanmuBlockWordsRaw(v) }
+    }
+
     fun setQqMusicCookieJson(rawJson: String?) {
         viewModelScope.launch { repo.setQqMusicCookieJson(rawJson) }
     }

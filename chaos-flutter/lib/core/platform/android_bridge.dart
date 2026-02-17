@@ -16,6 +16,25 @@ class AndroidBridge {
     return v?.trim().isEmpty == true ? null : v;
   }
 
+  static Future<({String displayPath, bool skipped})?> exportIntoDownloads({
+    required String outDir,
+    required String sourcePath,
+    bool overwrite = false,
+  }) async {
+    if (!Platform.isAndroid) return null;
+    final raw = await _ch.invokeMethod<Map>('exportIntoDownloads', {
+      'outDir': outDir,
+      'sourcePath': sourcePath,
+      'overwrite': overwrite,
+    });
+    if (raw == null) return null;
+    final m = raw.cast<String, dynamic>();
+    final dp = (m['displayPath'] as String?)?.trim() ?? '';
+    final skipped = (m['skipped'] as bool?) ?? false;
+    if (dp.isEmpty) return null;
+    return (displayPath: dp, skipped: skipped);
+  }
+
   static Future<bool> isPipSupported() async {
     if (!Platform.isAndroid) return false;
     final v = await _ch.invokeMethod<bool>('isPipSupported');
