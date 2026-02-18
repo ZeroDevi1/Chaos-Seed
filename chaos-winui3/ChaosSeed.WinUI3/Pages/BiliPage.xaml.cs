@@ -2,6 +2,7 @@ using System.Linq;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using BiliPageModel = ChaosSeed.WinUI3.Models.Bili.BiliPage;
 using ChaosSeed.WinUI3.Models.Bili;
 using ChaosSeed.WinUI3.Services;
