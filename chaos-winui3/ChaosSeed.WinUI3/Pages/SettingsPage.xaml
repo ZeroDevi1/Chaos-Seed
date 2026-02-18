@@ -374,8 +374,8 @@
 
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="文件名模板" VerticalAlignment="Center" />
                             <StackPanel Grid.Row="7" Grid.Column="1" Spacing="4">
-                                <TextBox x:Name="BiliFilePatternBox" PlaceholderText="<videoTitle>" LostFocus="OnBiliFilePatternLostFocus" />
-                                <TextBox x:Name="BiliMultiFilePatternBox" PlaceholderText="<videoTitle>/[P<pageNumberWithZero>]<pageTitle>" LostFocus="OnBiliMultiFilePatternLostFocus" />
+                                <TextBox x:Name="BiliFilePatternBox" PlaceholderText="&lt;videoTitle&gt;" LostFocus="OnBiliFilePatternLostFocus" />
+                                <TextBox x:Name="BiliMultiFilePatternBox" PlaceholderText="&lt;videoTitle&gt;/[P&lt;pageNumberWithZero&gt;]&lt;pageTitle&gt;" LostFocus="OnBiliMultiFilePatternLostFocus" />
                             </StackPanel>
 
                             <TextBlock Grid.Row="8" Grid.Column="0" Text="ffmpeg" VerticalAlignment="Center" />

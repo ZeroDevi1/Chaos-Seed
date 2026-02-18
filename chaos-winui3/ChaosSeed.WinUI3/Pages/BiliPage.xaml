@@ -93,8 +93,8 @@
                                     <CheckBox x:Name="SkipMuxToggle" Content="跳过混流（仅下载流）" />
                                 </StackPanel>
 
-                                <TextBox x:Name="FilePatternBox" PlaceholderText="filePattern（如：<videoTitle>）" />
-                                <TextBox x:Name="MultiFilePatternBox" PlaceholderText="multiFilePattern（如：<videoTitle>/[P<pageNumberWithZero>]<pageTitle>）" />
+                                <TextBox x:Name="FilePatternBox" PlaceholderText="filePattern（如：&lt;videoTitle&gt;）" />
+                                <TextBox x:Name="MultiFilePatternBox" PlaceholderText="multiFilePattern（如：&lt;videoTitle&gt;/[P&lt;pageNumberWithZero&gt;]&lt;pageTitle&gt;）" />
 
                                 <StackPanel Orientation="Horizontal" Spacing="12">
                                     <TextBlock x:Name="FfmpegPathText" Text="ffmpeg：-" Opacity="0.85" VerticalAlignment="Center" TextWrapping="Wrap" />
@@ -188,4 +188,3 @@
         </Grid>
     </ScrollViewer>
 </Page>
-
