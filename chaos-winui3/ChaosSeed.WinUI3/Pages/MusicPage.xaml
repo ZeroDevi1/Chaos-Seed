@@ -5,7 +5,8 @@
     xmlns:local="using:ChaosSeed.WinUI3.Pages"
     xmlns:controls="using:ChaosSeed.WinUI3.Controls"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
-    xmlns:music="using:ChaosSeed.WinUI3.Models.Music">
+    xmlns:music="using:ChaosSeed.WinUI3.Models.Music"
+    xmlns:downloads="using:ChaosSeed.WinUI3.Services.Downloads">
 
     <Grid>
         <Grid.RowDefinitions>
@@ -208,14 +209,15 @@
                             MaxHeight="420">
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="local:MusicTrackVm">
-                                    <Grid Padding="10" ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="56" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="180" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
+                                        <Grid Padding="10" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="56" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="180" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
 
                                         <Border CornerRadius="6" Width="48" Height="48" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                                             <Image Source="{x:Bind Cover}" Stretch="UniformToFill" />
@@ -243,6 +245,7 @@
 
                                         <Button Grid.Column="3" Content="{x:Bind PreviewBtnText}" Tag="{x:Bind}" Click="OnPreviewTrackClicked" VerticalAlignment="Center" />
                                         <Button Grid.Column="4" Content="下载" Tag="{x:Bind}" Click="OnDownloadTrackClicked" VerticalAlignment="Center" />
+                                        <Button Grid.Column="5" Content="+" Tag="{x:Bind}" Click="OnAddToPlaylistClicked" VerticalAlignment="Center" />
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -325,6 +328,7 @@
                                                     <ColumnDefinition Width="180" />
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
 
                                                 <StackPanel Spacing="2">
@@ -346,6 +350,7 @@
 
                                                 <Button Grid.Column="2" Content="{x:Bind PreviewBtnText}" Tag="{x:Bind}" Click="OnPreviewTrackClicked" VerticalAlignment="Center" />
                                                 <Button Grid.Column="3" Content="下载" Tag="{x:Bind}" Click="OnDownloadTrackClicked" VerticalAlignment="Center" />
+                                                <Button Grid.Column="4" Content="+" Tag="{x:Bind}" Click="OnAddToPlaylistClicked" VerticalAlignment="Center" />
                                             </Grid>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
@@ -383,38 +388,26 @@
 
                 <Border x:Name="DownloadCard" Grid.Row="2" Grid.Column="0" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                     <StackPanel Spacing="12">
-                        <TextBlock Text="下载任务" FontSize="18" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="下载任务" FontSize="18" FontWeight="SemiBold" />
+                            <Button Content="打开下载页" Click="OnOpenDownloadsPageClicked" />
+                        </StackPanel>
                         <muxc:InfoBar x:Name="DownloadBar" IsOpen="False" />
 
                         <ListView
                             x:Name="DownloadSessionsList"
-                            ItemsSource="{x:Bind DownloadSessions, Mode=OneWay}"
+                            ItemsSource="{x:Bind ActiveDownloadSessions, Mode=OneWay}"
                             MaxHeight="520">
                             <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="local:MusicDownloadSessionVm">
+                                <DataTemplate x:DataType="downloads:DownloadSessionVm">
                                     <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" Padding="10" Margin="0,0,0,8">
                                         <StackPanel Spacing="8">
                                             <StackPanel Orientation="Horizontal" Spacing="12">
-                                                <TextBlock Text="{x:Bind Header}" FontWeight="SemiBold" />
-                                                <TextBlock Text="{x:Bind TotalsText}" Opacity="0.75" />
+                                                <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{x:Bind State}" Opacity="0.75" VerticalAlignment="Center" />
                                                 <Button Content="取消" Tag="{x:Bind}" Click="OnCancelDownloadClicked" />
                                             </StackPanel>
-                                            <ListView ItemsSource="{x:Bind Jobs, Mode=OneWay}" MaxHeight="220">
-                                                <ListView.ItemTemplate>
-                                                    <DataTemplate x:DataType="music:MusicDownloadJobResult">
-                                                        <Grid Padding="6" ColumnSpacing="12">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="60" />
-                                                                <ColumnDefinition Width="80" />
-                                                                <ColumnDefinition Width="*" />
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Grid.Column="0" Text="{x:Bind Index}" Opacity="0.7" />
-                                                            <TextBlock Grid.Column="1" Text="{x:Bind State}" />
-                                                            <TextBlock Grid.Column="2" Text="{x:Bind Error}" Opacity="0.7" TextWrapping="Wrap" />
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </ListView.ItemTemplate>
-                                            </ListView>
+                                            <TextBlock Text="{x:Bind Totals}" Opacity="0.75" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate>

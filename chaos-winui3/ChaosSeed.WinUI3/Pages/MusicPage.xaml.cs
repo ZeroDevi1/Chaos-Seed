@@ -7,6 +7,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Models.Music;
 using ChaosSeed.WinUI3.Services;
+using ChaosSeed.WinUI3.Services.Downloads;
 using ChaosSeed.WinUI3.Services.MusicBackends;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -36,7 +37,7 @@ public sealed partial class MusicPage : Page
     public ObservableCollection<MusicArtistVm> ArtistResults { get; } = new();
     public ObservableCollection<MusicTrackVm> DetailTrackResults { get; } = new();
     public ObservableCollection<MusicAlbumVm> DetailAlbumResults { get; } = new();
-    public ObservableCollection<MusicDownloadSessionVm> DownloadSessions { get; } = new();
+    public ObservableCollection<DownloadSessionVm> ActiveDownloadSessions => MusicDownloadManagerService.Instance.ActiveSessions;
 
     private MusicAlbum? _detailAlbum;
     private MusicArtist? _detailArtist;
@@ -49,14 +50,14 @@ public sealed partial class MusicPage : Page
         {
             SettingsService.Instance.SettingsChanged += OnSettingsChanged;
             UpdateLoginStatusFromSettings();
-            MusicPreviewPlayerService.Instance.Changed += OnPreviewPlayerChanged;
+            MusicPlayerService.Instance.Changed += OnPreviewPlayerChanged;
             UpdatePreviewFlagsFromService();
             TryRestoreSearchState();
         };
         Unloaded += (_, _) =>
         {
             SettingsService.Instance.SettingsChanged -= OnSettingsChanged;
-            MusicPreviewPlayerService.Instance.Changed -= OnPreviewPlayerChanged;
+            MusicPlayerService.Instance.Changed -= OnPreviewPlayerChanged;
             SaveSearchState();
         };
 
@@ -1281,13 +1282,88 @@ public sealed partial class MusicPage : Page
                 Options = options,
             };
 
-            var res = await _backend.DownloadStartAsync(start, CancellationToken.None);
-            StartDownloadSession(res.SessionId);
-            SetInfoBar(DownloadBar, InfoBarSeverity.Informational, "下载已开始", res.SessionId);
+            var trackArtist = vm.Track.Artists is null ? "" : string.Join(" / ", vm.Track.Artists.Where(x => !string.IsNullOrWhiteSpace(x)));
+            var meta = new DownloadSessionMeta
+            {
+                TargetType = "track",
+                Service = vm.Track.Service,
+                Title = vm.Track.Title,
+                Artist = string.IsNullOrWhiteSpace(trackArtist) ? null : trackArtist,
+                Album = vm.Track.Album,
+                CoverUrl = vm.Track.CoverUrl,
+                PrefetchedTracks = new[] { vm.Track },
+            };
+
+            var sid = await MusicDownloadManagerService.Instance.StartAsync(start, meta, CancellationToken.None);
+            SetInfoBar(DownloadBar, InfoBarSeverity.Informational, "下载已开始", sid);
         }
         catch (Exception ex)
         {
             SetInfoBar(DownloadBar, InfoBarSeverity.Error, "下载失败", ex.Message);
+        }
+    }
+
+    private async void OnAddToPlaylistClicked(object sender, RoutedEventArgs e)
+    {
+        _ = e;
+        if (sender is not Button btn || btn.Tag is not MusicTrackVm vm)
+        {
+            return;
+        }
+
+        try
+        {
+            await MusicPlayerService.Instance.EnqueueAsync(vm.Track, ResolveQualityIdForTrackVm(vm), CancellationToken.None);
+            SetInfoBar(SearchBar, InfoBarSeverity.Success, "已加入播放列表", vm.Title);
+        }
+        catch (Exception ex)
+        {
+            SetInfoBar(SearchBar, InfoBarSeverity.Error, "加入失败", ex.Message);
+        }
+    }
+
+    private void OnOpenDownloadsPageClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        try
+        {
+            var win = App.MainWindowInstance;
+            var nav = win?.NavigationElement;
+            if (nav is null)
+            {
+                return;
+            }
+
+            NavigationViewItem? FindItem(string tag)
+            {
+                foreach (var x in nav.MenuItems)
+                {
+                    if (x is NavigationViewItem nvi && string.Equals(nvi.Tag as string, tag, StringComparison.Ordinal))
+                    {
+                        return nvi;
+                    }
+                }
+                foreach (var x in nav.FooterMenuItems)
+                {
+                    if (x is NavigationViewItem nvi && string.Equals(nvi.Tag as string, tag, StringComparison.Ordinal))
+                    {
+                        return nvi;
+                    }
+                }
+                return null;
+            }
+
+            var item = FindItem("downloads");
+            if (item is not null)
+            {
+                nav.SelectedItem = item;
+            }
+        }
+        catch
+        {
+            // ignore
         }
     }
 
@@ -1296,6 +1372,28 @@ public sealed partial class MusicPage : Page
         try
         {
             await EnsureConfigAppliedAsync(CancellationToken.None);
+
+            MusicTrack[] prefetched;
+            try
+            {
+                prefetched = await _backend.AlbumTracksAsync(
+                    new MusicAlbumTracksParams { Service = alb.Service, AlbumId = alb.Id },
+                    CancellationToken.None
+                );
+                foreach (var t in prefetched)
+                {
+                    NormalizeTrackForUi(t);
+                    if (t.Album is null)
+                    {
+                        t.Album = alb.Title;
+                    }
+                }
+            }
+            catch
+            {
+                prefetched = Array.Empty<MusicTrack>();
+            }
+
             var outDir = await GetOutDirForDownloadAsync(CancellationToken.None);
             if (string.IsNullOrWhiteSpace(outDir))
             {
@@ -1330,9 +1428,19 @@ public sealed partial class MusicPage : Page
                 Options = options,
             };
 
-            var res = await _backend.DownloadStartAsync(start, CancellationToken.None);
-            StartDownloadSession(res.SessionId);
-            SetInfoBar(DownloadBar, InfoBarSeverity.Informational, "专辑下载已开始", res.SessionId);
+            var meta = new DownloadSessionMeta
+            {
+                TargetType = "album",
+                Service = alb.Service,
+                Title = alb.Title,
+                Artist = alb.Artist,
+                Album = alb.Title,
+                CoverUrl = alb.CoverUrl,
+                PrefetchedTracks = prefetched,
+            };
+
+            var sid = await MusicDownloadManagerService.Instance.StartAsync(start, meta, CancellationToken.None);
+            SetInfoBar(DownloadBar, InfoBarSeverity.Informational, "专辑下载已开始", sid);
         }
         catch (Exception ex)
         {
@@ -1379,9 +1487,19 @@ public sealed partial class MusicPage : Page
                 Options = options,
             };
 
-            var res = await _backend.DownloadStartAsync(start, CancellationToken.None);
-            StartDownloadSession(res.SessionId);
-            SetInfoBar(DownloadBar, InfoBarSeverity.Informational, "歌手全量下载已开始", res.SessionId);
+            var meta = new DownloadSessionMeta
+            {
+                TargetType = "artist_all",
+                Service = a.Service,
+                Title = a.Name,
+                Artist = a.Name,
+                Album = null,
+                CoverUrl = a.CoverUrl,
+                PrefetchedTracks = null,
+            };
+
+            var sid = await MusicDownloadManagerService.Instance.StartAsync(start, meta, CancellationToken.None);
+            SetInfoBar(DownloadBar, InfoBarSeverity.Informational, "歌手全量下载已开始", sid);
         }
         catch (Exception ex)
         {
@@ -1513,56 +1631,15 @@ public sealed partial class MusicPage : Page
         _detailArtist = null;
     }
 
-    private void StartDownloadSession(string sessionId)
-    {
-        var vm = new MusicDownloadSessionVm(sessionId);
-        DownloadSessions.Insert(0, vm);
-        _ = PollDownloadAsync(vm);
-    }
-
-    private async Task PollDownloadAsync(MusicDownloadSessionVm vm)
-    {
-        vm.PollCts?.Cancel();
-        vm.PollCts = new CancellationTokenSource();
-        var ct = vm.PollCts.Token;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var st = await _backend.DownloadStatusAsync(vm.SessionId, ct);
-                _dq.TryEnqueue(() => vm.Apply(st));
-
-                if (st.Done)
-                {
-                    return;
-                }
-
-                await Task.Delay(800, ct);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // ignore
-        }
-        catch (Exception ex)
-        {
-            _dq.TryEnqueue(() =>
-                SetInfoBar(DownloadBar, InfoBarSeverity.Error, "轮询下载状态失败", ex.Message)
-            );
-        }
-    }
-
     private async void OnCancelDownloadClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button btn || btn.Tag is not MusicDownloadSessionVm vm)
+        if (sender is not Button btn || btn.Tag is not DownloadSessionVm vm)
         {
             return;
         }
         try
         {
-            vm.PollCts?.Cancel();
-            await _backend.CancelDownloadAsync(vm.SessionId, CancellationToken.None);
+            await MusicDownloadManagerService.Instance.CancelAsync(vm.SessionId, CancellationToken.None);
             SetInfoBar(DownloadBar, InfoBarSeverity.Informational, "已取消", vm.SessionId);
         }
         catch (Exception ex)
@@ -1580,7 +1657,7 @@ public sealed partial class MusicPage : Page
 
         try
         {
-            await TogglePreviewAsync(vm, CancellationToken.None);
+            await TogglePlayAsync(vm, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -1588,10 +1665,10 @@ public sealed partial class MusicPage : Page
         }
     }
 
-    private async Task TogglePreviewAsync(MusicTrackVm vm, CancellationToken ct)
+    private async Task TogglePlayAsync(MusicTrackVm vm, CancellationToken ct)
     {
         var key = $"{vm.Track.Service}:{vm.Track.Id}";
-        var svc = MusicPreviewPlayerService.Instance;
+        var svc = MusicPlayerService.Instance;
         if (svc.IsOpen && string.Equals(svc.CurrentKey, key, StringComparison.Ordinal))
         {
             svc.TogglePlayPause();
@@ -1599,58 +1676,7 @@ public sealed partial class MusicPage : Page
             return;
         }
 
-        await EnsureConfigAppliedAsync(ct);
-
-        var desired = ResolveQualityIdForTrackVm(vm);
-        var candidates = new List<string?>
-        {
-            desired,
-            "mp3_320",
-            "mp3_192",
-            "mp3_128",
-            "flac",
-        };
-        candidates = candidates
-            .Select(s => (s ?? "").Trim())
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Distinct(StringComparer.Ordinal)
-            .Cast<string?>()
-            .ToList();
-
-        Exception? lastError = null;
-        MusicTrackPlayUrlResult? res = null;
-        foreach (var q in candidates)
-        {
-            try
-            {
-                res = await _backend.TrackPlayUrlAsync(
-                    new MusicTrackPlayUrlParams
-                    {
-                        Service = (vm.Track.Service ?? "").Trim(),
-                        TrackId = (vm.Track.Id ?? "").Trim(),
-                        QualityId = q,
-                        Auth = BuildAuthFromSettings(),
-                    },
-                    ct
-                );
-                if (!string.IsNullOrWhiteSpace(res.Url))
-                {
-                    break;
-                }
-            }
-            catch (Exception ex)
-            {
-                lastError = ex;
-                continue;
-            }
-        }
-
-        if (res is null || string.IsNullOrWhiteSpace(res.Url))
-        {
-            throw lastError ?? new InvalidOperationException("empty play url");
-        }
-
-        svc.Play(key, vm.Track, res.Url);
+        await svc.PlayNowAsync(vm.Track, ResolveQualityIdForTrackVm(vm), ct);
         UpdatePreviewFlagsFromService();
     }
 
@@ -1663,7 +1689,7 @@ public sealed partial class MusicPage : Page
 
     private void UpdatePreviewFlagsFromService()
     {
-        var svc = MusicPreviewPlayerService.Instance;
+        var svc = MusicPlayerService.Instance;
         var key = svc.CurrentKey;
         foreach (var vm in EnumerateAllTrackVms())
         {
@@ -1859,50 +1885,4 @@ internal static class MusicUiUtil
             return null;
         }
     }
-}
-
-public sealed class MusicDownloadSessionVm : INotifyPropertyChanged
-{
-    public MusicDownloadSessionVm(string sessionId)
-    {
-        SessionId = sessionId ?? "";
-    }
-
-    public string SessionId { get; }
-
-    public string Header => $"Session: {SessionId}";
-
-    private string _totalsText = "-";
-    public string TotalsText
-    {
-        get => _totalsText;
-        private set
-        {
-            if (string.Equals(_totalsText, value, StringComparison.Ordinal))
-            {
-                return;
-            }
-            _totalsText = value;
-            OnPropertyChanged();
-        }
-    }
-
-    public ObservableCollection<MusicDownloadJobResult> Jobs { get; } = new();
-
-    public CancellationTokenSource? PollCts { get; set; }
-
-    public void Apply(MusicDownloadStatus st)
-    {
-        TotalsText = $"Total={st.Totals.Total} Done={st.Totals.Done} Failed={st.Totals.Failed} Skipped={st.Totals.Skipped} Canceled={st.Totals.Canceled}";
-        Jobs.Clear();
-        foreach (var j in st.Jobs ?? Array.Empty<MusicDownloadJobResult>())
-        {
-            Jobs.Add(j);
-        }
-    }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    private void OnPropertyChanged([CallerMemberName] string? name = null)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

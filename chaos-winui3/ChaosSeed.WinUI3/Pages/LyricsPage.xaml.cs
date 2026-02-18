@@ -12,7 +12,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage.Streams;
-using muxc = Microsoft.UI.Xaml.Controls;
+using Muxc = Microsoft.UI.Xaml.Controls;
 
 namespace ChaosSeed.WinUI3.Pages;
 
@@ -980,7 +980,7 @@ public sealed partial class LyricsPage : Page
         }
     }
 
-    private void OnThresholdChanged(muxc.NumberBox sender, muxc.NumberBoxValueChangedEventArgs args)
+    private void OnThresholdChanged(Muxc.NumberBox sender, Muxc.NumberBoxValueChangedEventArgs args)
     {
         _ = args;
         if (_uiInit)
@@ -993,7 +993,7 @@ public sealed partial class LyricsPage : Page
         SettingsService.Instance.Update(s => s.LyricsThreshold = v);
     }
 
-    private void OnLimitChanged(muxc.NumberBox sender, muxc.NumberBoxValueChangedEventArgs args)
+    private void OnLimitChanged(Muxc.NumberBox sender, Muxc.NumberBoxValueChangedEventArgs args)
     {
         _ = args;
         if (_uiInit)
@@ -1006,7 +1006,7 @@ public sealed partial class LyricsPage : Page
         SettingsService.Instance.Update(s => s.LyricsLimit = v);
     }
 
-    private void OnTimeoutChanged(muxc.NumberBox sender, muxc.NumberBoxValueChangedEventArgs args)
+    private void OnTimeoutChanged(Muxc.NumberBox sender, Muxc.NumberBoxValueChangedEventArgs args)
     {
         _ = args;
         if (_uiInit)

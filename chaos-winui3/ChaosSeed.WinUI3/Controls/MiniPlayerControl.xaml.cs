@@ -1,13 +1,12 @@
-using ChaosSeed.WinUI3.Pages;
 using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Input;
-using System.Linq;
 using System;
+using System.Linq;
+using System.Threading;
 
 namespace ChaosSeed.WinUI3.Controls;
 
@@ -20,18 +19,26 @@ public sealed partial class MiniPlayerControl : UserControl
     private bool _seeking;
     private bool _seekCommitPending;
     private bool _seekHandlersAttached;
+    private bool _updatingPlaylistSelection;
 
     public MiniPlayerControl()
     {
         InitializeComponent();
         Loaded += (_, _) =>
         {
-            MusicPreviewPlayerService.Instance.Changed += OnChanged;
+            MusicPlayerService.Instance.Changed += OnChanged;
+            MusicPlayerService.Instance.PlaylistChanged += OnPlaylistChanged;
+            try { DetailControl.CloseRequested += OnDetailCloseRequested; } catch { }
             AttachSeekHandlers();
             UpdateUi();
             EnsureTimer();
         };
-        Unloaded += (_, _) => MusicPreviewPlayerService.Instance.Changed -= OnChanged;
+        Unloaded += (_, _) =>
+        {
+            MusicPlayerService.Instance.Changed -= OnChanged;
+            MusicPlayerService.Instance.PlaylistChanged -= OnPlaylistChanged;
+            try { DetailControl.CloseRequested -= OnDetailCloseRequested; } catch { }
+        };
     }
 
     private void AttachSeekHandlers()
@@ -61,6 +68,13 @@ public sealed partial class MiniPlayerControl : UserControl
         _dq.TryEnqueue(UpdateUi);
     }
 
+    private void OnPlaylistChanged(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _dq.TryEnqueue(UpdatePlaylistUi);
+    }
+
     private void EnsureTimer()
     {
         if (_timer is not null)
@@ -77,7 +91,7 @@ public sealed partial class MiniPlayerControl : UserControl
 
     private void UpdateUi()
     {
-        var svc = MusicPreviewPlayerService.Instance;
+        var svc = MusicPlayerService.Instance;
         Visibility = svc.IsOpen ? Visibility.Visible : Visibility.Collapsed;
         PlayPauseIcon.Symbol = svc.IsPlaying ? Symbol.Pause : Symbol.Play;
         TitleText.Text = svc.Track?.Title ?? "-";
@@ -108,12 +122,39 @@ public sealed partial class MiniPlayerControl : UserControl
             _updatingVolume = false;
         }
 
+        UpdateLoopText();
+        UpdatePlaylistUi();
         UpdateTimeline(force: true);
+    }
+
+    private void UpdatePlaylistUi()
+    {
+        try
+        {
+            var svc = MusicPlayerService.Instance;
+            PlaylistList.ItemsSource = svc.Playlist;
+            PlaylistCountText.Text = svc.Playlist.Count.ToString();
+
+            var idx = svc.CurrentIndex;
+            _updatingPlaylistSelection = true;
+            try
+            {
+                PlaylistList.SelectedIndex = idx;
+            }
+            finally
+            {
+                _updatingPlaylistSelection = false;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
     }
 
     private void UpdateTimeline(bool force = false)
     {
-        var svc = MusicPreviewPlayerService.Instance;
+        var svc = MusicPlayerService.Instance;
         if (!svc.IsOpen)
         {
             if (force)
@@ -166,21 +207,21 @@ public sealed partial class MiniPlayerControl : UserControl
     {
         _ = sender;
         _ = e;
-        MusicPreviewPlayerService.Instance.TogglePlayPause();
+        MusicPlayerService.Instance.TogglePlayPause();
     }
 
     private void OnStopClicked(object sender, RoutedEventArgs e)
     {
         _ = sender;
         _ = e;
-        MusicPreviewPlayerService.Instance.StopKeepOpen();
+        MusicPlayerService.Instance.StopKeepOpen();
     }
 
     private void OnCloseClicked(object sender, RoutedEventArgs e)
     {
         _ = sender;
         _ = e;
-        MusicPreviewPlayerService.Instance.Stop();
+        MusicPlayerService.Instance.Stop();
     }
 
     private void OnVolumeChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -190,7 +231,7 @@ public sealed partial class MiniPlayerControl : UserControl
         {
             return;
         }
-        MusicPreviewPlayerService.Instance.Volume = e.NewValue / 100.0;
+        MusicPlayerService.Instance.Volume = e.NewValue / 100.0;
         VolumePercentText.Text = $"{(int)Math.Round(e.NewValue)}%";
         VolumeIcon.Symbol = e.NewValue <= 0.1 ? Symbol.Mute : Symbol.Volume;
     }
@@ -261,7 +302,7 @@ public sealed partial class MiniPlayerControl : UserControl
 
             if (seekNow)
             {
-                MusicPreviewPlayerService.Instance.SeekToSeconds(PosSlider.Value);
+                MusicPlayerService.Instance.SeekToSeconds(PosSlider.Value);
                 _seekCommitPending = false;
                 _seeking = false;
             }
@@ -281,7 +322,7 @@ public sealed partial class MiniPlayerControl : UserControl
         }
         _seekCommitPending = false;
         _seeking = false;
-        MusicPreviewPlayerService.Instance.SeekToSeconds(PosSlider.Value);
+        MusicPlayerService.Instance.SeekToSeconds(PosSlider.Value);
     }
 
     private void OnPositionChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -294,6 +335,126 @@ public sealed partial class MiniPlayerControl : UserControl
         if (_seeking)
         {
             PosText.Text = FormatTime(TimeSpan.FromSeconds(e.NewValue));
+        }
+    }
+
+    private void OnPrevClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _ = MusicPlayerService.Instance.PrevAsync(CancellationToken.None);
+    }
+
+    private void OnNextClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _ = MusicPlayerService.Instance.NextAsync(CancellationToken.None);
+    }
+
+    private void OnLoopClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        var svc = MusicPlayerService.Instance;
+        svc.LoopMode = svc.LoopMode switch
+        {
+            MusicLoopMode.Single => MusicLoopMode.All,
+            MusicLoopMode.All => MusicLoopMode.Off,
+            _ => MusicLoopMode.Single,
+        };
+
+        UpdateLoopText();
+    }
+
+    private void UpdateLoopText()
+    {
+        var svc = MusicPlayerService.Instance;
+        LoopText.Text = svc.LoopMode switch
+        {
+            MusicLoopMode.All => "∞",
+            MusicLoopMode.Off => "—",
+            _ => "1",
+        };
+    }
+
+    private void OnRemovePlaylistItemClicked(object sender, RoutedEventArgs e)
+    {
+        _ = e;
+        if (sender is not Button btn || btn.Tag is not MusicPlaylistItemVm vm)
+        {
+            return;
+        }
+
+        var idx = MusicPlayerService.Instance.Playlist.IndexOf(vm);
+        if (idx >= 0)
+        {
+            MusicPlayerService.Instance.RemoveAt(idx);
+        }
+    }
+
+    private void OnClearPlaylistClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        MusicPlayerService.Instance.ClearPlaylist();
+    }
+
+    private void OnPlaylistSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _ = e;
+        if (_updatingPlaylistSelection)
+        {
+            return;
+        }
+
+        if (sender is not ListView lv)
+        {
+            return;
+        }
+
+        var idx = lv.SelectedIndex;
+        if (idx < 0)
+        {
+            return;
+        }
+
+        _ = MusicPlayerService.Instance.PlayAtAsync(idx, CancellationToken.None);
+    }
+
+    private void OnCoverTapped(object sender, TappedRoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (!MusicPlayerService.Instance.IsOpen)
+        {
+            return;
+        }
+
+        try
+        {
+            DetailControl.Open();
+            DetailPopup.IsOpen = true;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void OnDetailCloseRequested(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        try
+        {
+            DetailPopup.IsOpen = false;
+        }
+        catch
+        {
+            // ignore
         }
     }
 }

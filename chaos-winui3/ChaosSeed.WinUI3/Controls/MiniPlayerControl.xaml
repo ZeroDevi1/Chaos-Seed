@@ -4,6 +4,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     xmlns:conv="using:ChaosSeed.WinUI3.Converters"
+    xmlns:services="using:ChaosSeed.WinUI3.Services"
+    xmlns:controls="using:ChaosSeed.WinUI3.Controls"
     Visibility="Collapsed">
 
     <UserControl.Resources>
@@ -22,29 +24,102 @@
 
             <Grid Grid.Row="0" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="56" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Border CornerRadius="999" Width="48" Height="48" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" VerticalAlignment="Center">
-                    <Image x:Name="CoverImg" Stretch="UniformToFill" />
-                </Border>
+                <!-- Left: cover + title -->
+                <Grid Grid.Column="0" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="220" />
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                    <TextBlock x:Name="TitleText" Text="-" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock x:Name="SubtitleText" Text="" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+                    <Border
+                        x:Name="CoverBorder"
+                        CornerRadius="12"
+                        Width="48"
+                        Height="48"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        VerticalAlignment="Center"
+                        Tapped="OnCoverTapped">
+                        <Image x:Name="CoverImg" Stretch="UniformToFill" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock x:Name="TitleText" Text="-" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="SubtitleText" Text="" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- Center: transport -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button x:Name="LoopBtn" Click="OnLoopClicked" ToolTipService.ToolTip="循环模式">
+                        <TextBlock x:Name="LoopText" Text="1" FontWeight="SemiBold" />
+                    </Button>
+
+                    <Button x:Name="PrevBtn" Click="OnPrevClicked" ToolTipService.ToolTip="上一首">
+                        <muxc:SymbolIcon Symbol="Back" />
+                    </Button>
+
+                    <Button x:Name="PlayPauseBtn" Click="OnPlayPauseClicked" ToolTipService.ToolTip="播放/暂停" CornerRadius="999" MinWidth="44" MinHeight="44">
+                        <Button.Background>
+                            <SolidColorBrush Color="{ThemeResource SystemAccentColor}" Opacity="0.95" />
+                        </Button.Background>
+                        <muxc:SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" Foreground="White" />
+                    </Button>
+
+                    <Button x:Name="NextBtn" Click="OnNextClicked" ToolTipService.ToolTip="下一首">
+                        <muxc:SymbolIcon Symbol="Forward" />
+                    </Button>
                 </StackPanel>
 
+                <!-- Right: playlist / volume / close -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button x:Name="PlayPauseBtn" Click="OnPlayPauseClicked">
-                        <muxc:SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" />
-                    </Button>
-                    <Button x:Name="StopBtn" Click="OnStopClicked">
-                        <muxc:SymbolIcon Symbol="Stop" />
+                    <Button x:Name="PlaylistBtn" ToolTipService.ToolTip="播放列表">
+                        <muxc:SymbolIcon Symbol="List" />
+                        <Button.Flyout>
+                            <Flyout Placement="Top">
+                                <Border Padding="12" CornerRadius="10" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" MinWidth="360">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <TextBlock Text="播放列表" FontWeight="SemiBold" />
+                                            <TextBlock x:Name="PlaylistCountText" Text="0" Opacity="0.75" />
+                                            <Button Content="清空" Click="OnClearPlaylistClicked" />
+                                        </StackPanel>
+
+                                        <ListView x:Name="PlaylistList" SelectionChanged="OnPlaylistSelectionChanged" MaxHeight="420">
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate x:DataType="services:MusicPlaylistItemVm">
+                                                    <Grid Padding="8" ColumnSpacing="12">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="56" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <Border CornerRadius="8" Width="48" Height="48" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                                            <Image Source="{x:Bind Cover}" Stretch="UniformToFill" />
+                                                        </Border>
+
+                                                        <StackPanel Grid.Column="1" Spacing="2">
+                                                            <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{x:Bind Subtitle}" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+
+                                                        <Button Grid.Column="2" Content="移除" Tag="{x:Bind}" Click="OnRemovePlaylistItemClicked" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
                     </Button>
 
-                    <Button x:Name="VolumeBtn">
+                    <Button x:Name="VolumeBtn" ToolTipService.ToolTip="音量">
                         <muxc:SymbolIcon x:Name="VolumeIcon" Symbol="Volume" />
                         <Button.Flyout>
                             <Flyout Placement="Top">
@@ -67,7 +142,11 @@
                         </Button.Flyout>
                     </Button>
 
-                    <Button Click="OnCloseClicked">
+                    <Button Click="OnStopClicked" ToolTipService.ToolTip="停止">
+                        <muxc:SymbolIcon Symbol="Stop" />
+                    </Button>
+
+                    <Button Click="OnCloseClicked" ToolTipService.ToolTip="关闭">
                         <muxc:SymbolIcon Symbol="Clear" />
                     </Button>
                 </StackPanel>
@@ -94,6 +173,12 @@
                     ValueChanged="OnPositionChanged" />
                 <TextBlock x:Name="DurText" Grid.Column="2" Text="--:--" Opacity="0.75" VerticalAlignment="Center" />
             </Grid>
+
+            <Popup x:Name="DetailPopup" IsLightDismissEnabled="False">
+                <Grid x:Name="DetailPopupRoot" Background="#66000000">
+                    <controls:NowPlayingDetailControl x:Name="DetailControl" />
+                </Grid>
+            </Popup>
         </Grid>
     </Border>
 </UserControl>

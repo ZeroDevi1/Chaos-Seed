@@ -311,13 +311,18 @@ public sealed class DaemonClient : IDisposable
 
     public async Task<LyricsSearchResult[]> LyricsSearchAsync(LyricsSearchParams p, CancellationToken ct = default)
     {
+        if (p is null)
+        {
+            throw new ArgumentNullException(nameof(p));
+        }
+
         await EnsureConnectedAsync(ct);
         if (_rpc is null)
         {
             throw new InvalidOperationException("rpc not connected");
         }
 
-        var title = (p?.Title ?? "").Trim();
+        var title = (p.Title ?? "").Trim();
         if (string.IsNullOrWhiteSpace(title))
         {
             throw new ArgumentException("empty title", nameof(p));

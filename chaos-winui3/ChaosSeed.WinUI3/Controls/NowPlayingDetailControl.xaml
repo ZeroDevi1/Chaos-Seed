@@ -1,0 +1,133 @@
+<UserControl
+    x:Class="ChaosSeed.WinUI3.Controls.NowPlayingDetailControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:local="using:ChaosSeed.WinUI3.Controls">
+
+    <Border
+        Margin="24"
+        CornerRadius="16"
+        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+        Padding="18"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        MaxWidth="1200"
+        MaxHeight="760">
+
+        <Grid RowSpacing="14" ColumnSpacing="18">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Top -->
+            <Grid Grid.Row="0" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button Click="OnCloseClicked" ToolTipService.ToolTip="关闭">
+                    <muxc:SymbolIcon Symbol="Back" />
+                </Button>
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock x:Name="HeaderTitleText" Text="正在播放" FontWeight="SemiBold" />
+                    <TextBlock x:Name="HeaderSubText" Text="" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Content -->
+            <Grid Grid.Row="1" ColumnSpacing="18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="340" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" CornerRadius="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" Padding="12">
+                    <StackPanel Spacing="12">
+                        <Border CornerRadius="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <Image x:Name="CoverImg" Stretch="UniformToFill" Height="300" />
+                        </Border>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock x:Name="TitleText" Text="-" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ArtistText" Text="" Opacity="0.75" TextWrapping="Wrap" />
+                            <TextBlock x:Name="AlbumText" Text="" Opacity="0.65" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1" CornerRadius="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" Padding="12">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="歌词" FontWeight="SemiBold" />
+                            <TextBlock x:Name="LyricsStatusText" Text="" Opacity="0.7" />
+                        </StackPanel>
+
+                        <ListView Grid.Row="1" x:Name="LyricsList" ItemsSource="{x:Bind LyricsLines, Mode=OneWay}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="local:NowPlayingLyricsLineVm">
+                                    <StackPanel Spacing="2" Padding="4">
+                                        <TextBlock Text="{x:Bind Original}" Opacity="{x:Bind Opacity}" FontWeight="{x:Bind FontWeight}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{x:Bind TranslationText}" Visibility="{x:Bind TranslationVisibility}" Opacity="{x:Bind TranslationOpacity}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Bottom transport -->
+            <Grid Grid.Row="2" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                    <Button Click="OnLoopClicked" ToolTipService.ToolTip="循环模式">
+                        <TextBlock x:Name="LoopText" Text="1" FontWeight="SemiBold" />
+                    </Button>
+                    <Button Click="OnPrevClicked" ToolTipService.ToolTip="上一首">
+                        <muxc:SymbolIcon Symbol="Back" />
+                    </Button>
+                    <Button Click="OnPlayPauseClicked" ToolTipService.ToolTip="播放/暂停" CornerRadius="999" MinWidth="46" MinHeight="46">
+                        <Button.Background>
+                            <SolidColorBrush Color="{ThemeResource SystemAccentColor}" Opacity="0.95" />
+                        </Button.Background>
+                        <muxc:SymbolIcon x:Name="PlayPauseIcon" Symbol="Play" Foreground="White" />
+                    </Button>
+                    <Button Click="OnNextClicked" ToolTipService.ToolTip="下一首">
+                        <muxc:SymbolIcon Symbol="Forward" />
+                    </Button>
+                </StackPanel>
+
+                <Grid Grid.Row="1" ColumnSpacing="10" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="PosText" Text="00:00" Opacity="0.75" VerticalAlignment="Center" />
+                    <Slider
+                        x:Name="PosSlider"
+                        Grid.Column="1"
+                        Minimum="0"
+                        Maximum="1"
+                        StepFrequency="1"
+                        SmallChange="1"
+                        LargeChange="5"
+                        ValueChanged="OnPositionChanged" />
+                    <TextBlock x:Name="DurText" Grid.Column="2" Text="--:--" Opacity="0.75" VerticalAlignment="Center" />
+                </Grid>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>
