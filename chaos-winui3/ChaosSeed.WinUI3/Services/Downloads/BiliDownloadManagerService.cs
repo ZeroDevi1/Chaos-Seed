@@ -199,10 +199,10 @@ public sealed class BiliDownloadManagerService
 
 public sealed class BiliDownloadSessionVm : INotifyPropertyChanged
 {
-    public string SessionId { get; init; } = "";
-    public string? Input { get; init; }
-    public string? DisplayTitle { get; init; }
-    public long StartedAtUnixMs { get; init; }
+    public string SessionId { get; set; } = "";
+    public string? Input { get; set; }
+    public string? DisplayTitle { get; set; }
+    public long StartedAtUnixMs { get; set; }
 
     private bool _done;
     private string _totalsText = "";
@@ -304,7 +304,7 @@ public sealed class BiliDownloadSessionVm : INotifyPropertyChanged
 
 public sealed class BiliDownloadJobVm : INotifyPropertyChanged
 {
-    public uint Index { get; init; }
+    public uint Index { get; set; }
 
     private uint? _pageNumber;
     private string _title = "";

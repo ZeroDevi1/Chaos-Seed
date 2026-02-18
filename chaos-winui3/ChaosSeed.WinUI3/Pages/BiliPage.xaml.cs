@@ -546,11 +546,11 @@ public sealed class BiliParsedPageVm : INotifyPropertyChanged
 {
     private bool? _isSelected = true;
 
-    public uint PageNumber { get; init; }
-    public string Cid { get; init; } = "";
-    public string PageTitle { get; init; } = "";
-    public uint? DurationS { get; init; }
-    public string? Dimension { get; init; }
+    public uint PageNumber { get; set; }
+    public string Cid { get; set; } = "";
+    public string PageTitle { get; set; } = "";
+    public uint? DurationS { get; set; }
+    public string? Dimension { get; set; }
 
     public bool? IsSelected
     {
