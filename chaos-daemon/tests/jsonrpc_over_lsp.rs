@@ -13,6 +13,11 @@ use chaos_proto::{
     MusicDownloadStatusParams, MusicDownloadTotals, MusicLoginQr, MusicLoginQrCreateParams, MusicLoginQrPollParams,
     MusicLoginQrPollResult, MusicLoginQrState, MusicProviderConfig, MusicRefreshCookieParams,
     MusicSearchParams, MusicTrack, MusicTrackPlayUrlParams, MusicTrackPlayUrlResult, OkReply, QqMusicCookie,
+    // bilibili video download (MVP)
+    BiliDownloadCancelParams, BiliDownloadStartParams,
+    BiliDownloadStartResult, BiliDownloadStatus, BiliDownloadStatusParams, BiliDownloadTotals,
+    BiliLoginQr, BiliLoginQrCreateParams, BiliLoginQrPollParams, BiliLoginQrPollResult, BiliLoginQrState,
+    BiliParseParams, BiliParseResult, BiliRefreshCookieParams, BiliRefreshCookieResult,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -381,6 +386,76 @@ impl ChaosService for FakeSvc {
     async fn music_download_cancel(
         &self,
         _params: MusicDownloadCancelParams,
+    ) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
+    async fn bili_login_qr_create(
+        &self,
+        _params: BiliLoginQrCreateParams,
+    ) -> Result<BiliLoginQr, String> {
+        Ok(BiliLoginQr {
+            session_id: "bili".to_string(),
+            mime: "image/png".to_string(),
+            base64: "".to_string(),
+            url: "https://example.com/qr".to_string(),
+            qrcode_key: "k".to_string(),
+            created_at_unix_ms: 0,
+        })
+    }
+
+    async fn bili_login_qr_poll(
+        &self,
+        params: BiliLoginQrPollParams,
+    ) -> Result<BiliLoginQrPollResult, String> {
+        Ok(BiliLoginQrPollResult {
+            session_id: params.session_id,
+            state: BiliLoginQrState::Scan,
+            message: None,
+            auth: None,
+        })
+    }
+
+    async fn bili_refresh_cookie(
+        &self,
+        params: BiliRefreshCookieParams,
+    ) -> Result<BiliRefreshCookieResult, String> {
+        Ok(BiliRefreshCookieResult { auth: params.auth })
+    }
+
+    async fn bili_parse(&self, _params: BiliParseParams) -> Result<BiliParseResult, String> {
+        Ok(BiliParseResult { videos: vec![] })
+    }
+
+    async fn bili_download_start(
+        &self,
+        _params: BiliDownloadStartParams,
+    ) -> Result<BiliDownloadStartResult, String> {
+        Ok(BiliDownloadStartResult {
+            session_id: "bdl".to_string(),
+        })
+    }
+
+    async fn bili_download_status(
+        &self,
+        _params: BiliDownloadStatusParams,
+    ) -> Result<BiliDownloadStatus, String> {
+        Ok(BiliDownloadStatus {
+            done: true,
+            totals: BiliDownloadTotals {
+                total: 0,
+                done: 0,
+                failed: 0,
+                skipped: 0,
+                canceled: 0,
+            },
+            jobs: vec![],
+        })
+    }
+
+    async fn bili_download_cancel(
+        &self,
+        _params: BiliDownloadCancelParams,
     ) -> Result<OkReply, String> {
         Ok(OkReply { ok: true })
     }

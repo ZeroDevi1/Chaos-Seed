@@ -24,11 +24,11 @@
 返回：
 
 ```json
-{"version":"0.4.6","git":"unknown","api":7}
+{"version":"0.4.6","git":"unknown","api":8}
 ```
 
 当前为：
-- `api = 7`（补齐 music: `trackPlayUrl` + 下载任务 start/status/cancel）。
+- `api = 8`（新增 bilibili 普通视频下载：登录/刷新/解析/下载任务）。
 
 ### `char* chaos_ffi_last_error_json(void)`
 
@@ -103,7 +103,7 @@ char* chaos_now_playing_snapshot_json(
 
 ```json
 {
-  "kugouBaseUrl": "http://127.0.0.1:3000",
+  "kugouBaseUrl": null,
   "neteaseBaseUrls": ["http://127.0.0.1:3001"],
   "neteaseAnonymousCookieUrl": "/register/anonimous"
 }
@@ -116,7 +116,7 @@ char* chaos_now_playing_snapshot_json(
 ```
 
 说明：
-- 酷狗：需要配置 `kugouBaseUrl` 才能启用相关能力（留空则不可用）。
+- 酷狗：`kugouBaseUrl` 已废弃并被忽略（为向后兼容保留字段）；酷狗能力已内置直连，无需配置。
 - 网易云：若 `neteaseBaseUrls` 为空，会使用内置的一组可用 API 列表；也可通过 config 覆盖。
 
 ### 搜索 / 列表
@@ -143,7 +143,7 @@ char* chaos_now_playing_snapshot_json(
 
 ### 登录（酷狗）
 
-- `char* chaos_music_kugou_login_qr_create_json(const char* login_type_utf8)`：依赖 `kugouBaseUrl` 配置；返回 `MusicLoginQr`。
+- `char* chaos_music_kugou_login_qr_create_json(const char* login_type_utf8)`：不再依赖 `kugouBaseUrl`；返回 `MusicLoginQr`。
 - `char* chaos_music_kugou_login_qr_poll_json(const char* session_id_utf8)`：成功时 `kugouUser` 非空。
 
 ### 下载（阻塞）
@@ -163,6 +163,34 @@ char* chaos_now_playing_snapshot_json(
 - `char* chaos_music_download_start_json(const char* start_params_json_utf8)` -> `MusicDownloadStartResult`
 - `char* chaos_music_download_status_json(const char* session_id_utf8)` -> `MusicDownloadStatus`
 - `char* chaos_music_download_cancel_json(const char* session_id_utf8)` -> `OkReply`
+
+## Bilibili 视频（BV/AV）下载（MVP）
+
+说明：
+- MVP 仅支持普通 BV/AV（含多P）；番剧/课程/合集等后续里程碑。
+- 字段形状对齐 `chaos-proto` 的 Bili DTO（`camelCase`）。
+- 合规边界：仅调用 B 站公开/官方接口获取资源 URL 并下载；不包含任何 DRM 绕过逻辑。
+
+### 登录（WEB 二维码）
+
+- `char* chaos_bili_login_qr_create_json(void)` -> `BiliLoginQr`（含二维码 base64）
+- `char* chaos_bili_login_qr_poll_json(const char* session_id_utf8)` -> `BiliLoginQrPollResult`（成功时 `auth` 非空，含 `cookie + refreshToken`）
+
+### Cookie 刷新
+
+- `char* chaos_bili_refresh_cookie_json(const char* params_json_utf8)` -> `BiliRefreshCookieResult`
+
+其中 `params_json_utf8` 为 `BiliRefreshCookieParams` JSON（包含 `auth`）。
+
+### 解析（BV/AV）
+
+- `char* chaos_bili_parse_json(const char* params_json_utf8)` -> `BiliParseResult`
+
+### 下载（任务 / 可轮询）
+
+- `char* chaos_bili_download_start_json(const char* params_json_utf8)` -> `BiliDownloadStartResult`
+- `char* chaos_bili_download_status_json(const char* session_id_utf8)` -> `BiliDownloadStatus`
+- `char* chaos_bili_download_cancel_json(const char* session_id_utf8)` -> `OkReply`
 
 ## 字幕（Thunder）
 

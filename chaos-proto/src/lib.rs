@@ -32,6 +32,15 @@ pub const METHOD_MUSIC_DOWNLOAD_START: &str = "music.download.start";
 pub const METHOD_MUSIC_DOWNLOAD_STATUS: &str = "music.download.status";
 pub const METHOD_MUSIC_DOWNLOAD_CANCEL: &str = "music.download.cancel";
 
+// Bilibili video download (BV/AV) - MVP
+pub const METHOD_BILI_LOGIN_QR_CREATE: &str = "bili.loginQrCreate";
+pub const METHOD_BILI_LOGIN_QR_POLL: &str = "bili.loginQrPoll";
+pub const METHOD_BILI_REFRESH_COOKIE: &str = "bili.refreshCookie";
+pub const METHOD_BILI_PARSE: &str = "bili.parse";
+pub const METHOD_BILI_DOWNLOAD_START: &str = "bili.download.start";
+pub const METHOD_BILI_DOWNLOAD_STATUS: &str = "bili.download.status";
+pub const METHOD_BILI_DOWNLOAD_CANCEL: &str = "bili.download.cancel";
+
 pub const METHOD_LIVE_DIR_CATEGORIES: &str = "liveDir.categories";
 pub const METHOD_LIVE_DIR_RECOMMEND_ROOMS: &str = "liveDir.recommendRooms";
 pub const METHOD_LIVE_DIR_CATEGORY_ROOMS: &str = "liveDir.categoryRooms";
@@ -558,6 +567,234 @@ pub struct MusicLoginQr {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MusicLoginQrPollParams {
+    pub session_id: String,
+}
+
+// -----------------------------
+// Bilibili video (BV/AV) download
+// -----------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliAuthState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cookie: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BiliLoginQrState {
+    Scan,
+    Confirm,
+    Done,
+    Timeout,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliLoginQr {
+    pub session_id: String,
+    pub mime: String,
+    pub base64: String,
+    pub url: String,
+    pub qrcode_key: String,
+    pub created_at_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliLoginQrCreateParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliLoginQrPollParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliLoginQrPollResult {
+    pub session_id: String,
+    pub state: BiliLoginQrState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth: Option<BiliAuthState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliRefreshCookieParams {
+    pub auth: BiliAuthState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliRefreshCookieResult {
+    pub auth: BiliAuthState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliParseParams {
+    pub input: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<BiliAuthState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliPage {
+    pub page_number: u32,
+    pub cid: String,
+    pub page_title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_s: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimension: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliParsedVideo {
+    pub aid: String,
+    pub bvid: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_mid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pub_time_unix_s: Option<i64>,
+    pub pages: Vec<BiliPage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliParseResult {
+    pub videos: Vec<BiliParsedVideo>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BiliApiType {
+    Auto,
+    Web,
+    Tv,
+    App,
+    Intl,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadOptions {
+    pub out_dir: String,
+    pub select_page: String,
+    pub dfn_priority: String,
+    pub encoding_priority: String,
+    pub file_pattern: String,
+    pub multi_file_pattern: String,
+    pub download_subtitle: bool,
+    pub skip_mux: bool,
+    pub concurrency: u32,
+    pub retries: u32,
+    pub ffmpeg_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadStartParams {
+    pub api: BiliApiType,
+    pub input: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<BiliAuthState>,
+    pub options: BiliDownloadOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadStartResult {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BiliJobState {
+    Pending,
+    Running,
+    Muxing,
+    Done,
+    Failed,
+    Skipped,
+    Canceled,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BiliJobPhase {
+    Parse,
+    Video,
+    Audio,
+    Subtitle,
+    Mux,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadJobStatus {
+    pub index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_number: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cid: Option<String>,
+    pub title: String,
+    pub state: BiliJobState,
+    pub phase: BiliJobPhase,
+    pub bytes_downloaded: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_total: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_bps: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadTotals {
+    pub total: u32,
+    pub done: u32,
+    pub failed: u32,
+    pub skipped: u32,
+    pub canceled: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadStatus {
+    pub done: bool,
+    pub totals: BiliDownloadTotals,
+    pub jobs: Vec<BiliDownloadJobStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadStatusParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BiliDownloadCancelParams {
     pub session_id: String,
 }
 

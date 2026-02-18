@@ -74,6 +74,11 @@
                         <muxc:SymbolIcon Symbol="Audio" />
                     </muxc:NavigationViewItem.Icon>
                 </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="B站下载" Tag="bili">
+                    <muxc:NavigationViewItem.Icon>
+                        <muxc:SymbolIcon Symbol="Video" />
+                    </muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
                 <muxc:NavigationViewItem Content="下载" Tag="downloads">
                     <muxc:NavigationViewItem.Icon>
                         <muxc:SymbolIcon Symbol="Download" />

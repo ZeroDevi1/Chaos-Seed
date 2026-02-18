@@ -70,6 +70,9 @@ daemon 会把弹幕以 **服务器通知**的形式推给客户端：
 - `music.qq.loginQrCreate` / `music.qq.loginQrPoll` / `music.qq.refreshCookie`
 - `music.kugou.loginQrCreate` / `music.kugou.loginQrPoll`
 - `music.download.start` / `music.download.status` / `music.download.cancel`
+- `bili.loginQrCreate` / `bili.loginQrPoll` / `bili.refreshCookie`
+- `bili.parse`
+- `bili.download.start` / `bili.download.status` / `bili.download.cancel`
 - `livestream.decodeManifest`
 - `live.open` / `live.close`
 - `danmaku.connect` / `danmaku.disconnect` / `danmaku.fetchImage`
@@ -204,7 +207,7 @@ params：`MusicProviderConfig`
 
 ```json
 {
-  "kugouBaseUrl": "http://127.0.0.1:3000",
+  "kugouBaseUrl": null,
   "neteaseBaseUrls": ["http://127.0.0.1:3001"],
   "neteaseAnonymousCookieUrl": "/register/anonimous"
 }
@@ -217,7 +220,7 @@ result：`OkReply`
 ```
 
 说明：
-- 酷狗：需要配置 `kugouBaseUrl` 才能启用相关能力（留空则不可用）。
+- 酷狗：`kugouBaseUrl` 已废弃并被忽略（为向后兼容保留字段）；酷狗能力已内置直连，无需配置。
 - 网易云：若 `neteaseBaseUrls` 为空，daemon 会使用内置的一组可用 API 列表；也可通过 `music.config.set` 覆盖。
 
 ### `music.searchTracks` / `music.searchAlbums` / `music.searchArtists`
@@ -310,7 +313,7 @@ result：`QqMusicCookie`
 
 ### `music.kugou.loginQrCreate` / `music.kugou.loginQrPoll`
 
-说明：依赖 `kugouBaseUrl` 配置；成功时 `kugouUser`（token/userid）非空。
+说明：不再依赖 `kugouBaseUrl`；成功时 `kugouUser`（token/userid）非空。
 
 ### `music.download.start` / `music.download.status` / `music.download.cancel`
 
@@ -340,6 +343,112 @@ status params：
 ```
 
 status result：`MusicDownloadStatus`（含 totals + jobs 状态）
+
+cancel params：
+
+```json
+{ "sessionId": "<downloadSessionId>" }
+```
+
+cancel result：`OkReply`
+
+## B站视频下载（MVP：BV/AV 普通视频）
+
+说明：
+- 字段形状与 `chaos-proto` 的 bili DTO 对齐（`camelCase`）。
+- 客户端负责保存登录态（`cookie`/`refreshToken`）；daemon 不落盘，只接收/返回。
+- **敏感数据**：不要在日志/错误上报中包含完整 cookie。
+
+### `bili.loginQrCreate` / `bili.loginQrPoll`（Web 扫码登录）
+
+创建二维码：
+
+params（空对象必传）：
+
+```json
+{}
+```
+
+result：`BiliLoginQr`（`base64` 为二维码 PNG）
+
+轮询：
+
+params：
+
+```json
+{ "sessionId": "<sessionId>" }
+```
+
+result：`BiliLoginQrPollResult`
+
+说明：
+- `state`：`scan | confirm | done | timeout | other`
+- 成功时 `auth` 非空（包含 `cookie + refreshToken`），客户端应保存并在解析/下载时传回。
+
+### `bili.refreshCookie`（手动/自动刷新 Cookie）
+
+params：
+
+```json
+{ "auth": { "cookie": "SESSDATA=...; bili_jct=...; ...", "refreshToken": "..." } }
+```
+
+result：`BiliRefreshCookieResult`（返回更新后的 `auth`）
+
+说明：
+- `bili.download.start` 内部会 **best-effort 自动刷新**（当接口返回需要刷新时），但建议 UI 也提供手动刷新按钮。
+
+### `bili.parse`（解析 BV/AV：view API）
+
+params：
+
+```json
+{ "input": "https://www.bilibili.com/video/BV...", "auth": null }
+```
+
+result：`BiliParseResult`
+
+说明：
+- MVP 仅支持普通 BV/AV（含多 P），后续番剧/课程/合集等会扩展。
+
+### `bili.download.start` / `bili.download.status` / `bili.download.cancel`
+
+start params：`BiliDownloadStartParams`
+
+```json
+{
+  "api": "web",
+  "input": "BV...",
+  "auth": { "cookie": "SESSDATA=...; bili_jct=...; ...", "refreshToken": "..." },
+  "options": {
+    "outDir": "D:/Videos",
+    "selectPage": "ALL",
+    "dfnPriority": "1080P 高码率, 1080P 高清, 720P 高清",
+    "encodingPriority": "hevc,av1,avc",
+    "filePattern": "<videoTitle>",
+    "multiFilePattern": "<videoTitle>/[P<pageNumberWithZero>]<pageTitle>",
+    "downloadSubtitle": true,
+    "skipMux": false,
+    "concurrency": 4,
+    "retries": 2,
+    "ffmpegPath": "C:/tools/ffmpeg/bin/ffmpeg.exe"
+  }
+}
+```
+
+start result：`BiliDownloadStartResult`
+
+```json
+{ "sessionId": "<downloadSessionId>" }
+```
+
+status params：
+
+```json
+{ "sessionId": "<downloadSessionId>" }
+```
+
+status result：`BiliDownloadStatus`（含 totals + jobs 进度）
 
 cancel params：
 

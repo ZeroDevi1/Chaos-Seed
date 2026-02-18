@@ -335,11 +335,11 @@ static string TakeOrThrow(IntPtr p, string what)
 }
 
 // 1) config.set
-// - 酷狗：需要配置 kugouBaseUrl 才能启用（留空则不可用）
+// - 酷狗：kugouBaseUrl 已废弃并被忽略（为向后兼容保留字段）；酷狗能力已内置直连，无需配置
 // - 网易云：neteaseBaseUrls 为空时会使用内置列表；也可在此覆盖
 var cfgJson = """
 {
-  "kugouBaseUrl": "http://127.0.0.1:3000",
+  "kugouBaseUrl": "http://127.0.0.1:3000", // ignored
   "neteaseBaseUrls": ["http://127.0.0.1:3001"],
   "neteaseAnonymousCookieUrl": "/register/anonimous"
 }

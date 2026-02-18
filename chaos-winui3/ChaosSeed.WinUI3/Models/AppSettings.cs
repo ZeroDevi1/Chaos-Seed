@@ -82,6 +82,30 @@ public sealed class AppSettings
     public int MusicDownloadRetries { get; set; } = 2;
     public bool MusicDownloadOverwrite { get; set; } = false;
 
+    // ----- bilibili video download (MVP: BV/AV) -----
+
+    public LiveBackendMode BiliBackendMode { get; set; } = LiveBackendMode.Auto;
+
+    // Auth (persisted in WinUI settings; daemon/ffi does not persist)
+    public string? BiliCookie { get; set; }
+    public string? BiliRefreshToken { get; set; }
+
+    // Download preferences
+    public string? BiliLastOutDir { get; set; }
+    public bool BiliAskOutDirEachTime { get; set; } = true;
+    public string BiliFilePattern { get; set; } = "<videoTitle>";
+    public string BiliMultiFilePattern { get; set; } = "<videoTitle>/[P<pageNumberWithZero>]<pageTitle>";
+    public string BiliDfnPriority { get; set; } =
+        "8K 超高清, HDR 真彩, 杜比视界, 1080P 高码率, 1080P 高清, 720P 高清, 480P 清晰, 360P 流畅";
+    public string BiliEncodingPriority { get; set; } = "hevc,av1,avc";
+    public int BiliConcurrency { get; set; } = 4;
+    public int BiliRetries { get; set; } = 2;
+    public bool BiliDownloadSubtitle { get; set; } = true;
+    public bool BiliSkipMux { get; set; } = false;
+
+    // External tools
+    public string? FfmpegPath { get; set; }
+
     // ----- updates (WinUI3 only; zip self-updater) -----
 
     public bool AutoUpdateEnabled { get; set; } = true;

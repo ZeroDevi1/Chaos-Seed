@@ -303,11 +303,11 @@ public sealed class LiveDirRoomCard
 
 ```csharp
 // 1) music.config.set
-// - 酷狗：需要配置 kugouBaseUrl 才能启用（留空则不可用）
+// - 酷狗：kugouBaseUrl 已废弃并被忽略（为向后兼容保留字段）；酷狗能力已内置直连，无需配置
 // - 网易云：neteaseBaseUrls 为空时会使用内置列表；也可在此覆盖
 var cfg = new
 {
-    kugouBaseUrl = "http://127.0.0.1:3000",
+    kugouBaseUrl = "http://127.0.0.1:3000", // ignored
     neteaseBaseUrls = new[] { "http://127.0.0.1:3001" },
     neteaseAnonymousCookieUrl = "/register/anonimous",
 };
@@ -382,3 +382,89 @@ while (true)
 ```
 
 DTO 结构参考 `chaos-daemon/docs/API.md` 的“音乐下载”章节。
+
+## B站视频下载（MVP: BV/AV）
+
+下面片段可接在“最小客户端”中（鉴权成功后）：
+
+```csharp
+// 1) 扫码登录：create -> poll
+var qr = await rpc.InvokeWithParameterObjectAsync<BiliLoginQr>(
+    "bili.loginQrCreate",
+    new { } // params 必须存在
+);
+
+BiliAuthState? auth = null;
+for (int i = 0; i < 300; i++)
+{
+    var poll = await rpc.InvokeWithParameterObjectAsync<BiliLoginQrPollResult>(
+        "bili.loginQrPoll",
+        new { sessionId = qr.SessionId }
+    );
+    if (poll.State == "done" && poll.Auth is not null)
+    {
+        auth = poll.Auth;
+        break;
+    }
+    if (poll.State == "timeout")
+    {
+        throw new Exception("login timeout");
+    }
+    await Task.Delay(1000);
+}
+
+// 2) 可选：手动刷新 Cookie（download.start 内也会 best-effort 自动刷新）
+if (auth is not null)
+{
+    var refreshed = await rpc.InvokeWithParameterObjectAsync<BiliRefreshCookieResult>(
+        "bili.refreshCookie",
+        new { auth }
+    );
+    auth = refreshed.Auth;
+}
+
+// 3) parse（拿标题/分P等；可选）
+var parsed = await rpc.InvokeWithParameterObjectAsync<BiliParseResult>(
+    "bili.parse",
+    new { input = "https://www.bilibili.com/video/BV...", auth }
+);
+Console.WriteLine("pages=" + (parsed.Videos?[0].Pages?.Length ?? 0));
+
+// 4) start/status/cancel
+var start = await rpc.InvokeWithParameterObjectAsync<BiliDownloadStartResult>(
+    "bili.download.start",
+    new
+    {
+        api = "web",
+        input = "BV...",
+        auth,
+        options = new
+        {
+            outDir = "D:/Videos",
+            selectPage = "ALL",
+            dfnPriority = "1080P 高码率, 1080P 高清, 720P 高清",
+            encodingPriority = "hevc,av1,avc",
+            filePattern = "<videoTitle>",
+            multiFilePattern = "<videoTitle>/[P<pageNumberWithZero>]<pageTitle>",
+            downloadSubtitle = true,
+            skipMux = false,
+            concurrency = 4,
+            retries = 2,
+            ffmpegPath = "C:/tools/ffmpeg/bin/ffmpeg.exe"
+        }
+    }
+);
+
+while (true)
+{
+    var st = await rpc.InvokeWithParameterObjectAsync<BiliDownloadStatus>(
+        "bili.download.status",
+        new { sessionId = start.SessionId }
+    );
+    Console.WriteLine($"done={st.Done} totals={st.Totals.Done}/{st.Totals.Total}");
+    if (st.Done) break;
+    await Task.Delay(800);
+}
+```
+
+DTO 结构参考 `chaos-daemon/docs/API.md` 的 “B站视频下载” 章节。

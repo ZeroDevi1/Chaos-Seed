@@ -2,6 +2,8 @@ using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 
 namespace ChaosSeed.WinUI3.Pages;
 
@@ -10,6 +12,7 @@ public sealed partial class SettingsPage : Page
     private bool _init;
     private bool _updateBusy;
     private UpdateAvailable? _available;
+    private bool _ffmpegBusy;
 
     public SettingsPage()
     {
@@ -72,13 +75,36 @@ public sealed partial class SettingsPage : Page
         BackdropCombo.IsEnabled = win11;
         BackdropHint.IsOpen = !win11;
 
-        MusicKugouBaseUrlBox.Text = s.KugouBaseUrl ?? "";
         MusicNeteaseBaseUrlsBox.Text = s.NeteaseBaseUrls ?? "";
         MusicNeteaseAnonUrlBox.Text = s.NeteaseAnonymousCookieUrl ?? "/register/anonimous";
         MusicAskOutDirToggle.IsOn = s.MusicAskOutDirEachTime;
         MusicPathTemplateBox.Text = string.IsNullOrWhiteSpace(s.MusicPathTemplate)
             ? new AppSettings().MusicPathTemplate
             : s.MusicPathTemplate;
+
+        BiliBackendCombo.SelectedIndex = s.BiliBackendMode switch
+        {
+            LiveBackendMode.Ffi => 1,
+            LiveBackendMode.Daemon => 2,
+            _ => 0, // Auto
+        };
+
+        BiliLoginStatusText.Text = string.IsNullOrWhiteSpace(s.BiliCookie) ? "未登录" : "已登录（Cookie 已保存）";
+        BiliAskOutDirToggle.IsOn = s.BiliAskOutDirEachTime;
+        BiliDfnPriorityBox.Text = string.IsNullOrWhiteSpace(s.BiliDfnPriority) ? new AppSettings().BiliDfnPriority : s.BiliDfnPriority;
+        BiliEncodingPriorityBox.Text = string.IsNullOrWhiteSpace(s.BiliEncodingPriority) ? "hevc,av1,avc" : s.BiliEncodingPriority;
+        BiliConcurrencyBox.Value = Math.Clamp(s.BiliConcurrency, 1, 16);
+        BiliRetriesBox.Value = Math.Clamp(s.BiliRetries, 0, 10);
+        BiliDownloadSubtitleToggle.IsOn = s.BiliDownloadSubtitle;
+        BiliSkipMuxToggle.IsOn = s.BiliSkipMux;
+        BiliFilePatternBox.Text = string.IsNullOrWhiteSpace(s.BiliFilePattern) ? "<videoTitle>" : s.BiliFilePattern;
+        BiliMultiFilePatternBox.Text = string.IsNullOrWhiteSpace(s.BiliMultiFilePattern)
+            ? "<videoTitle>/[P<pageNumberWithZero>]<pageTitle>"
+            : s.BiliMultiFilePattern;
+
+        FfmpegPathText.Text = string.IsNullOrWhiteSpace(s.FfmpegPath) ? "-" : s.FfmpegPath;
+        FfmpegStatusText.Text = "";
+        FfmpegProgressBar.Visibility = Visibility.Collapsed;
 
         InitUpdateCardFromSettings(s);
     }
@@ -262,6 +288,236 @@ public sealed partial class SettingsPage : Page
         SettingsService.Instance.Update(s => s.LiveDefaultFullscreen = LiveDefaultFullscreenToggle.IsOn);
     }
 
+    private void OnBiliBackendChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+        if (BiliBackendCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string tag)
+        {
+            return;
+        }
+
+        var mode = tag switch
+        {
+            "Ffi" => LiveBackendMode.Ffi,
+            "Daemon" => LiveBackendMode.Daemon,
+            _ => LiveBackendMode.Auto,
+        };
+        SettingsService.Instance.Update(s => s.BiliBackendMode = mode);
+    }
+
+    private void OnBiliClearLoginClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s =>
+        {
+            s.BiliCookie = null;
+            s.BiliRefreshToken = null;
+        });
+        BiliLoginStatusText.Text = "未登录";
+    }
+
+    private void OnBiliAskOutDirToggled(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+        SettingsService.Instance.Update(s => s.BiliAskOutDirEachTime = BiliAskOutDirToggle.IsOn);
+    }
+
+    private void OnBiliDfnPriorityLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+        SettingsService.Instance.Update(s => s.BiliDfnPriority = (BiliDfnPriorityBox.Text ?? "").Trim());
+    }
+
+    private void OnBiliEncodingPriorityLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+        SettingsService.Instance.Update(s => s.BiliEncodingPriority = (BiliEncodingPriorityBox.Text ?? "").Trim());
+    }
+
+    private void OnBiliConcurrencyChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        _ = args;
+        if (!_init)
+        {
+            return;
+        }
+
+        var v = (int)Math.Round(sender.Value);
+        v = Math.Clamp(v, 1, 16);
+        SettingsService.Instance.Update(s => s.BiliConcurrency = v);
+    }
+
+    private void OnBiliRetriesChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        _ = args;
+        if (!_init)
+        {
+            return;
+        }
+
+        var v = (int)Math.Round(sender.Value);
+        v = Math.Clamp(v, 0, 10);
+        SettingsService.Instance.Update(s => s.BiliRetries = v);
+    }
+
+    private void OnBiliDownloadSubtitleToggled(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s => s.BiliDownloadSubtitle = BiliDownloadSubtitleToggle.IsOn);
+    }
+
+    private void OnBiliSkipMuxToggled(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s => s.BiliSkipMux = BiliSkipMuxToggle.IsOn);
+    }
+
+    private void OnBiliFilePatternLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+        SettingsService.Instance.Update(s => s.BiliFilePattern = (BiliFilePatternBox.Text ?? "").Trim());
+    }
+
+    private void OnBiliMultiFilePatternLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+        SettingsService.Instance.Update(s => s.BiliMultiFilePattern = (BiliMultiFilePatternBox.Text ?? "").Trim());
+    }
+
+    private async void OnPickFfmpegClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        try
+        {
+            var picker = new FileOpenPicker();
+            picker.FileTypeFilter.Add(".exe");
+
+            var win = App.MainWindowInstance;
+            if (win is null)
+            {
+                throw new InvalidOperationException("MainWindow not ready");
+            }
+
+            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(win));
+            var file = await picker.PickSingleFileAsync();
+            if (file is null || string.IsNullOrWhiteSpace(file.Path))
+            {
+                return;
+            }
+
+            SettingsService.Instance.Update(s => s.FfmpegPath = file.Path);
+            FfmpegPathText.Text = file.Path;
+        }
+        catch (Exception ex)
+        {
+            FfmpegStatusText.Text = ex.Message;
+        }
+    }
+
+    private async void OnDownloadFfmpegClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init || _ffmpegBusy)
+        {
+            return;
+        }
+
+        _ffmpegBusy = true;
+        DownloadFfmpegButton.IsEnabled = false;
+        PickFfmpegButton.IsEnabled = false;
+        FfmpegProgressBar.Visibility = Visibility.Visible;
+        FfmpegProgressBar.Value = 0;
+        FfmpegStatusText.Text = "准备下载…";
+
+        try
+        {
+            var p = new Progress<ExternalToolProgress>(x =>
+            {
+                if (x.Percent is not null)
+                {
+                    FfmpegProgressBar.Value = Math.Clamp(x.Percent.Value, 0.0, 100.0);
+                }
+                if (!string.IsNullOrWhiteSpace(x.Message))
+                {
+                    FfmpegStatusText.Text = x.Message!;
+                }
+                else
+                {
+                    FfmpegStatusText.Text = x.Phase;
+                }
+            });
+
+            var res = await ExternalToolsService.Instance.InstallOrUpdateFfmpegAsync(p, CancellationToken.None);
+            FfmpegPathText.Text = res.FfmpegPath;
+            FfmpegStatusText.Text = $"已安装：{res.Version}";
+        }
+        catch (Exception ex)
+        {
+            FfmpegStatusText.Text = $"失败：{ex.Message}";
+        }
+        finally
+        {
+            FfmpegProgressBar.Visibility = Visibility.Collapsed;
+            DownloadFfmpegButton.IsEnabled = true;
+            PickFfmpegButton.IsEnabled = true;
+            _ffmpegBusy = false;
+        }
+    }
+
     private void OnLiveFullscreenAnimRateChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         _ = args;
@@ -289,19 +545,6 @@ public sealed partial class SettingsPage : Page
         }
 
         SettingsService.Instance.Update(s => s.DebugPlayerOverlay = DebugPlayerToggle.IsOn);
-    }
-
-    private void OnMusicKugouBaseUrlLostFocus(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        if (!_init)
-        {
-            return;
-        }
-
-        var v = (MusicKugouBaseUrlBox.Text ?? "").Trim().TrimEnd('/');
-        SettingsService.Instance.Update(s => s.KugouBaseUrl = string.IsNullOrWhiteSpace(v) ? null : v);
     }
 
     private void OnMusicNeteaseBaseUrlsLostFocus(object sender, RoutedEventArgs e)

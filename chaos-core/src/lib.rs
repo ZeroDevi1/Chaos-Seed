@@ -1,4 +1,5 @@
 pub mod danmaku;
+pub mod bili_video;
 pub mod live_directory;
 pub mod livestream;
 pub mod lyrics;

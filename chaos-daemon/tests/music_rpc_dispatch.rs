@@ -272,6 +272,88 @@ impl ChaosService for TestSvc {
     ) -> Result<OkReply, String> {
         Ok(OkReply { ok: true })
     }
+
+    async fn bili_login_qr_create(
+        &self,
+        _params: BiliLoginQrCreateParams,
+    ) -> Result<BiliLoginQr, String> {
+        Ok(BiliLoginQr {
+            session_id: "sid".to_string(),
+            mime: "image/png".to_string(),
+            base64: "".to_string(),
+            url: "https://example.invalid".to_string(),
+            qrcode_key: "key".to_string(),
+            created_at_unix_ms: 0,
+        })
+    }
+
+    async fn bili_login_qr_poll(
+        &self,
+        params: BiliLoginQrPollParams,
+    ) -> Result<BiliLoginQrPollResult, String> {
+        Ok(BiliLoginQrPollResult {
+            session_id: params.session_id,
+            state: BiliLoginQrState::Scan,
+            message: None,
+            auth: None,
+        })
+    }
+
+    async fn bili_refresh_cookie(
+        &self,
+        params: BiliRefreshCookieParams,
+    ) -> Result<BiliRefreshCookieResult, String> {
+        Ok(BiliRefreshCookieResult { auth: params.auth })
+    }
+
+    async fn bili_parse(&self, params: BiliParseParams) -> Result<BiliParseResult, String> {
+        Ok(BiliParseResult {
+            videos: vec![BiliParsedVideo {
+                aid: "1".to_string(),
+                bvid: params.input,
+                title: "t".to_string(),
+                desc: None,
+                pic: None,
+                owner_name: None,
+                owner_mid: None,
+                pub_time_unix_s: None,
+                pages: vec![],
+            }],
+        })
+    }
+
+    async fn bili_download_start(
+        &self,
+        _params: BiliDownloadStartParams,
+    ) -> Result<BiliDownloadStartResult, String> {
+        Ok(BiliDownloadStartResult {
+            session_id: "bili_dl".to_string(),
+        })
+    }
+
+    async fn bili_download_status(
+        &self,
+        _params: BiliDownloadStatusParams,
+    ) -> Result<BiliDownloadStatus, String> {
+        Ok(BiliDownloadStatus {
+            done: true,
+            totals: BiliDownloadTotals {
+                total: 0,
+                done: 0,
+                failed: 0,
+                skipped: 0,
+                canceled: 0,
+            },
+            jobs: vec![],
+        })
+    }
+
+    async fn bili_download_cancel(
+        &self,
+        _params: BiliDownloadCancelParams,
+    ) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
 }
 
 async fn rpc_call(
@@ -320,6 +402,10 @@ async fn music_methods_are_dispatchable() {
     // music.trackPlayUrl
     let resp = rpc_call(&mut cw, &mut br, 4, "music.trackPlayUrl", json!({ "service":"qq", "trackId":"1" })).await;
     assert_eq!(resp.pointer("/result/ext").and_then(|v| v.as_str()), Some("mp3"));
+
+    // bili.loginQrCreate
+    let resp = rpc_call(&mut cw, &mut br, 5, "bili.loginQrCreate", json!({})).await;
+    assert_eq!(resp.pointer("/result/sessionId").and_then(|v| v.as_str()), Some("sid"));
 
     server_task.abort();
 }

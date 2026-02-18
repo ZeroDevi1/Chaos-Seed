@@ -1,0 +1,45 @@
+using ChaosSeed.WinUI3.Models.Bili;
+
+namespace ChaosSeed.WinUI3.Services.BiliBackends;
+
+public sealed class ErrorBiliBackend : IBiliBackend
+{
+    private readonly string _name;
+    private readonly string _message;
+
+    public ErrorBiliBackend(string name, string message)
+    {
+        _name = name;
+        _message = message;
+    }
+
+    public string Name => _name;
+    public string? InitNotice => _message;
+
+    public Task<BiliLoginQr> LoginQrCreateAsync(CancellationToken ct)
+        => Task.FromException<BiliLoginQr>(new InvalidOperationException(_message));
+
+    public Task<BiliLoginQrPollResult> LoginQrPollAsync(string sessionId, CancellationToken ct)
+        => Task.FromException<BiliLoginQrPollResult>(new InvalidOperationException(_message));
+
+    public Task<BiliRefreshCookieResult> RefreshCookieAsync(BiliRefreshCookieParams p, CancellationToken ct)
+        => Task.FromException<BiliRefreshCookieResult>(new InvalidOperationException(_message));
+
+    public Task<BiliParseResult> ParseAsync(BiliParseParams p, CancellationToken ct)
+        => Task.FromException<BiliParseResult>(new InvalidOperationException(_message));
+
+    public Task<BiliDownloadStartResult> DownloadStartAsync(BiliDownloadStartParams p, CancellationToken ct)
+        => Task.FromException<BiliDownloadStartResult>(new InvalidOperationException(_message));
+
+    public Task<BiliDownloadStatus> DownloadStatusAsync(string sessionId, CancellationToken ct)
+        => Task.FromException<BiliDownloadStatus>(new InvalidOperationException(_message));
+
+    public Task CancelDownloadAsync(string sessionId, CancellationToken ct)
+        => Task.FromException(new InvalidOperationException(_message));
+
+    public void Dispose()
+    {
+        // nothing
+    }
+}
+

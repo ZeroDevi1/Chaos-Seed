@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.IO.Pipes;
 using ChaosSeed.WinUI3.Models;
+using ChaosSeed.WinUI3.Models.Bili;
 using ChaosSeed.WinUI3.Models.Music;
 using StreamJsonRpc;
 using StreamJsonRpc.Protocol;
@@ -707,6 +708,206 @@ public sealed class DaemonClient : IDisposable
         catch (RemoteInvocationException ex)
         {
             throw WrapRpcFailure("music.download.cancel", ex);
+        }
+    }
+
+    // ----- bilibili (video download) -----
+
+    public async Task<BiliLoginQr> BiliLoginQrCreateAsync(CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliLoginQr>(
+                "bili.loginQrCreate",
+                new { },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.loginQrCreate", ex);
+        }
+    }
+
+    public async Task<BiliLoginQrPollResult> BiliLoginQrPollAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliLoginQrPollResult>(
+                "bili.loginQrPoll",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.loginQrPoll", ex);
+        }
+    }
+
+    public async Task<BiliRefreshCookieResult> BiliRefreshCookieAsync(BiliRefreshCookieParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        if (p.Auth is null) throw new ArgumentException("missing auth", nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliRefreshCookieResult>(
+                "bili.refreshCookie",
+                new { auth = p.Auth },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.refreshCookie", ex);
+        }
+    }
+
+    public async Task<BiliParseResult> BiliParseAsync(BiliParseParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        var input = (p.Input ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            throw new ArgumentException("empty input", nameof(p));
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliParseResult>(
+                "bili.parse",
+                new { input, auth = p.Auth },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.parse", ex);
+        }
+    }
+
+    public async Task<BiliDownloadStartResult> BiliDownloadStartAsync(BiliDownloadStartParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        if (p.Options is null) throw new ArgumentException("missing options", nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        var input = (p.Input ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            throw new ArgumentException("empty input", nameof(p));
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliDownloadStartResult>(
+                "bili.download.start",
+                new
+                {
+                    api = (p.Api ?? "web").Trim(),
+                    input,
+                    auth = p.Auth,
+                    options = p.Options,
+                },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.download.start", ex);
+        }
+    }
+
+    public async Task<BiliDownloadStatus> BiliDownloadStatusAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliDownloadStatus>(
+                "bili.download.status",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.download.status", ex);
+        }
+    }
+
+    public async Task BiliDownloadCancelAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>(
+                "bili.download.cancel",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.download.cancel", ex);
         }
     }
 
