@@ -36,6 +36,11 @@
                             <Button Content="清除登录" Click="OnClearLoginClicked" />
                         </StackPanel>
 
+                        <TextBlock
+                            Text="提示：刷新 Cookie 仅用于 Web 登录；TV 登录会用于 TV API（api=tv）下载。"
+                            Opacity="0.7"
+                            TextWrapping="Wrap" />
+
                         <StackPanel x:Name="QrPanel" Spacing="10" Visibility="Collapsed">
                             <TextBlock x:Name="QrHintText" Text="" Opacity="0.8" TextWrapping="Wrap" />
                             <Image x:Name="QrImage" Width="220" Height="220" Stretch="Uniform" />

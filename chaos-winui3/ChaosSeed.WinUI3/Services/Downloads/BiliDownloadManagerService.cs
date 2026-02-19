@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using ChaosSeed.WinUI3.Models.Bili;
+using ChaosSeed.WinUI3.Services;
 using ChaosSeed.WinUI3.Services.BiliBackends;
 using Microsoft.UI.Dispatching;
 
@@ -42,6 +43,8 @@ public sealed class BiliDownloadManagerService
 
         // Prefer BBDown-style task API (daemon/ffi share the same semantics).
         BiliAuthBundle? bundle = null;
+        var hasWebAuth = false;
+        var hasTvAuth = false;
         try
         {
             var a = start.Auth;
@@ -49,6 +52,7 @@ public sealed class BiliDownloadManagerService
             var tv = (SettingsService.Instance.Current.BiliTvAccessToken ?? "").Trim();
             if (!string.IsNullOrWhiteSpace(cookie))
             {
+                hasWebAuth = true;
                 bundle = new BiliAuthBundle
                 {
                     Web = new BiliWebAuth
@@ -62,6 +66,7 @@ public sealed class BiliDownloadManagerService
             {
                 bundle ??= new BiliAuthBundle();
                 bundle.Tv = new BiliTvAuth { AccessToken = tv };
+                hasTvAuth = true;
             }
         }
         catch
@@ -69,9 +74,29 @@ public sealed class BiliDownloadManagerService
             bundle = null;
         }
 
+        // If user only has TV auth, force api=tv (avoids "未登录" on web APIs).
+        var requestedApi = (start.Api ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(requestedApi))
+        {
+            requestedApi = "auto";
+        }
+        if (!hasWebAuth && hasTvAuth && (requestedApi == "web" || requestedApi == "auto"))
+        {
+            requestedApi = "tv";
+        }
+
+        try
+        {
+            AppLog.Info($"bili.task.add api={requestedApi} web={hasWebAuth} tv={hasTvAuth} outDir={start.Options.OutDir} selectPage={start.Options.SelectPage}");
+        }
+        catch
+        {
+            // ignore
+        }
+
         var taskRes = await _backend.TaskAddAsync(new BiliTaskAddParams
         {
-            Api = start.Api,
+            Api = requestedApi,
             Input = start.Input,
             Auth = bundle,
             Options = start.Options,

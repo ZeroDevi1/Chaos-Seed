@@ -77,11 +77,23 @@ WinUI3 播放内核切换为 Flyleaf（基于 FFmpeg/DirectX），需要在可�
 
 这类问题通常与 WinUI 3 / Windows App Runtime 的启动自检或依赖缺失相关，建议按顺序排查：
 
+0. 先看 WinUI3 启动日志：`%LOCALAPPDATA%\\ChaosSeed\\logs\\winui3.log`  
+   - 现在 `Program.cs` 会在 `XamlCheckProcessRequirements()` 前后写入日志。  
+   - 若日志停在 `Calling XamlCheckProcessRequirements...`，通常说明 Windows App Runtime / VC++ 依赖未满足或安装异常。
 1. 确认已安装 **Windows App Runtime 1.8 (x64)**（本仓库当前 `ChaosSeed.WinUI3.csproj` 使用 `Microsoft.WindowsAppSDK 1.8.x`）。
    - PowerShell 快速检查：`(get-appxpackage micro*win*appruntime*).PackageFullName`（应能看到 `Microsoft.WindowsAppRuntime.1.8` 的 x64 包，通常包含 Framework/Main/Singleton 等）。
 2. 安装/修复 **Visual C++ Redistributable 2015-2022 x64**（VLC 与部分 WinUI 运行时依赖）。
 3. 重新 `msbuild ... /restore`，确保 NuGet 依赖完整还原后再运行。
 4. 若依旧崩溃：删除 `bin/`、`obj/` 后重建，避免旧的 XAML 生成物残留；并确保工程启用了自定义入口（本仓库通过 `DISABLE_XAML_GENERATED_MAIN` + `Program.cs` 在启动前调用 `XamlCheckProcessRequirements()`）。
+
+可选：运行脚本快速自检（在 Windows PowerShell 执行）：
+
+```powershell
+.\scripts\check_winui3_prereqs.ps1
+```
+
+> 备注：仓库默认把 **WinUI3 的 Release（zip / unpackaged）构建**设为 **Windows App SDK self-contained**（减少“未安装 Runtime 导致启动即崩溃”的情况）。  
+> 如需关闭（例如做 MSIX/Framework 依赖调试），可在构建时传：`/p:ChaosWinUI3SelfContained=false`。
 
 ### “解析中…” 一直不结束
 

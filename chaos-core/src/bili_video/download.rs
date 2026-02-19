@@ -21,11 +21,13 @@ async fn fetch_with_range(
     headers: &HeaderMap,
     range: Option<(u64, u64)>,
 ) -> Result<reqwest::Response, BiliError> {
+    // Downloads can legitimately take a long time; avoid the small default client timeout here.
+    const DL_TIMEOUT: Duration = Duration::from_secs(60 * 30);
     let mut req = http.get(url).headers(headers.clone());
     if let Some((start, end)) = range {
         req = req.header(reqwest::header::RANGE, format!("bytes={start}-{end}"));
     }
-    Ok(req.send().await?.error_for_status()?)
+    Ok(req.timeout(DL_TIMEOUT).send().await?.error_for_status()?)
 }
 
 fn parse_total_from_content_range(v: &str) -> Option<u64> {
@@ -37,10 +39,12 @@ fn parse_total_from_content_range(v: &str) -> Option<u64> {
 }
 
 pub async fn probe_size(http: &Client, url: &str, headers: &HeaderMap) -> Result<(Option<u64>, bool), BiliError> {
+    const DL_TIMEOUT: Duration = Duration::from_secs(60 * 5);
     let resp = http
         .get(url)
         .headers(headers.clone())
         .header(reqwest::header::RANGE, "bytes=0-0")
+        .timeout(DL_TIMEOUT)
         .send()
         .await?;
     let status = resp.status().as_u16();
@@ -68,7 +72,7 @@ pub async fn download_to_file_single(
     overwrite: bool,
     cancel: Option<&Arc<AtomicBool>>,
     progress: Option<ProgressCb>,
-) -> Result<u64, BiliError> {
+    ) -> Result<u64, BiliError> {
     if out_path.exists() && !overwrite {
         return Err(BiliError::Io("target exists".to_string()));
     }
@@ -99,6 +103,9 @@ pub async fn download_to_file_single(
             }
         };
         let total = resp.content_length();
+        if let Some(cb) = progress.as_ref() {
+            cb(0, total);
+        }
         let mut stream = resp.bytes_stream();
         let mut f = tokio::fs::File::create(&tmp).await?;
         let mut downloaded: u64 = 0;
@@ -207,6 +214,9 @@ pub async fn download_to_file_ranged(
     }
 
     let (total_opt, can_range) = probe_size(http, url, headers).await?;
+    if let Some(cb) = progress.as_ref() {
+        cb(0, total_opt);
+    }
     let conc = concurrency.clamp(1, 16);
     if !can_range || total_opt.unwrap_or(0) < 2 * 1024 * 1024 || conc <= 1 {
         return download_to_file_single(http, url, headers, out_path, retries, overwrite, cancel, progress).await;

@@ -322,10 +322,19 @@ public sealed partial class BiliPage : Page
 
         try
         {
+            var s = SettingsService.Instance.Current;
+            var hasTv = !string.IsNullOrWhiteSpace((s.BiliTvAccessToken ?? "").Trim());
             var auth = BuildAuthFromSettings();
             if (auth is null)
             {
-                SetInfo(InfoBarSeverity.Warning, "未登录", "请先扫码登录。");
+                if (hasTv)
+                {
+                    SetInfo(InfoBarSeverity.Informational, "仅 TV 登录", "TV 登录无法刷新 Web Cookie；如需 Cookie，请使用“Web 扫码登录”。");
+                }
+                else
+                {
+                    SetInfo(InfoBarSeverity.Warning, "未登录", "请先扫码登录。");
+                }
                 return;
             }
 
@@ -514,6 +523,8 @@ public sealed partial class BiliPage : Page
         {
             PersistParsedToMemory();
             var s = SettingsService.Instance.Current;
+            var hasTv = !string.IsNullOrWhiteSpace((s.BiliTvAccessToken ?? "").Trim());
+            var hasWeb = !string.IsNullOrWhiteSpace((s.BiliCookie ?? "").Trim());
 
             var outDir = await GetOutDirForDownloadAsync(CancellationToken.None);
             if (string.IsNullOrWhiteSpace(outDir))
@@ -555,7 +566,7 @@ public sealed partial class BiliPage : Page
 
             var start = new BiliDownloadStartParams
             {
-                Api = "web",
+                Api = hasWeb ? "web" : (hasTv ? "tv" : "web"),
                 Input = input,
                 Auth = BuildAuthFromSettings(),
                 Options = new BiliDownloadOptions

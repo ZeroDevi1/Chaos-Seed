@@ -16,6 +16,13 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Provide our own Program.Main to call XamlCheckProcessRequirements early. -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+
+    <!--
+      Default Release builds to self-contained Windows App SDK for zip/unpackaged distribution.
+      The MSIX packaging project overrides this to false via ProjectReference Properties.
+    -->
+    <WindowsAppSDKSelfContained Condition="'$(ChaosWinUI3SelfContained)' != ''">$(ChaosWinUI3SelfContained)</WindowsAppSDKSelfContained>
+    <WindowsAppSDKSelfContained Condition="'$(ChaosWinUI3SelfContained)' == '' and '$(Configuration)' == 'Release'">true</WindowsAppSDKSelfContained>
   </PropertyGroup>
 
   <ItemGroup>
