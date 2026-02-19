@@ -2956,6 +2956,16 @@ mod win {
                         if let Ok(v) = reqwest::header::HeaderValue::from_str(&referer) {
                             headers.insert(reqwest::header::REFERER, v);
                         }
+                    } else if !job.bvid.trim().is_empty() {
+                        let referer = format!("https://www.bilibili.com/video/{}", job.bvid.trim());
+                        if let Ok(v) = reqwest::header::HeaderValue::from_str(&referer) {
+                            headers.insert(reqwest::header::REFERER, v);
+                        }
+                    } else if !job.aid.trim().is_empty() {
+                        let referer = format!("https://www.bilibili.com/video/av{}", job.aid.trim());
+                        if let Ok(v) = reqwest::header::HeaderValue::from_str(&referer) {
+                            headers.insert(reqwest::header::REFERER, v);
+                        }
                     }
 
                     // ----- video download -----
@@ -3010,9 +3020,46 @@ mod win {
                         options.retries,
                         true,
                         Some(&cancel2),
-                        Some(video_prog),
+                        Some(video_prog.clone()),
                     )
                     .await;
+
+                    let video_res = match video_res {
+                        Ok(x) => Ok(x),
+                        Err(e0) => {
+                            let mut last = e0;
+                            let mut ok: Option<u64> = None;
+                            for u in v.backup_url.iter() {
+                                if cancel2.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                // Best-effort cleanup before retrying another URL.
+                                let _ = tokio::fs::remove_file(&video_tmp).await;
+                                let _ = tokio::fs::remove_file(video_tmp.with_extension("part")).await;
+
+                                match bili_video::download::download_to_file_ranged(
+                                    &client.http,
+                                    u,
+                                    &headers,
+                                    &video_tmp,
+                                    options.concurrency,
+                                    options.retries,
+                                    true,
+                                    Some(&cancel2),
+                                    Some(video_prog.clone()),
+                                )
+                                .await
+                                {
+                                    Ok(x) => {
+                                        ok = Some(x);
+                                        break;
+                                    }
+                                    Err(e) => last = e,
+                                }
+                            }
+                            ok.map(Ok).unwrap_or(Err(last))
+                        }
+                    };
 
                     if let Err(e) = video_res {
                         let mut st = status2.lock().await;
@@ -3056,9 +3103,44 @@ mod win {
                         options.retries,
                         true,
                         Some(&cancel2),
-                        Some(audio_prog),
+                        Some(audio_prog.clone()),
                     )
                     .await;
+                    let audio_res = match audio_res {
+                        Ok(x) => Ok(x),
+                        Err(e0) => {
+                            let mut last = e0;
+                            let mut ok: Option<u64> = None;
+                            for u in a.backup_url.iter() {
+                                if cancel2.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                let _ = tokio::fs::remove_file(&audio_tmp).await;
+                                let _ = tokio::fs::remove_file(audio_tmp.with_extension("part")).await;
+
+                                match bili_video::download::download_to_file_ranged(
+                                    &client.http,
+                                    u,
+                                    &headers,
+                                    &audio_tmp,
+                                    options.concurrency,
+                                    options.retries,
+                                    true,
+                                    Some(&cancel2),
+                                    Some(audio_prog.clone()),
+                                )
+                                .await
+                                {
+                                    Ok(x) => {
+                                        ok = Some(x);
+                                        break;
+                                    }
+                                    Err(e) => last = e,
+                                }
+                            }
+                            ok.map(Ok).unwrap_or(Err(last))
+                        }
+                    };
                     if let Err(e) = audio_res {
                         let mut st = status2.lock().await;
                         if let Some(j) = st.jobs.get_mut(job_idx) {

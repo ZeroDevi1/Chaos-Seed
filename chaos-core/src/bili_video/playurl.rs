@@ -256,6 +256,15 @@ fn parse_playurl_root<'a>(json: &'a Value) -> Result<&'a Value, BiliError> {
     }
 }
 
+fn normalize_media_url(s: &str) -> String {
+    let u = s.trim();
+    if u.starts_with("http://") && u.contains("bili") {
+        format!("https://{}", &u["http://".len()..])
+    } else {
+        u.to_string()
+    }
+}
+
 fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
     let quality = root
         .get("quality")
@@ -287,7 +296,7 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
         if let Some(vs) = dash.get("video").and_then(|v| v.as_array()) {
             for v in vs {
                 let id = v.get("id").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
-                let base_url = v.get("base_url").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                let base_url = normalize_media_url(v.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
                 if id == 0 || base_url.is_empty() {
                     continue;
                 }
@@ -296,7 +305,8 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
                     .and_then(|x| x.as_array())
                     .map(|arr| {
                         arr.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .filter_map(|x| x.as_str().map(normalize_media_url))
+                            .filter(|s| !s.trim().is_empty())
                             .collect()
                     })
                     .unwrap_or_default();
@@ -322,7 +332,7 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
         if let Some(as_) = dash.get("audio").and_then(|v| v.as_array()) {
             for a in as_ {
                 let id = a.get("id").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
-                let base_url = a.get("base_url").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                let base_url = normalize_media_url(a.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
                 if id == 0 || base_url.is_empty() {
                     continue;
                 }
@@ -331,7 +341,8 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
                     .and_then(|x| x.as_array())
                     .map(|arr| {
                         arr.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .filter_map(|x| x.as_str().map(normalize_media_url))
+                            .filter(|s| !s.trim().is_empty())
                             .collect()
                     })
                     .unwrap_or_default();

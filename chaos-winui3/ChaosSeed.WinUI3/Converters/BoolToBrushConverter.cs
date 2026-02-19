@@ -5,13 +5,36 @@ using System;
 
 namespace ChaosSeed.WinUI3.Converters;
 
-public sealed class BoolToBrushConverter : IValueConverter
+public sealed class BoolToBrushConverter : DependencyObject, IValueConverter
 {
+    public static readonly DependencyProperty TrueBrushProperty =
+        DependencyProperty.Register(
+            nameof(TrueBrush),
+            typeof(object),
+            typeof(BoolToBrushConverter),
+            new PropertyMetadata(null));
+
+    public static readonly DependencyProperty FalseBrushProperty =
+        DependencyProperty.Register(
+            nameof(FalseBrush),
+            typeof(object),
+            typeof(BoolToBrushConverter),
+            new PropertyMetadata(null));
+
     // NOTE:
-    // XAML ThemeResource lookups can yield values that are not Brush (e.g., Color or UnsetValue) depending on
-    // resource availability and platform/runtime. Keep these as object to avoid XAML parse-time assignment errors.
-    public object? TrueBrush { get; set; }
-    public object? FalseBrush { get; set; }
+    // - ThemeResource is only supported on DependencyProperties; keep these as DPs so XAML can assign ThemeResource.
+    // - Keep value type as object: ThemeResource lookups can yield values that are not Brush depending on availability.
+    public object? TrueBrush
+    {
+        get => (object?)GetValue(TrueBrushProperty);
+        set => SetValue(TrueBrushProperty, value);
+    }
+
+    public object? FalseBrush
+    {
+        get => (object?)GetValue(FalseBrushProperty);
+        set => SetValue(FalseBrushProperty, value);
+    }
 
     public object Convert(object value, Type targetType, object parameter, string language)
     {
@@ -34,20 +57,24 @@ public sealed class BoolToBrushConverter : IValueConverter
             return b;
         }
 
-        if (v is Windows.UI.Color c)
+        if (v is global::Windows.UI.Color c)
         {
-            return new SolidColorBrush(c);
+            var sb = new SolidColorBrush();
+            sb.Color = c;
+            return sb;
         }
 
         if (v is string s && TryParseHexColor(s, out var hc))
         {
-            return new SolidColorBrush(hc);
+            var sb = new SolidColorBrush();
+            sb.Color = hc;
+            return sb;
         }
 
         return null;
     }
 
-    private static bool TryParseHexColor(string s, out Windows.UI.Color c)
+    private static bool TryParseHexColor(string s, out global::Windows.UI.Color c)
     {
         c = default;
         var t = (s ?? "").Trim();
@@ -70,7 +97,7 @@ public sealed class BoolToBrushConverter : IValueConverter
             if (!ByteFromHex(t.Substring(0, 2), out var r)) return false;
             if (!ByteFromHex(t.Substring(2, 2), out var g)) return false;
             if (!ByteFromHex(t.Substring(4, 2), out var b)) return false;
-            c = Windows.UI.ColorHelper.FromArgb(255, r, g, b);
+            c = new global::Windows.UI.Color { A = 255, R = r, G = g, B = b };
             return true;
         }
         if (t.Length == 8)
@@ -79,7 +106,7 @@ public sealed class BoolToBrushConverter : IValueConverter
             if (!ByteFromHex(t.Substring(2, 2), out var r)) return false;
             if (!ByteFromHex(t.Substring(4, 2), out var g)) return false;
             if (!ByteFromHex(t.Substring(6, 2), out var b)) return false;
-            c = Windows.UI.ColorHelper.FromArgb(a, r, g, b);
+            c = new global::Windows.UI.Color { A = a, R = r, G = g, B = b };
             return true;
         }
 
