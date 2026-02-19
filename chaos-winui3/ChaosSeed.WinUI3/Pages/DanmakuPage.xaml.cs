@@ -4,7 +4,7 @@ using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using VirtualKey = Windows.System.VirtualKey;
+using VirtualKey = global::Windows.System.VirtualKey;
 
 namespace ChaosSeed.WinUI3.Pages;
 
@@ -222,4 +222,3 @@ public sealed partial class DanmakuPage : Page
         await ConnectAsync();
     }
 }
-

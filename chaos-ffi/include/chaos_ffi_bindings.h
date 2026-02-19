@@ -42,6 +42,40 @@ char *chaos_music_download_cancel_json(const char *session_id_utf8);
 
 char *chaos_music_download_blocking_json(const char *start_params_json_utf8);
 
+// -----------------------------
+// Bilibili video (FFI JSON)
+// -----------------------------
+
+char *chaos_bili_login_qr_create_json(void);
+
+char *chaos_bili_login_qr_poll_json(const char *session_id_utf8);
+
+char *chaos_bili_login_qr_create_v2_json(const char *params_json_utf8);
+
+char *chaos_bili_login_qr_poll_v2_json(const char *session_id_utf8);
+
+char *chaos_bili_check_login_json(const char *params_json_utf8);
+
+char *chaos_bili_refresh_cookie_json(const char *params_json_utf8);
+
+char *chaos_bili_parse_json(const char *params_json_utf8);
+
+char *chaos_bili_download_start_json(const char *params_json_utf8);
+
+char *chaos_bili_download_status_json(const char *session_id_utf8);
+
+char *chaos_bili_download_cancel_json(const char *session_id_utf8);
+
+char *chaos_bili_task_add_json(const char *params_json_utf8);
+
+char *chaos_bili_tasks_get_json(const char *params_json_utf8);
+
+char *chaos_bili_task_get_json(const char *params_json_utf8);
+
+char *chaos_bili_task_cancel_json(const char *params_json_utf8);
+
+char *chaos_bili_tasks_remove_finished_json(const char *params_json_utf8);
+
 uint32_t chaos_ffi_api_version(void);
 
 char *chaos_ffi_version_json(void);

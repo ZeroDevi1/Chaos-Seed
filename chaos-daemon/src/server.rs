@@ -23,6 +23,9 @@ use chaos_proto::{
     METHOD_BILI_DOWNLOAD_CANCEL, METHOD_BILI_DOWNLOAD_START, METHOD_BILI_DOWNLOAD_STATUS,
     METHOD_BILI_LOGIN_QR_CREATE, METHOD_BILI_LOGIN_QR_POLL, METHOD_BILI_PARSE,
     METHOD_BILI_REFRESH_COOKIE,
+    METHOD_BILI_CHECK_LOGIN, METHOD_BILI_LOGIN_QR_CREATE_V2, METHOD_BILI_LOGIN_QR_POLL_V2,
+    METHOD_BILI_TASK_ADD, METHOD_BILI_TASK_CANCEL, METHOD_BILI_TASK_GET, METHOD_BILI_TASKS_GET,
+    METHOD_BILI_TASKS_REMOVE_FINISHED,
     MusicAlbum, MusicAlbumTracksParams, MusicArtist, MusicArtistAlbumsParams, MusicDownloadCancelParams,
     MusicDownloadStartParams, MusicDownloadStartResult, MusicDownloadStatus, MusicDownloadStatusParams,
     MusicLoginQr, MusicLoginQrCreateParams, MusicLoginQrPollParams, MusicLoginQrPollResult,
@@ -30,8 +33,11 @@ use chaos_proto::{
     MusicTrackPlayUrlParams, MusicTrackPlayUrlResult,
     BiliDownloadCancelParams, BiliDownloadStartParams, BiliDownloadStartResult, BiliDownloadStatus,
     BiliDownloadStatusParams, BiliLoginQr, BiliLoginQrCreateParams, BiliLoginQrPollParams,
-    BiliLoginQrPollResult, BiliParseParams, BiliParseResult, BiliRefreshCookieParams,
-    BiliRefreshCookieResult,
+    BiliLoginQrCreateV2Params, BiliLoginQrPollResult, BiliLoginQrPollResultV2, BiliParseParams,
+    BiliParseResult, BiliRefreshCookieParams, BiliRefreshCookieResult,
+    BiliCheckLoginParams, BiliCheckLoginResult,
+    BiliTaskAddParams, BiliTaskAddResult, BiliTaskCancelParams, BiliTaskDetail,
+    BiliTaskGetParams, BiliTasksGetParams, BiliTasksGetResult, BiliTasksRemoveFinishedParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -201,10 +207,25 @@ pub trait ChaosService: Send + Sync + 'static {
         params: BiliLoginQrCreateParams,
     ) -> impl Future<Output = Result<BiliLoginQr, String>> + Send;
 
+    fn bili_login_qr_create_v2(
+        &self,
+        params: BiliLoginQrCreateV2Params,
+    ) -> impl Future<Output = Result<BiliLoginQr, String>> + Send;
+
     fn bili_login_qr_poll(
         &self,
         params: BiliLoginQrPollParams,
     ) -> impl Future<Output = Result<BiliLoginQrPollResult, String>> + Send;
+
+    fn bili_login_qr_poll_v2(
+        &self,
+        params: BiliLoginQrPollParams,
+    ) -> impl Future<Output = Result<BiliLoginQrPollResultV2, String>> + Send;
+
+    fn bili_check_login(
+        &self,
+        params: BiliCheckLoginParams,
+    ) -> impl Future<Output = Result<BiliCheckLoginResult, String>> + Send;
 
     fn bili_refresh_cookie(
         &self,
@@ -229,6 +250,32 @@ pub trait ChaosService: Send + Sync + 'static {
     fn bili_download_cancel(
         &self,
         params: BiliDownloadCancelParams,
+    ) -> impl Future<Output = Result<OkReply, String>> + Send;
+
+    // ----- bilibili tasks -----
+    fn bili_task_add(
+        &self,
+        params: BiliTaskAddParams,
+    ) -> impl Future<Output = Result<BiliTaskAddResult, String>> + Send;
+
+    fn bili_tasks_get(
+        &self,
+        params: BiliTasksGetParams,
+    ) -> impl Future<Output = Result<BiliTasksGetResult, String>> + Send;
+
+    fn bili_task_get(
+        &self,
+        params: BiliTaskGetParams,
+    ) -> impl Future<Output = Result<BiliTaskDetail, String>> + Send;
+
+    fn bili_task_cancel(
+        &self,
+        params: BiliTaskCancelParams,
+    ) -> impl Future<Output = Result<OkReply, String>> + Send;
+
+    fn bili_tasks_remove_finished(
+        &self,
+        params: BiliTasksRemoveFinishedParams,
     ) -> impl Future<Output = Result<OkReply, String>> + Send;
 }
 
@@ -755,6 +802,29 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                             }
                         }
                     }
+                    METHOD_BILI_LOGIN_QR_CREATE_V2 => {
+                        let params: BiliLoginQrCreateV2Params = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_login_qr_create_v2(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
                     METHOD_BILI_LOGIN_QR_POLL => {
                         let params: BiliLoginQrPollParams = match decode_params(req.params) {
                             Ok(v) => v,
@@ -766,6 +836,52 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                             }
                         };
                         match svc.bili_login_qr_poll(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_BILI_LOGIN_QR_POLL_V2 => {
+                        let params: BiliLoginQrPollParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_login_qr_poll_v2(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_BILI_CHECK_LOGIN => {
+                        let params: BiliCheckLoginParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_check_login(params).await {
                             Ok(res) => {
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
@@ -881,6 +997,121 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                             }
                         };
                         match svc.bili_download_cancel(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_BILI_TASK_ADD => {
+                        let params: BiliTaskAddParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_task_add(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_BILI_TASKS_GET => {
+                        let params: BiliTasksGetParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_tasks_get(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_BILI_TASK_GET => {
+                        let params: BiliTaskGetParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_task_get(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_BILI_TASK_CANCEL => {
+                        let params: BiliTaskCancelParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_task_cancel(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_BILI_TASKS_REMOVE_FINISHED => {
+                        let params: BiliTasksRemoveFinishedParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.bili_tasks_remove_finished(params).await {
                             Ok(res) => {
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());

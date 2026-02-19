@@ -1085,6 +1085,7 @@ version = "0.4.6"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "chaos-proto",
  "fastrand",
  "flate2",
  "futures-util",

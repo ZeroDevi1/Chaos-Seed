@@ -143,6 +143,15 @@ internal static partial class ChaosFfi
     internal static partial IntPtr chaos_bili_login_qr_poll_json(string session_id_utf8);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_login_qr_create_v2_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_login_qr_poll_v2_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_check_login_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_bili_refresh_cookie_json(string params_json_utf8);
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
@@ -156,6 +165,21 @@ internal static partial class ChaosFfi
 
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_bili_download_cancel_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_task_add_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_tasks_get_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_task_get_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_task_cancel_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_bili_tasks_remove_finished_json(string params_json_utf8);
 
     internal static string? TakeString(IntPtr p)
     {

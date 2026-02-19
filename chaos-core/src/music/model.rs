@@ -106,7 +106,8 @@ pub struct MusicArtist {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
-    /// For "kugou" service. When empty, kugou provider is disabled.
+    /// Deprecated: kugou provider no longer uses this base URL.
+    /// Kept only for backward compatibility; ignored.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kugou_base_url: Option<String>,
 

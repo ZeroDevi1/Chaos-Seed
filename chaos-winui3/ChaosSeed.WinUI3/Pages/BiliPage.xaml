@@ -30,7 +30,8 @@
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <Button Content="扫码登录" Click="OnLoginQrClicked" />
+                            <Button Content="Web 扫码登录" Click="OnLoginQrClicked" />
+                            <Button Content="TV 扫码登录" Click="OnLoginQrTvClicked" />
                             <Button Content="刷新 Cookie" Click="OnRefreshCookieClicked" />
                             <Button Content="清除登录" Click="OnClearLoginClicked" />
                         </StackPanel>

@@ -319,6 +319,8 @@ result：`QqMusicCookie`
 
 start params：`MusicDownloadStartParams`（包含 `config` + `auth` + `target` + `options`）
 
+说明：`target`（`MusicDownloadTarget`）字段使用 `camelCase`：`albumId` / `artistId`（仍兼容输入 `album_id` / `artist_id`）。
+
 示例（单曲）：
 
 ```json

@@ -1,3 +1,4 @@
+using System;
 using ChaosSeed.WinUI3.Pages;
 using ChaosSeed.WinUI3.Services;
 using Microsoft.UI;
@@ -6,6 +7,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using WinRT.Interop;
 
@@ -151,7 +153,11 @@ public sealed partial class MainWindow : Window
                 ContentFrame.Navigate(typeof(LyricsPage), null, new DrillInNavigationTransitionInfo());
                 break;
             case "music":
-                ContentFrame.Navigate(typeof(MusicPage), null, new DrillInNavigationTransitionInfo());
+                ContentFrame.Navigate(
+                    SettingsService.Instance.Current.UseNewMusicUi ? typeof(MusicPageV2) : typeof(MusicPage),
+                    null,
+                    new DrillInNavigationTransitionInfo()
+                );
                 break;
             case "bili":
                 ContentFrame.Navigate(typeof(BiliPage), null, new DrillInNavigationTransitionInfo());
@@ -179,6 +185,24 @@ public sealed partial class MainWindow : Window
         {
             Nav.SelectedItem = FindNavItemByTag("live") ?? Nav.MenuItems[0];
             ContentFrame.Navigate(typeof(LivePage), input, new DrillInNavigationTransitionInfo());
+        }
+        finally
+        {
+            _suppressSelectionChanged = false;
+        }
+    }
+
+    public void NavigateToMusic()
+    {
+        _suppressSelectionChanged = true;
+        try
+        {
+            Nav.SelectedItem = FindNavItemByTag("music") ?? Nav.MenuItems[0];
+            ContentFrame.Navigate(
+                SettingsService.Instance.Current.UseNewMusicUi ? typeof(MusicPageV2) : typeof(MusicPage),
+                null,
+                new DrillInNavigationTransitionInfo()
+            );
         }
         finally
         {
@@ -241,4 +265,70 @@ public sealed partial class MainWindow : Window
     public Grid FullScreenPopupRootElement => FullScreenPopupRoot;
     public Grid FullScreenBackdropElement => FullScreenBackdrop;
     public ContentControl FullScreenPlayerHostElement => FullScreenPlayerHost;
+    public ContentControl FullScreenOverlayHostElement => FullScreenOverlayHost;
+
+    public bool IsMusicOverlayOpen => MusicOverlayRoot.Visibility == Visibility.Visible;
+
+    public void ShowMusicOverlay(FrameworkElement content, string? coverUrl = null)
+    {
+        if (content is null) throw new ArgumentNullException(nameof(content));
+        UpdateMusicOverlayBackground(coverUrl);
+
+        try { MusicOverlayHost.Content = content; }
+        catch (Exception ex) { Services.AppLog.Exception("MainWindow.ShowMusicOverlay(set content)", ex); }
+
+        try
+        {
+            MusicOverlayRoot.IsHitTestVisible = true;
+            MusicOverlayRoot.Visibility = Visibility.Visible;
+            _ = MusicOverlayRoot.Focus(FocusState.Programmatic);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    public void HideMusicOverlay()
+    {
+        try
+        {
+            MusicOverlayRoot.IsHitTestVisible = false;
+            MusicOverlayRoot.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex) { Services.AppLog.Exception("MainWindow.HideMusicOverlay", ex); }
+
+        try { MusicOverlayHost.Content = null; }
+        catch (Exception ex) { Services.AppLog.Exception("MainWindow.HideMusicOverlay(clear content)", ex); }
+    }
+
+    public void UpdateMusicOverlayBackground(string? coverUrl)
+    {
+        try
+        {
+            MusicOverlayBackgroundImage.Source = Services.MusicUiUtil.TryCreateBitmap(coverUrl);
+        }
+        catch
+        {
+            MusicOverlayBackgroundImage.Source = null;
+        }
+    }
+
+    private void OnMusicOverlayBackdropTapped(object sender, TappedRoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        // Optional: click backdrop to close
+        HideMusicOverlay();
+    }
+
+    private void OnMusicOverlayKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        _ = sender;
+        if (e.Key == global::Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            HideMusicOverlay();
+        }
+    }
 }

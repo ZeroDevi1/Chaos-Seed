@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde_json::Value;
+use reqwest::Url;
 
 use super::{BiliClient, BiliError, bili_check_code, header_map_with_cookie};
 
@@ -41,6 +42,16 @@ fn re_aid() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"(?i)\bav(\d{1,20})\b").unwrap())
 }
 
+fn re_ep_id() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)\bep(\d{1,20})\b").unwrap())
+}
+
+fn re_season_id() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)\bss(\d{1,20})\b").unwrap())
+}
+
 pub fn parse_video_id(input: &str) -> Result<VideoId, BiliError> {
     let raw = input.trim();
     if raw.is_empty() {
@@ -61,6 +72,87 @@ pub fn parse_video_id(input: &str) -> Result<VideoId, BiliError> {
     }
 
     Err(BiliError::InvalidInput("unsupported input (expect BV/av/url)".to_string()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParsedInput {
+    Video(VideoId),
+    BangumiEpisode { ep_id: String },
+    BangumiSeason { season_id: String },
+}
+
+fn try_parse_input_sync(raw: &str) -> Option<ParsedInput> {
+    if let Some(m) = re_bvid().captures(raw).and_then(|c| c.get(1)) {
+        return Some(ParsedInput::Video(VideoId {
+            aid: None,
+            bvid: Some(m.as_str().to_string()),
+        }));
+    }
+    if let Some(m) = re_aid().captures(raw).and_then(|c| c.get(1)) {
+        return Some(ParsedInput::Video(VideoId {
+            aid: Some(m.as_str().to_string()),
+            bvid: None,
+        }));
+    }
+    if let Some(m) = re_ep_id().captures(raw).and_then(|c| c.get(1)) {
+        return Some(ParsedInput::BangumiEpisode {
+            ep_id: m.as_str().to_string(),
+        });
+    }
+    if let Some(m) = re_season_id().captures(raw).and_then(|c| c.get(1)) {
+        return Some(ParsedInput::BangumiSeason {
+            season_id: m.as_str().to_string(),
+        });
+    }
+    None
+}
+
+fn normalize_urlish_input(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if s.starts_with("http://") || s.starts_with("https://") {
+        return Some(s.to_string());
+    }
+    // Allow common "domain/path" inputs without scheme.
+    if s.contains('.') && (s.contains('/') || s.contains('?')) {
+        return Some(format!("https://{s}"));
+    }
+    None
+}
+
+async fn resolve_final_url(client: &BiliClient, url: &str) -> Result<String, BiliError> {
+    let u = Url::parse(url).map_err(|e| BiliError::InvalidInput(format!("invalid url: {e}")))?;
+    let resp = client.http.get(u).send().await?;
+    Ok(resp.url().to_string())
+}
+
+/// Parse user input and resolve short links (e.g. b23.tv) by following redirects.
+pub async fn parse_input(client: &BiliClient, input: &str) -> Result<ParsedInput, BiliError> {
+    let raw = input.trim();
+    if raw.is_empty() {
+        return Err(BiliError::InvalidInput("empty input".to_string()));
+    }
+
+    if let Some(p) = try_parse_input_sync(raw) {
+        return Ok(p);
+    }
+
+    // If it looks like a URL, try resolving redirects (b23.tv and other shorteners).
+    if let Some(url) = normalize_urlish_input(raw) {
+        let final_url = resolve_final_url(client, &url).await?;
+        if let Some(p) = try_parse_input_sync(&final_url) {
+            return Ok(p);
+        }
+        return Err(BiliError::InvalidInput(format!(
+            "unsupported url (no BV/av/ep/ss found): {final_url}"
+        )));
+    }
+
+    Err(BiliError::InvalidInput(
+        "unsupported input (expect BV/av/ep/ss/url)".to_string(),
+    ))
 }
 
 pub async fn fetch_view_info(
@@ -151,4 +243,3 @@ pub async fn fetch_view_info(
         pages,
     })
 }
-

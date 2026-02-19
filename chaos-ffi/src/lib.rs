@@ -46,7 +46,13 @@ use chaos_proto::{
     OkReply,
     QqMusicCookie,
     // bili
+    BiliApiType,
+    BiliAuthBundle,
+    BiliTvAuth,
+    BiliWebAuth,
     BiliAuthState,
+    BiliCheckLoginParams,
+    BiliCheckLoginResult,
     BiliDownloadJobStatus,
     BiliDownloadStartParams,
     BiliDownloadStartResult,
@@ -55,14 +61,26 @@ use chaos_proto::{
     BiliJobPhase,
     BiliJobState,
     BiliLoginQr,
+    BiliLoginQrCreateV2Params,
     BiliLoginQrPollResult,
+    BiliLoginQrPollResultV2,
     BiliLoginQrState,
+    BiliLoginType,
     BiliPage,
     BiliParseParams,
     BiliParseResult,
     BiliParsedVideo,
     BiliRefreshCookieParams,
     BiliRefreshCookieResult,
+    BiliTask,
+    BiliTaskAddParams,
+    BiliTaskAddResult,
+    BiliTaskCancelParams,
+    BiliTaskDetail,
+    BiliTaskGetParams,
+    BiliTasksGetParams,
+    BiliTasksGetResult,
+    BiliTasksRemoveFinishedParams,
 };
 
 const API_VERSION: u32 = 8;
@@ -1458,6 +1476,18 @@ fn map_bili_auth_to_proto(a: bili_video::auth::AuthState) -> BiliAuthState {
     }
 }
 
+fn map_core_web_auth_to_bundle(a: bili_video::auth::AuthState) -> Option<BiliAuthBundle> {
+    let cookie = a.cookie.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())?;
+    let refresh_token = a
+        .refresh_token
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Some(BiliAuthBundle {
+        web: Some(BiliWebAuth { cookie, refresh_token }),
+        tv: None,
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn chaos_bili_login_qr_create_json() -> *mut c_char {
     let res = std::panic::catch_unwind(|| -> Result<String, ()> {
@@ -1604,6 +1634,353 @@ pub extern "C" fn chaos_bili_login_qr_poll_json(session_id_utf8: *const c_char) 
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_login_qr_create_v2_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: BiliLoginQrCreateV2Params = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        match params.login_type {
+            BiliLoginType::Web => {
+                let client = {
+                    let st = bili_state();
+                    let locked = st.lock().map_err(|_| {
+                        set_last_error("bili state poisoned", None);
+                    })?;
+                    locked.client.clone()
+                };
+
+                let qr = runtime()
+                    .block_on(bili_video::auth::login_qr_create(&client))
+                    .map_err(|e| {
+                        set_last_error("bili login qr create failed", Some(e.to_string()));
+                    })?;
+
+                let sid = qr.qrcode_key.trim().to_string();
+                if sid.is_empty() {
+                    set_last_error("empty qrcode_key", None);
+                    return Err(());
+                }
+
+                {
+                    let st = bili_state();
+                    let mut locked = st.lock().map_err(|_| {
+                        set_last_error("bili state poisoned", None);
+                    })?;
+                    locked.login_sessions.insert(
+                        sid.clone(),
+                        BiliLoginSession {
+                            created_at_ms: now_unix_ms(),
+                            qrcode_key: qr.qrcode_key.clone(),
+                        },
+                    );
+                }
+
+                let out = BiliLoginQr {
+                    session_id: sid,
+                    mime: qr.mime,
+                    base64: qr.base64,
+                    url: qr.url,
+                    qrcode_key: qr.qrcode_key,
+                    created_at_unix_ms: qr.created_at_unix_ms,
+                };
+                serde_json::to_string(&out).map_err(|e| {
+                    set_last_error("failed to serialize BiliLoginQr", Some(e.to_string()));
+                })
+            }
+            BiliLoginType::Tv => {
+                let client = {
+                    let st = bili_state();
+                    let locked = st.lock().map_err(|_| {
+                        set_last_error("bili state poisoned", None);
+                    })?;
+                    locked.client.clone()
+                };
+
+                let (qr, tv_sess) = runtime()
+                    .block_on(bili_video::auth::login_tv_qr_create(&client))
+                    .map_err(|e| {
+                        set_last_error("bili tv login qr create failed", Some(e.to_string()));
+                    })?;
+
+                let sid = qr.qrcode_key.trim().to_string();
+                if sid.is_empty() {
+                    set_last_error("empty auth_code", None);
+                    return Err(());
+                }
+
+                {
+                    let st = bili_state();
+                    let mut locked = st.lock().map_err(|_| {
+                        set_last_error("bili state poisoned", None);
+                    })?;
+                    locked.tv_login_sessions.insert(
+                        sid.clone(),
+                        BiliTvLoginSession {
+                            created_at_ms: now_unix_ms(),
+                            sess: tv_sess,
+                        },
+                    );
+                }
+
+                let out = BiliLoginQr {
+                    session_id: sid,
+                    mime: qr.mime,
+                    base64: qr.base64,
+                    url: qr.url,
+                    qrcode_key: qr.qrcode_key,
+                    created_at_unix_ms: qr.created_at_unix_ms,
+                };
+                serde_json::to_string(&out).map_err(|e| {
+                    set_last_error("failed to serialize BiliLoginQr", Some(e.to_string()));
+                })
+            }
+        }
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_login_qr_create_v2_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_login_qr_poll_v2_json(session_id_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?.trim().to_string();
+        if sid.is_empty() {
+            set_last_error("session_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        // Prefer TV sessions if exists.
+        {
+            let (client, tv_sess, expired) = {
+                let st = bili_state();
+                let mut locked = st.lock().map_err(|_| {
+                    set_last_error("bili state poisoned", None);
+                })?;
+                let client = locked.client.clone();
+                if let Some(sess) = locked.tv_login_sessions.get(&sid) {
+                    let expired = now_unix_ms().saturating_sub(sess.created_at_ms) > 5 * 60 * 1000;
+                    let s2 = sess.sess.clone();
+                    if expired {
+                        locked.tv_login_sessions.remove(&sid);
+                    }
+                    (client, Some(s2), expired)
+                } else {
+                    (client, None, false)
+                }
+            };
+
+            if let Some(tv_sess) = tv_sess {
+                if expired {
+                    let out = BiliLoginQrPollResultV2 {
+                        session_id: sid,
+                        state: BiliLoginQrState::Timeout,
+                        message: Some("login session timeout".to_string()),
+                        auth: None,
+                    };
+                    return serde_json::to_string(&out).map_err(|e| {
+                        set_last_error("failed to serialize poll result", Some(e.to_string()));
+                    });
+                }
+
+                let r = runtime()
+                    .block_on(bili_video::auth::login_tv_qr_poll(&client, &tv_sess))
+                    .map_err(|e| {
+                        set_last_error("bili tv login qr poll failed", Some(e.to_string()));
+                    })?;
+
+                let state = match r.state {
+                    bili_video::auth::LoginQrState::Scan => BiliLoginQrState::Scan,
+                    bili_video::auth::LoginQrState::Confirm => BiliLoginQrState::Confirm,
+                    bili_video::auth::LoginQrState::Done => BiliLoginQrState::Done,
+                    bili_video::auth::LoginQrState::Timeout => BiliLoginQrState::Timeout,
+                    bili_video::auth::LoginQrState::Other => BiliLoginQrState::Other,
+                };
+
+                if matches!(state, BiliLoginQrState::Done) {
+                    let st = bili_state();
+                    if let Ok(mut locked) = st.lock() {
+                        locked.tv_login_sessions.remove(&sid);
+                    }
+                }
+
+                let auth = r.access_token.map(|access_token| BiliAuthBundle {
+                    web: None,
+                    tv: Some(BiliTvAuth { access_token }),
+                });
+
+                let out = BiliLoginQrPollResultV2 {
+                    session_id: sid,
+                    state,
+                    message: r.message,
+                    auth,
+                };
+                return serde_json::to_string(&out).map_err(|e| {
+                    set_last_error("failed to serialize poll result", Some(e.to_string()));
+                });
+            }
+        }
+
+        // Fallback to WEB sessions.
+        let (client, key, expired) = {
+            let st = bili_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            let Some(sess) = locked.login_sessions.get(&sid) else {
+                let out = BiliLoginQrPollResultV2 {
+                    session_id: sid,
+                    state: BiliLoginQrState::Other,
+                    message: Some("login session not found".to_string()),
+                    auth: None,
+                };
+                return serde_json::to_string(&out).map_err(|e| {
+                    set_last_error("failed to serialize poll result", Some(e.to_string()));
+                });
+            };
+            let expired = now_unix_ms().saturating_sub(sess.created_at_ms) > 5 * 60 * 1000;
+            let key = sess.qrcode_key.clone();
+            if expired {
+                locked.login_sessions.remove(&sid);
+            }
+            (locked.client.clone(), key, expired)
+        };
+
+        if expired {
+            let out = BiliLoginQrPollResultV2 {
+                session_id: sid,
+                state: BiliLoginQrState::Timeout,
+                message: Some("login session timeout".to_string()),
+                auth: None,
+            };
+            return serde_json::to_string(&out).map_err(|e| {
+                set_last_error("failed to serialize poll result", Some(e.to_string()));
+            });
+        }
+
+        let r = runtime()
+            .block_on(bili_video::auth::login_qr_poll(&client, &key))
+            .map_err(|e| {
+                set_last_error("bili login qr poll v2 failed", Some(e.to_string()));
+            })?;
+
+        let state = match r.state {
+            bili_video::auth::LoginQrState::Scan => BiliLoginQrState::Scan,
+            bili_video::auth::LoginQrState::Confirm => BiliLoginQrState::Confirm,
+            bili_video::auth::LoginQrState::Done => BiliLoginQrState::Done,
+            bili_video::auth::LoginQrState::Timeout => BiliLoginQrState::Timeout,
+            bili_video::auth::LoginQrState::Other => BiliLoginQrState::Other,
+        };
+
+        if matches!(state, BiliLoginQrState::Done) {
+            let st = bili_state();
+            if let Ok(mut locked) = st.lock() {
+                locked.login_sessions.remove(&sid);
+            }
+        }
+
+        let out = BiliLoginQrPollResultV2 {
+            session_id: sid,
+            state,
+            message: r.message,
+            auth: r.auth.and_then(map_core_web_auth_to_bundle),
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize poll result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_login_qr_poll_v2_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_check_login_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: BiliCheckLoginParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let mut missing: Vec<String> = Vec::new();
+
+        let web_cookie = params
+            .auth
+            .web
+            .as_ref()
+            .map(|w| w.cookie.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        if web_cookie.is_none() {
+            missing.push("web.cookie".to_string());
+        } else {
+            let c = web_cookie.as_deref().unwrap_or("");
+            if bili_video::cookie_get(c, "SESSDATA").is_none() {
+                missing.push("web.cookie.SESSDATA".to_string());
+            }
+            if bili_video::cookie_get(c, "bili_jct").is_none() {
+                missing.push("web.cookie.bili_jct".to_string());
+            }
+        }
+
+        let tv_token = params
+            .auth
+            .tv
+            .as_ref()
+            .map(|t| t.access_token.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if tv_token.is_none() {
+            missing.push("tv.accessToken".to_string());
+        }
+
+        let client = {
+            let st = bili_state();
+            let locked = st.lock().map_err(|_| set_last_error("bili state poisoned", None))?;
+            locked.client.clone()
+        };
+
+        let mut is_login = false;
+        if let Some(cookie) = web_cookie.as_deref() {
+            is_login = runtime()
+                .block_on(bili_video::auth::check_login_web(&client, cookie))
+                .unwrap_or(false);
+        }
+
+        let out = BiliCheckLoginResult {
+            is_login,
+            reason: (!is_login).then_some("not logged-in".to_string()),
+            missing_fields: missing,
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize checkLogin result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_check_login_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn chaos_bili_refresh_cookie_json(params_json_utf8: *const c_char) -> *mut c_char {
     let res = std::panic::catch_unwind(|| -> Result<String, ()> {
         let json = require_cstr(params_json_utf8, "params_json_utf8")?;
@@ -1656,40 +2033,100 @@ pub extern "C" fn chaos_bili_parse_json(params_json_utf8: *const c_char) -> *mut
             locked.client.clone()
         };
 
-        let view = runtime()
+        let out = runtime()
             .block_on(async move {
-                let vid = bili_video::parse::parse_video_id(&params.input)?;
-                bili_video::parse::fetch_view_info(&client, &vid, cookie).await
+                let parsed = bili_video::parse::parse_input(&client, &params.input).await?;
+                match parsed {
+                    bili_video::parse::ParsedInput::Video(vid) => {
+                        let view = bili_video::parse::fetch_view_info(&client, &vid, cookie).await?;
+                        let pages = view
+                            .pages
+                            .into_iter()
+                            .map(|p| BiliPage {
+                                page_number: p.page_number,
+                                cid: p.cid,
+                                page_title: p.page_title,
+                                duration_s: p.duration_s,
+                                dimension: p.dimension,
+                            })
+                            .collect::<Vec<_>>();
+                        Ok(BiliParseResult {
+                            videos: vec![BiliParsedVideo {
+                                aid: view.aid,
+                                bvid: view.bvid,
+                                title: view.title,
+                                desc: view.desc,
+                                pic: view.pic,
+                                owner_name: view.owner_name,
+                                owner_mid: view.owner_mid,
+                                pub_time_unix_s: view.pub_time_unix_s,
+                                pages,
+                            }],
+                        })
+                    }
+                    bili_video::parse::ParsedInput::BangumiEpisode { ep_id } => {
+                        let season = bili_video::pgc::fetch_pgc_season_by_ep_id(&client, &ep_id, cookie).await?;
+                        let pages = season
+                            .episodes
+                            .iter()
+                            .enumerate()
+                            .map(|(i, e)| BiliPage {
+                                page_number: (i as u32) + 1,
+                                cid: e.cid.clone(),
+                                page_title: e.title.clone(),
+                                duration_s: None,
+                                dimension: None,
+                            })
+                            .collect::<Vec<_>>();
+                        let first_aid = season.episodes.first().map(|e| e.aid.clone()).unwrap_or_default();
+                        Ok(BiliParseResult {
+                            videos: vec![BiliParsedVideo {
+                                aid: first_aid,
+                                bvid: "".to_string(),
+                                title: if season.title.trim().is_empty() { format!("ep{ep_id}") } else { season.title },
+                                desc: None,
+                                pic: season.cover,
+                                owner_name: None,
+                                owner_mid: None,
+                                pub_time_unix_s: None,
+                                pages,
+                            }],
+                        })
+                    }
+                    bili_video::parse::ParsedInput::BangumiSeason { season_id } => {
+                        let season = bili_video::pgc::fetch_pgc_season_by_season_id(&client, &season_id, cookie).await?;
+                        let pages = season
+                            .episodes
+                            .iter()
+                            .enumerate()
+                            .map(|(i, e)| BiliPage {
+                                page_number: (i as u32) + 1,
+                                cid: e.cid.clone(),
+                                page_title: e.title.clone(),
+                                duration_s: None,
+                                dimension: None,
+                            })
+                            .collect::<Vec<_>>();
+                        let first_aid = season.episodes.first().map(|e| e.aid.clone()).unwrap_or_default();
+                        Ok(BiliParseResult {
+                            videos: vec![BiliParsedVideo {
+                                aid: first_aid,
+                                bvid: "".to_string(),
+                                title: if season.title.trim().is_empty() { format!("ss{season_id}") } else { season.title },
+                                desc: None,
+                                pic: season.cover,
+                                owner_name: None,
+                                owner_mid: None,
+                                pub_time_unix_s: None,
+                                pages,
+                            }],
+                        })
+                    }
+                }
             })
-            .map_err(|e| {
+            .map_err(|e: bili_video::BiliError| {
                 set_last_error("bili parse failed", Some(e.to_string()));
             })?;
-
-        let pages = view
-            .pages
-            .into_iter()
-            .map(|p| BiliPage {
-                page_number: p.page_number,
-                cid: p.cid,
-                page_title: p.page_title,
-                duration_s: p.duration_s,
-                dimension: p.dimension,
-            })
-            .collect::<Vec<_>>();
-
-        let out = BiliParseResult {
-            videos: vec![BiliParsedVideo {
-                aid: view.aid,
-                bvid: view.bvid,
-                title: view.title,
-                desc: view.desc,
-                pic: view.pic,
-                owner_name: view.owner_name,
-                owner_mid: view.owner_mid,
-                pub_time_unix_s: view.pub_time_unix_s,
-                pages,
-            }],
-        };
 
         serde_json::to_string(&out).map_err(|e| {
             set_last_error("failed to serialize parse result", Some(e.to_string()));
@@ -2087,6 +2524,9 @@ pub extern "C" fn chaos_bili_download_start_json(params_json_utf8: *const c_char
             locked.downloads.insert(
                 session_id.clone(),
                 BiliDownloadSession {
+                    created_at_ms: now_unix_ms(),
+                    input: params.input.clone(),
+                    api: params.api,
                     status,
                     cancel,
                     handle,
@@ -2210,6 +2650,949 @@ pub extern "C" fn chaos_bili_download_cancel_json(session_id_utf8: *const c_char
         Ok(Err(())) => ptr::null_mut(),
         Err(_) => {
             set_last_error("panic in chaos_bili_download_cancel_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_task_add_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: BiliTaskAddParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        if params.options.out_dir.trim().is_empty() {
+            set_last_error("options.outDir is empty", None);
+            return Err(());
+        }
+        if matches!(params.api, BiliApiType::App) {
+            set_last_error("api=app is not supported yet (M3)", None);
+            return Err(());
+        }
+
+        let input = params.input.trim().to_string();
+        if input.is_empty() {
+            set_last_error("input is empty", None);
+            return Err(());
+        }
+        let input2 = input.clone();
+
+        let web_cookie = params
+            .auth
+            .as_ref()
+            .and_then(|b| b.web.as_ref())
+            .map(|w| w.cookie.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let web_refresh = params
+            .auth
+            .as_ref()
+            .and_then(|b| b.web.as_ref())
+            .and_then(|w| w.refresh_token.clone())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let tv_token = params
+            .auth
+            .as_ref()
+            .and_then(|b| b.tv.as_ref())
+            .map(|t| t.access_token.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let session_id = gen_session_id("bili_task");
+        let status = Arc::new(tokio::sync::Mutex::new(BiliDownloadStatus {
+            done: false,
+            totals: BiliDownloadTotals { total: 0, done: 0, failed: 0, skipped: 0, canceled: 0 },
+            jobs: vec![],
+        }));
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let client = {
+            let st = bili_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            locked.client.clone()
+        };
+
+        let status2 = Arc::clone(&status);
+        let cancel2 = Arc::clone(&cancel);
+        let api = params.api;
+        let options = params.options.clone();
+        let out_dir = params.options.out_dir.trim().to_string();
+
+        let handle = runtime().spawn(async move {
+            fn recompute_totals(st: &mut BiliDownloadStatus) {
+                let mut done: u32 = 0;
+                let mut failed: u32 = 0;
+                let mut skipped: u32 = 0;
+                let mut canceled: u32 = 0;
+                for j in &st.jobs {
+                    match j.state {
+                        BiliJobState::Done => done = done.saturating_add(1),
+                        BiliJobState::Failed => failed = failed.saturating_add(1),
+                        BiliJobState::Skipped => skipped = skipped.saturating_add(1),
+                        BiliJobState::Canceled => canceled = canceled.saturating_add(1),
+                        _ => {}
+                    }
+                }
+                st.totals.done = done;
+                st.totals.failed = failed;
+                st.totals.skipped = skipped;
+                st.totals.canceled = canceled;
+            }
+
+            // Web auth refresh (best-effort).
+            let mut web_auth = bili_video::auth::AuthState {
+                cookie: web_cookie,
+                refresh_token: web_refresh,
+            };
+            if web_auth.cookie.is_some() && web_auth.refresh_token.is_some() {
+                if let Ok(a) = bili_video::auth::refresh_cookie_if_needed(&client, &web_auth).await {
+                    web_auth = a;
+                }
+            }
+            let cookie = web_auth.cookie.as_deref();
+
+            #[derive(Debug, Clone)]
+            struct JobInput {
+                page_number: u32,
+                cid: String,
+                title: String,
+                dimension: Option<String>,
+                aid: String,
+                bvid: String,
+                ep_id: Option<String>,
+                video_title: String,
+                owner_name: String,
+                owner_mid: String,
+            }
+
+            let (all_count, jobs): (usize, Vec<JobInput>) = match bili_video::parse::parse_input(&client, &input2).await {
+                Ok(bili_video::parse::ParsedInput::Video(vid)) => {
+                    let view = match bili_video::parse::fetch_view_info(&client, &vid, cookie).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let mut st = status2.lock().await;
+                            st.jobs = vec![BiliDownloadJobStatus {
+                                index: 0,
+                                page_number: None,
+                                cid: None,
+                                title: "view".to_string(),
+                                state: BiliJobState::Failed,
+                                phase: BiliJobPhase::Parse,
+                                bytes_downloaded: 0,
+                                bytes_total: None,
+                                speed_bps: None,
+                                path: None,
+                                error: Some(e.to_string()),
+                            }];
+                            st.totals.total = 1;
+                            st.totals.failed = 1;
+                            st.done = true;
+                            return;
+                        }
+                    };
+
+                    let indices = bili_video::select_page::select_page_indices(view.pages.len(), &options.select_page)
+                        .unwrap_or_else(|_| (0..view.pages.len()).collect());
+
+                    let jobs = indices
+                        .iter()
+                        .map(|&pi| {
+                            let p = &view.pages[pi];
+                            JobInput {
+                                page_number: p.page_number,
+                                cid: p.cid.clone(),
+                                title: p.page_title.clone(),
+                                dimension: p.dimension.clone(),
+                                aid: view.aid.clone(),
+                                bvid: view.bvid.clone(),
+                                ep_id: None,
+                                video_title: view.title.clone(),
+                                owner_name: view.owner_name.clone().unwrap_or_default(),
+                                owner_mid: view.owner_mid.clone().unwrap_or_default(),
+                            }
+                        })
+                        .collect::<Vec<_>>();
+
+                    (view.pages.len(), jobs)
+                }
+                Ok(bili_video::parse::ParsedInput::BangumiEpisode { ep_id }) => {
+                    let season = match bili_video::pgc::fetch_pgc_season_by_ep_id(&client, &ep_id, cookie).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let mut st = status2.lock().await;
+                            st.jobs = vec![BiliDownloadJobStatus {
+                                index: 0,
+                                page_number: None,
+                                cid: None,
+                                title: "pgc".to_string(),
+                                state: BiliJobState::Failed,
+                                phase: BiliJobPhase::Parse,
+                                bytes_downloaded: 0,
+                                bytes_total: None,
+                                speed_bps: None,
+                                path: None,
+                                error: Some(e.to_string()),
+                            }];
+                            st.totals.total = 1;
+                            st.totals.failed = 1;
+                            st.done = true;
+                            return;
+                        }
+                    };
+
+                    let indices = bili_video::select_page::select_page_indices(season.episodes.len(), &options.select_page)
+                        .unwrap_or_else(|_| (0..season.episodes.len()).collect());
+                    let jobs = indices
+                        .iter()
+                        .filter_map(|&ei| season.episodes.get(ei).map(|e| (ei, e)))
+                        .map(|(ei, e)| JobInput {
+                            page_number: (ei as u32) + 1,
+                            cid: e.cid.clone(),
+                            title: e.title.clone(),
+                            dimension: None,
+                            aid: e.aid.clone(),
+                            bvid: "".to_string(),
+                            ep_id: Some(e.ep_id.clone()),
+                            video_title: if season.title.trim().is_empty() { format!("ep{ep_id}") } else { season.title.clone() },
+                            owner_name: "".to_string(),
+                            owner_mid: "".to_string(),
+                        })
+                        .collect::<Vec<_>>();
+                    (season.episodes.len(), jobs)
+                }
+                Ok(bili_video::parse::ParsedInput::BangumiSeason { season_id }) => {
+                    let season = match bili_video::pgc::fetch_pgc_season_by_season_id(&client, &season_id, cookie).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let mut st = status2.lock().await;
+                            st.jobs = vec![BiliDownloadJobStatus {
+                                index: 0,
+                                page_number: None,
+                                cid: None,
+                                title: "pgc".to_string(),
+                                state: BiliJobState::Failed,
+                                phase: BiliJobPhase::Parse,
+                                bytes_downloaded: 0,
+                                bytes_total: None,
+                                speed_bps: None,
+                                path: None,
+                                error: Some(e.to_string()),
+                            }];
+                            st.totals.total = 1;
+                            st.totals.failed = 1;
+                            st.done = true;
+                            return;
+                        }
+                    };
+
+                    let indices = bili_video::select_page::select_page_indices(season.episodes.len(), &options.select_page)
+                        .unwrap_or_else(|_| (0..season.episodes.len()).collect());
+                    let jobs = indices
+                        .iter()
+                        .filter_map(|&ei| season.episodes.get(ei).map(|e| (ei, e)))
+                        .map(|(ei, e)| JobInput {
+                            page_number: (ei as u32) + 1,
+                            cid: e.cid.clone(),
+                            title: e.title.clone(),
+                            dimension: None,
+                            aid: e.aid.clone(),
+                            bvid: "".to_string(),
+                            ep_id: Some(e.ep_id.clone()),
+                            video_title: if season.title.trim().is_empty() { format!("ss{season_id}") } else { season.title.clone() },
+                            owner_name: "".to_string(),
+                            owner_mid: "".to_string(),
+                        })
+                        .collect::<Vec<_>>();
+                    (season.episodes.len(), jobs)
+                }
+                Err(e) => {
+                    let mut st = status2.lock().await;
+                    st.jobs = vec![BiliDownloadJobStatus {
+                        index: 0,
+                        page_number: None,
+                        cid: None,
+                        title: "parse".to_string(),
+                        state: BiliJobState::Failed,
+                        phase: BiliJobPhase::Parse,
+                        bytes_downloaded: 0,
+                        bytes_total: None,
+                        speed_bps: None,
+                        path: None,
+                        error: Some(e.to_string()),
+                    }];
+                    st.totals.total = 1;
+                    st.totals.failed = 1;
+                    st.done = true;
+                    return;
+                }
+            };
+
+            {
+                let mut st = status2.lock().await;
+                st.jobs = jobs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, j)| BiliDownloadJobStatus {
+                        index: i as u32,
+                        page_number: Some(j.page_number),
+                        cid: Some(j.cid.clone()),
+                        title: j.title.clone(),
+                        state: BiliJobState::Pending,
+                        phase: BiliJobPhase::Parse,
+                        bytes_downloaded: 0,
+                        bytes_total: None,
+                        speed_bps: None,
+                        path: None,
+                        error: None,
+                    })
+                    .collect();
+                st.totals.total = st.jobs.len() as u32;
+            }
+
+            for (job_idx, job) in jobs.iter().enumerate() {
+                if cancel2.load(Ordering::Relaxed) { break; }
+
+                {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) {
+                        j.state = BiliJobState::Running;
+                        j.phase = BiliJobPhase::Parse;
+                        j.bytes_downloaded = 0;
+                        j.bytes_total = None;
+                        j.speed_bps = None;
+                        j.error = None;
+                    }
+                }
+
+                async fn fetch_play(
+                    client: &bili_video::BiliClient,
+                    api: BiliApiType,
+                    is_pgc: bool,
+                    aid: &str,
+                    bvid: &str,
+                    cid: &str,
+                    ep_id: Option<&str>,
+                    qn: i32,
+                    cookie: Option<&str>,
+                    tv_token: Option<&str>,
+                ) -> Result<(bili_video::playurl::PlayurlInfo, bool), bili_video::BiliError> {
+                    let web = async {
+                        if is_pgc {
+                            bili_video::playurl::fetch_playurl_dash_pgc_web(client, aid, cid, ep_id.unwrap_or(""), qn, cookie).await
+                        } else {
+                            bili_video::playurl::fetch_playurl_dash(client, bvid, aid, cid, qn, cookie).await
+                        }
+                    };
+                    let tv = async {
+                        if is_pgc {
+                            bili_video::playurl::fetch_playurl_dash_pgc_tv(client, aid, cid, ep_id.unwrap_or(""), qn, tv_token).await
+                        } else {
+                            bili_video::playurl::fetch_playurl_dash_tv(client, aid, cid, qn, tv_token).await
+                        }
+                    };
+                    match api {
+                        BiliApiType::Web | BiliApiType::Auto => match web.await {
+                            Ok(p) => Ok((p, false)),
+                            Err(e) => {
+                                if tv_token.is_some() && bili_video::api_error_code(&e) == Some(-101) {
+                                    Ok((tv.await?, true))
+                                } else {
+                                    Err(e)
+                                }
+                            }
+                        },
+                        BiliApiType::Tv => Ok((tv.await?, false)),
+                        BiliApiType::Intl => Err(bili_video::BiliError::InvalidInput("api=intl is not supported yet".to_string())),
+                        BiliApiType::App => Err(bili_video::BiliError::InvalidInput("api=app is not supported yet".to_string())),
+                    }
+                }
+
+                let is_pgc = job.ep_id.is_some();
+                let (base_play, used_tv0) = match fetch_play(
+                    &client,
+                    api,
+                    is_pgc,
+                    &job.aid,
+                    &job.bvid,
+                    &job.cid,
+                    job.ep_id.as_deref(),
+                    0,
+                    cookie,
+                    tv_token.as_deref(),
+                )
+                .await
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let mut st = status2.lock().await;
+                        if let Some(j) = st.jobs.get_mut(job_idx) { j.state = BiliJobState::Failed; j.error = Some(e.to_string()); }
+                        recompute_totals(&mut st);
+                        continue;
+                    }
+                };
+                let mut used_tv_fallback = used_tv0;
+                let effective_api = if used_tv_fallback { BiliApiType::Tv } else { api };
+
+                let qn = bili_video::playurl::choose_qn_by_dfn_priority(&base_play.accept_quality, &base_play.accept_description, &options.dfn_priority)
+                    .unwrap_or(base_play.quality);
+
+                let play = if qn != base_play.quality {
+                    match fetch_play(
+                        &client,
+                        effective_api,
+                        is_pgc,
+                        &job.aid,
+                        &job.bvid,
+                        &job.cid,
+                        job.ep_id.as_deref(),
+                        qn,
+                        cookie,
+                        tv_token.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok((p, used)) => {
+                            used_tv_fallback |= used;
+                            p
+                        }
+                        Err(_) => base_play,
+                    }
+                } else {
+                    base_play
+                };
+
+                let (v, a) = match bili_video::playurl::pick_dash_tracks(&play, &options.encoding_priority) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        let mut st = status2.lock().await;
+                        if let Some(j) = st.jobs.get_mut(job_idx) { j.state = BiliJobState::Failed; j.error = Some(e.to_string()); }
+                        recompute_totals(&mut st);
+                        continue;
+                    }
+                };
+
+                let mut dfn = play.quality.to_string();
+                for (i, q) in play.accept_quality.iter().enumerate() {
+                    if *q == play.quality {
+                        if let Some(desc) = play.accept_description.get(i) {
+                            if !desc.trim().is_empty() { dfn = desc.trim().to_string(); }
+                        }
+                    }
+                }
+
+                let res = match (v.width, v.height) { (Some(w), Some(h)) => format!("{w}x{h}"), _ => job.dimension.clone().unwrap_or_default() };
+                let fps = v.frame_rate.clone().unwrap_or_default();
+
+                let vars = bili_video::template::TemplateVars {
+                    video_title: job.video_title.clone(),
+                    page_number: job.page_number,
+                    page_title: job.title.clone(),
+                    bvid: job.bvid.clone(),
+                    aid: job.aid.clone(),
+                    cid: job.cid.clone(),
+                    dfn,
+                    res,
+                    fps,
+                    video_codecs: v.codecs.clone(),
+                    audio_codecs: a.codecs.clone(),
+                    owner_name: job.owner_name.clone(),
+                    owner_mid: job.owner_mid.clone(),
+                };
+
+                let out_mp4 = bili_video::template::build_output_path(
+                    std::path::Path::new(&out_dir),
+                    &options.file_pattern,
+                    &options.multi_file_pattern,
+                    all_count,
+                    &vars,
+                    "mp4",
+                );
+
+                if out_mp4.exists() {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) { j.state = BiliJobState::Skipped; j.phase = BiliJobPhase::Parse; j.path = Some(out_mp4.to_string_lossy().to_string()); j.error = Some("target exists".to_string()); }
+                    recompute_totals(&mut st);
+                    continue;
+                }
+
+                let video_tmp = out_mp4.with_extension("video.m4s");
+                let audio_tmp = out_mp4.with_extension("audio.m4s");
+
+                let buvid = bili_video::playurl::ensure_buvid_cookie(&client).await.ok();
+                let cookie_hdr = bili_video::merge_cookie_header(buvid.as_deref(), cookie);
+                let mut headers = bili_video::header_map_with_cookie(cookie_hdr.as_deref());
+                if let Some(ep) = job.ep_id.as_deref() {
+                    let referer = format!("https://www.bilibili.com/bangumi/play/ep{ep}");
+                    if let Ok(v) = reqwest::header::HeaderValue::from_str(&referer) {
+                        headers.insert(reqwest::header::REFERER, v);
+                    }
+                }
+
+                // video
+                {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) { j.phase = BiliJobPhase::Video; j.bytes_downloaded = 0; j.bytes_total = None; j.speed_bps = None; }
+                }
+                let prog_downloaded = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                let prog_t0 = std::sync::Arc::new(std::sync::Mutex::new((std::time::Instant::now(), 0u64)));
+
+                let video_prog: bili_video::download::ProgressCb = Arc::new({
+                    let status2 = status2.clone();
+                    let prog_downloaded = prog_downloaded.clone();
+                    let prog_t0 = prog_t0.clone();
+                    move |d, t| {
+                        prog_downloaded.store(d, Ordering::Relaxed);
+                        if let Ok(mut g) = prog_t0.lock() {
+                            let now = std::time::Instant::now();
+                            let dt = now.duration_since(g.0).as_secs_f64();
+                            let speed = if dt > 0.2 {
+                                let diff = d.saturating_sub(g.1);
+                                g.0 = now;
+                                g.1 = d;
+                                Some((diff as f64 / dt) as u64)
+                            } else { None };
+                            let status2 = status2.clone();
+                            tokio::spawn(async move {
+                                let mut st = status2.lock().await;
+                                if let Some(j) = st.jobs.get_mut(job_idx) {
+                                    j.bytes_downloaded = d;
+                                    j.bytes_total = t;
+                                    j.speed_bps = speed;
+                                }
+                            });
+                        }
+                    }
+                });
+
+                let video_res = bili_video::download::download_to_file_ranged(
+                    &client.http,
+                    &v.base_url,
+                    &headers,
+                    &video_tmp,
+                    options.concurrency,
+                    options.retries,
+                    true,
+                    Some(&cancel2),
+                    Some(video_prog),
+                )
+                .await;
+                if let Err(e) = video_res {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) { j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed }; j.error = Some(e.to_string()); }
+                    recompute_totals(&mut st);
+                    continue;
+                }
+
+                // audio
+                {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) { j.phase = BiliJobPhase::Audio; j.bytes_downloaded = prog_downloaded.load(Ordering::Relaxed); j.bytes_total = None; j.speed_bps = None; }
+                }
+                let audio_prog: bili_video::download::ProgressCb = Arc::new({
+                    let status2 = status2.clone();
+                    move |d, t| {
+                        let status2 = status2.clone();
+                        tokio::spawn(async move {
+                            let mut st = status2.lock().await;
+                            if let Some(j) = st.jobs.get_mut(job_idx) { j.bytes_downloaded = d; j.bytes_total = t; }
+                        });
+                    }
+                });
+                let audio_res = bili_video::download::download_to_file_ranged(
+                    &client.http,
+                    &a.base_url,
+                    &headers,
+                    &audio_tmp,
+                    options.concurrency,
+                    options.retries,
+                    true,
+                    Some(&cancel2),
+                    Some(audio_prog),
+                )
+                .await;
+                if let Err(e) = audio_res {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) { j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed }; j.error = Some(e.to_string()); }
+                    recompute_totals(&mut st);
+                    continue;
+                }
+
+                // subtitles
+                let mut sub_paths: Vec<std::path::PathBuf> = vec![];
+                if options.download_subtitle && job.ep_id.is_none() && !cancel2.load(Ordering::Relaxed) {
+                    let _ = {
+                        let mut st = status2.lock().await;
+                        if let Some(j) = st.jobs.get_mut(job_idx) { j.phase = BiliJobPhase::Subtitle; }
+                    };
+                    if !job.bvid.trim().is_empty() {
+                        if let Ok(subs) = bili_video::subtitle::fetch_subtitles(&client, &job.bvid, &job.cid, cookie).await {
+                        for s in subs {
+                            if cancel2.load(Ordering::Relaxed) { break; }
+                            if let Ok(srt) = bili_video::subtitle::download_subtitle_srt(&client, &s.url, cookie).await {
+                                let lang = music::util::sanitize_component(&s.lang);
+                                let path = out_mp4.with_extension(format!("{lang}.srt"));
+                                let _ = tokio::fs::write(&path, srt).await;
+                                sub_paths.push(path);
+                            }
+                        }
+                    }
+                    }
+                }
+
+                if cancel2.load(Ordering::Relaxed) {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) { j.state = BiliJobState::Canceled; j.error = Some("canceled".to_string()); }
+                    recompute_totals(&mut st);
+                    continue;
+                }
+
+                if options.skip_mux {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) {
+                        j.state = BiliJobState::Done;
+                        j.phase = BiliJobPhase::Mux;
+                        j.path = Some(out_mp4.to_string_lossy().to_string());
+                        if used_tv_fallback && j.error.is_none() {
+                            j.error = Some("info: web playurl returned -101, used tv token fallback".to_string());
+                        }
+                    }
+                    recompute_totals(&mut st);
+                    continue;
+                }
+
+                {
+                    let mut st = status2.lock().await;
+                    if let Some(j) = st.jobs.get_mut(job_idx) { j.state = BiliJobState::Muxing; j.phase = BiliJobPhase::Mux; j.bytes_downloaded = 0; j.bytes_total = None; }
+                }
+                let mux_res = bili_video::mux::mux_ffmpeg(&options.ffmpeg_path, &video_tmp, &audio_tmp, &sub_paths, &out_mp4, true, Some(&cancel2)).await;
+                let _ = tokio::fs::remove_file(&video_tmp).await;
+                let _ = tokio::fs::remove_file(&audio_tmp).await;
+
+                match mux_res {
+                    Ok(()) => {
+                        let mut st = status2.lock().await;
+                        if let Some(j) = st.jobs.get_mut(job_idx) {
+                            j.state = BiliJobState::Done;
+                            j.phase = BiliJobPhase::Mux;
+                            j.path = Some(out_mp4.to_string_lossy().to_string());
+                            if used_tv_fallback && j.error.is_none() {
+                                j.error = Some("info: web playurl returned -101, used tv token fallback".to_string());
+                            }
+                        }
+                        recompute_totals(&mut st);
+                    }
+                    Err(e) => {
+                        let mut st = status2.lock().await;
+                        if let Some(j) = st.jobs.get_mut(job_idx) { j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed }; j.error = Some(e.to_string()); }
+                        recompute_totals(&mut st);
+                    }
+                }
+            }
+
+            let mut st = status2.lock().await;
+            if cancel2.load(Ordering::Relaxed) {
+                for j in st.jobs.iter_mut() {
+                    if matches!(j.state, BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing) {
+                        j.state = BiliJobState::Canceled;
+                    }
+                }
+                recompute_totals(&mut st);
+            }
+            st.done = true;
+        });
+
+        {
+            let st = bili_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            locked.downloads.insert(
+                session_id.clone(),
+                BiliDownloadSession {
+                    created_at_ms: now_unix_ms(),
+                    input,
+                    api,
+                    status,
+                    cancel,
+                    handle,
+                },
+            );
+        }
+
+        serde_json::to_string(&BiliTaskAddResult { task_id: session_id }).map_err(|e| {
+            set_last_error("failed to serialize taskAdd result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_task_add_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_tasks_get_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let _params: BiliTasksGetParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let snapshot = {
+            let st = bili_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            locked
+                .downloads
+                .iter()
+                .map(|(id, sess)| {
+                    (
+                        id.clone(),
+                        sess.input.clone(),
+                        sess.api,
+                        sess.created_at_ms,
+                        Arc::clone(&sess.status),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut running: Vec<BiliTask> = Vec::new();
+        let mut finished: Vec<BiliTask> = Vec::new();
+
+        for (task_id, input, api, created_at_ms, status) in snapshot {
+            let st = runtime().block_on(async { status.lock().await.clone() });
+            let done = st.done;
+            let totals = st.totals.clone();
+            let task = BiliTask {
+                task_id,
+                input,
+                api,
+                created_at_unix_ms: created_at_ms,
+                done,
+                totals,
+            };
+            if done {
+                finished.push(task);
+            } else {
+                running.push(task);
+            }
+        }
+
+        running.sort_by(|a, b| b.created_at_unix_ms.cmp(&a.created_at_unix_ms));
+        finished.sort_by(|a, b| b.created_at_unix_ms.cmp(&a.created_at_unix_ms));
+
+        let out = BiliTasksGetResult { running, finished };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize tasksGet result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_tasks_get_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_task_get_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: BiliTaskGetParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let tid = params.task_id.trim().to_string();
+        if tid.is_empty() {
+            set_last_error("taskId is empty", None);
+            return Err(());
+        }
+
+        let (input, api, created_at_ms, status) = {
+            let st = bili_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            let Some(sess) = locked.downloads.get(&tid) else {
+                set_last_error("task not found", None);
+                return Err(());
+            };
+            (
+                sess.input.clone(),
+                sess.api,
+                sess.created_at_ms,
+                Arc::clone(&sess.status),
+            )
+        };
+
+        let st = runtime().block_on(async { status.lock().await.clone() });
+        let done = st.done;
+        let totals = st.totals.clone();
+        let task = BiliTask {
+            task_id: tid,
+            input,
+            api,
+            created_at_unix_ms: created_at_ms,
+            done,
+            totals,
+        };
+
+        let out = BiliTaskDetail { task, status: st };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize taskGet result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_task_get_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_task_cancel_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: BiliTaskCancelParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let sid = params.task_id.trim().to_string();
+        if sid.is_empty() {
+            set_last_error("taskId is empty", None);
+            return Err(());
+        }
+
+        let (status, cancel) = {
+            let st = bili_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            let Some(sess) = locked.downloads.get_mut(&sid) else {
+                set_last_error("task not found", None);
+                return Err(());
+            };
+            sess.handle.abort();
+            (Arc::clone(&sess.status), Arc::clone(&sess.cancel))
+        };
+
+        cancel.store(true, Ordering::Relaxed);
+        runtime().block_on(async move {
+            let mut st = status.lock().await;
+            if !st.done {
+                for j in st.jobs.iter_mut() {
+                    if matches!(j.state, BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing) {
+                        j.state = BiliJobState::Canceled;
+                    }
+                }
+                let mut done: u32 = 0;
+                let mut failed: u32 = 0;
+                let mut skipped: u32 = 0;
+                let mut canceled: u32 = 0;
+                for j in &st.jobs {
+                    match j.state {
+                        BiliJobState::Done => done = done.saturating_add(1),
+                        BiliJobState::Failed => failed = failed.saturating_add(1),
+                        BiliJobState::Skipped => skipped = skipped.saturating_add(1),
+                        BiliJobState::Canceled => canceled = canceled.saturating_add(1),
+                        _ => {}
+                    }
+                }
+                st.totals.done = done;
+                st.totals.failed = failed;
+                st.totals.skipped = skipped;
+                st.totals.canceled = canceled;
+                st.done = true;
+            }
+        });
+
+        serde_json::to_string(&OkReply { ok: true }).map_err(|e| {
+            set_last_error("failed to serialize cancel reply", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_task_cancel_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_bili_tasks_remove_finished_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let json = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: BiliTasksRemoveFinishedParams = serde_json::from_str(json).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let only_failed = params.only_failed.unwrap_or(false);
+        let filter_id = params.task_id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+
+        let snapshot = {
+            let st = bili_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            locked
+                .downloads
+                .iter()
+                .filter(|(k, _)| filter_id.as_ref().map(|id| *k == id).unwrap_or(true))
+                .map(|(k, sess)| (k.clone(), Arc::clone(&sess.status)))
+                .collect::<Vec<_>>()
+        };
+
+        let mut to_remove: Vec<String> = Vec::new();
+        for (k, status) in snapshot {
+            let st = runtime().block_on(async { status.lock().await.clone() });
+            if !st.done {
+                continue;
+            }
+            if only_failed && st.totals.failed == 0 && st.totals.canceled == 0 {
+                continue;
+            }
+            to_remove.push(k);
+        }
+
+        if !to_remove.is_empty() {
+            let st = bili_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("bili state poisoned", None);
+            })?;
+            for k in to_remove {
+                locked.downloads.remove(&k);
+            }
+        }
+
+        serde_json::to_string(&OkReply { ok: true }).map_err(|e| {
+            set_last_error("failed to serialize removeFinished reply", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_bili_tasks_remove_finished_json", None);
             ptr::null_mut()
         }
     }
@@ -2770,7 +4153,16 @@ struct BiliLoginSession {
 }
 
 #[derive(Debug)]
+struct BiliTvLoginSession {
+    created_at_ms: i64,
+    sess: bili_video::auth::TvLoginSession,
+}
+
+#[derive(Debug)]
 struct BiliDownloadSession {
+    created_at_ms: i64,
+    input: String,
+    api: BiliApiType,
     status: Arc<tokio::sync::Mutex<BiliDownloadStatus>>,
     cancel: Arc<AtomicBool>,
     handle: tokio::task::JoinHandle<()>,
@@ -2780,6 +4172,7 @@ struct BiliDownloadSession {
 struct BiliFfiState {
     client: bili_video::BiliClient,
     login_sessions: HashMap<String, BiliLoginSession>,
+    tv_login_sessions: HashMap<String, BiliTvLoginSession>,
     downloads: HashMap<String, BiliDownloadSession>,
 }
 
@@ -2790,6 +4183,7 @@ fn bili_state() -> &'static Mutex<BiliFfiState> {
         Mutex::new(BiliFfiState {
             client,
             login_sessions: HashMap::new(),
+            tv_login_sessions: HashMap::new(),
             downloads: HashMap::new(),
         })
     })

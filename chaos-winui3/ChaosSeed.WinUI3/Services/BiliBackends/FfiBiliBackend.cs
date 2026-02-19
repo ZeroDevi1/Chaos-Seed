@@ -74,6 +74,74 @@ public sealed class FfiBiliBackend : IBiliBackend
             ct
         );
 
+    public Task<BiliLoginQr> LoginQrCreateV2Async(string loginType, CancellationToken ct)
+        => InvokeObjectAsync<BiliLoginQr>(
+            "login.qrCreate",
+            json => ChaosFfi.chaos_bili_login_qr_create_v2_json(json),
+            new BiliLoginQrCreateV2Params { LoginType = (loginType ?? "").Trim() },
+            ct
+        );
+
+    public Task<BiliLoginQrPollResultV2> LoginQrPollV2Async(string sessionId, CancellationToken ct)
+        => InvokeSessionAsync<BiliLoginQrPollResultV2>(
+            "login.qrPoll",
+            sid => ChaosFfi.chaos_bili_login_qr_poll_v2_json(sid),
+            sessionId,
+            ct
+        );
+
+    public Task<BiliCheckLoginResult> CheckLoginAsync(BiliAuthBundle auth, CancellationToken ct)
+        => InvokeObjectAsync<BiliCheckLoginResult>(
+            "checkLogin",
+            json => ChaosFfi.chaos_bili_check_login_json(json),
+            new BiliCheckLoginParams { Auth = auth ?? new BiliAuthBundle() },
+            ct
+        );
+
+    public Task<BiliTaskAddResult> TaskAddAsync(BiliTaskAddParams p, CancellationToken ct)
+        => InvokeObjectAsync<BiliTaskAddResult>(
+            "task.add",
+            json => ChaosFfi.chaos_bili_task_add_json(json),
+            p,
+            ct
+        );
+
+    public Task<BiliTasksGetResult> TasksGetAsync(CancellationToken ct)
+        => InvokeObjectAsync<BiliTasksGetResult>(
+            "tasks.get",
+            json => ChaosFfi.chaos_bili_tasks_get_json(json),
+            new BiliTasksGetParams(),
+            ct
+        );
+
+    public Task<BiliTaskDetail> TaskGetAsync(string taskId, CancellationToken ct)
+        => InvokeObjectAsync<BiliTaskDetail>(
+            "task.get",
+            json => ChaosFfi.chaos_bili_task_get_json(json),
+            new BiliTaskGetParams { TaskId = (taskId ?? "").Trim() },
+            ct
+        );
+
+    public async Task TaskCancelAsync(string taskId, CancellationToken ct)
+    {
+        _ = await InvokeObjectAsync<OkReply>(
+            "task.cancel",
+            json => ChaosFfi.chaos_bili_task_cancel_json(json),
+            new BiliTaskCancelParams { TaskId = (taskId ?? "").Trim() },
+            ct
+        );
+    }
+
+    public async Task TasksRemoveFinishedAsync(BiliTasksRemoveFinishedParams p, CancellationToken ct)
+    {
+        _ = await InvokeObjectAsync<OkReply>(
+            "tasks.removeFinished",
+            json => ChaosFfi.chaos_bili_tasks_remove_finished_json(json),
+            p,
+            ct
+        );
+    }
+
     public Task<BiliParseResult> ParseAsync(BiliParseParams p, CancellationToken ct)
         => InvokeObjectAsync<BiliParseResult>(
             "parse",

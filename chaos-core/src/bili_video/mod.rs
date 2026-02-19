@@ -1,13 +1,16 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use reqwest::cookie::{CookieStore, Jar};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
+use reqwest::Url;
 
 pub mod auth;
 pub mod download;
 pub mod mux;
 pub mod parse;
+pub mod pgc;
 pub mod playurl;
 pub mod select_page;
 pub mod subtitle;
@@ -29,6 +32,16 @@ pub enum BiliError {
     Crypto(String),
     #[error("mux error: {0}")]
     Mux(String),
+}
+
+pub fn api_error_code(err: &BiliError) -> Option<i64> {
+    let BiliError::Api(msg) = err else {
+        return None;
+    };
+    let s = msg.trim();
+    let rest = s.strip_prefix("code=")?;
+    let num = rest.split(':').next()?.trim();
+    num.parse::<i64>().ok()
 }
 
 impl From<reqwest::Error> for BiliError {
@@ -87,6 +100,7 @@ pub struct BiliClient {
     pub timeout: Duration,
     wbi_cache: std::sync::Arc<std::sync::Mutex<Option<WbiCache>>>,
     buvid_cache: std::sync::Arc<std::sync::Mutex<Option<BuvidCache>>>,
+    cookie_jar: std::sync::Arc<Jar>,
 }
 
 impl BiliClient {
@@ -98,9 +112,11 @@ impl BiliClient {
         endpoints: BiliEndpoints,
         timeout: Duration,
     ) -> Result<Self, BiliError> {
+        let jar = std::sync::Arc::new(Jar::default());
         let http = Client::builder()
             .user_agent(default_user_agent())
             .timeout(timeout)
+            .cookie_provider(jar.clone())
             .build()
             .map_err(|e| BiliError::Http(e.to_string()))?;
         Ok(Self {
@@ -109,6 +125,7 @@ impl BiliClient {
             timeout,
             wbi_cache: std::sync::Arc::new(std::sync::Mutex::new(None)),
             buvid_cache: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            cookie_jar: jar,
         })
     }
 
@@ -147,6 +164,18 @@ impl BiliClient {
             });
         }
     }
+
+    pub fn cookies_for_url(&self, url: &str) -> Option<String> {
+        let u = Url::parse(url).ok()?;
+        let hv = self.cookie_jar.cookies(&u)?;
+        let s = hv.to_str().ok()?.trim();
+        if s.is_empty() { None } else { Some(s.to_string()) }
+    }
+
+    pub fn cookies_for_www(&self) -> Option<String> {
+        let base = self.endpoints.www_base.trim_end_matches('/');
+        self.cookies_for_url(&format!("{base}/"))
+    }
 }
 
 pub fn mask_cookie_for_log(cookie: &str) -> String {
@@ -175,6 +204,63 @@ pub fn cookie_get(cookie: &str, name: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub fn parse_cookie_kv(cookie: &str) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for part in cookie.split(';') {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        let Some((k, v)) = p.split_once('=') else {
+            continue;
+        };
+        let k = k.trim();
+        let v = v.trim();
+        if !k.is_empty() && !v.is_empty() {
+            out.insert(k.to_string(), v.to_string());
+        }
+    }
+    out
+}
+
+pub fn cookie_kv_to_string(kv: &BTreeMap<String, String>) -> String {
+    kv.iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+pub fn merge_cookie_strings(old_cookie: &str, new_cookie: &str) -> Option<String> {
+    let mut kv = parse_cookie_kv(old_cookie);
+    for (k, v) in parse_cookie_kv(new_cookie) {
+        kv.insert(k, v);
+    }
+    let s = cookie_kv_to_string(&kv).trim().trim_end_matches(';').trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+pub fn extract_cookie_kv_from_url_query(url_s: &str) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let s = url_s.trim();
+    if s.is_empty() {
+        return out;
+    }
+    let Ok(url) = Url::parse(s) else {
+        return out;
+    };
+    for (k, v) in url.query_pairs() {
+        let k = k.trim();
+        let v = v.trim();
+        if k.is_empty() || v.is_empty() {
+            continue;
+        }
+        if k.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            out.insert(k.to_string(), v.to_string());
+        }
+    }
+    out
 }
 
 pub fn merge_cookie_header(buvid_cookie: Option<&str>, cookie: Option<&str>) -> Option<String> {
@@ -245,4 +331,3 @@ pub fn bili_check_code(json: &serde_json::Value) -> Result<(), BiliError> {
         .to_string();
     Err(BiliError::Api(format!("code={code}: {msg}")))
 }
-

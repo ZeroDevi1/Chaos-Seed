@@ -6,6 +6,14 @@ use serde_json::{Value, json};
 use crate::music::error::MusicError;
 use crate::music::model::{AuthState, MusicAlbum, MusicArtist, MusicQuality, MusicService, MusicTrack, ProviderConfig};
 
+const DEFAULT_NETEASE_BASE_URLS: &[&str] = &[
+    "http://plugin.changsheng.space:3000",
+    "https://wyy.xhily.com",
+    "http://111.229.38.178:3333",
+    "http://dg-t.cn:3000",
+    "https://zm.armoe.cn",
+];
+
 fn bases(cfg: &ProviderConfig) -> Result<Vec<String>, MusicError> {
     let mut out: Vec<String> = Vec::new();
     for raw in &cfg.netease_base_urls {
@@ -15,6 +23,17 @@ fn bases(cfg: &ProviderConfig) -> Result<Vec<String>, MusicError> {
         }
         if !out.contains(&b) {
             out.push(b);
+        }
+    }
+    if out.is_empty() {
+        for raw in DEFAULT_NETEASE_BASE_URLS {
+            let b = raw.trim().trim_end_matches('/').to_string();
+            if b.is_empty() {
+                continue;
+            }
+            if !out.contains(&b) {
+                out.push(b);
+            }
         }
     }
     if out.is_empty() {
@@ -419,7 +438,15 @@ pub async fn track_download_url(
 
     let cookie = auth.netease_cookie.as_deref();
     let q = quality_id.trim();
-    let payload = match q {
+    let (br, expect_ext) = match q {
+        "mp3_128" => (128000, "mp3"),
+        "mp3_192" => (192000, "mp3"),
+        "mp3_320" => (320000, "mp3"),
+        "flac" => (999000, "flac"),
+        _ => (320000, "mp3"),
+    };
+
+    let payload_download_url = match q {
         "mp3_128" => json!({ "id": id, "br": 128000 }),
         "mp3_192" => json!({ "id": id, "br": 192000 }),
         "mp3_320" => json!({ "id": id, "br": 320000 }),
@@ -427,20 +454,101 @@ pub async fn track_download_url(
         _ => json!({ "id": id, "br": 320000 }),
     };
 
-    let json = post_json_try_bases(http, cfg, "/song/download/url", &payload, cookie, timeout).await?;
-    // Some services return { data: { url: ... } }, others { url: ... }.
-    let url = json
-        .pointer("/data/url")
-        .or_else(|| json.get("url"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if url.is_empty() {
-        return Err(MusicError::Other(
-            "netease: empty download url (may require login or different API)".to_string(),
-        ));
+    let payload_song_url_v1 = json!({
+        "id": id,
+        "ids": [id],
+        "level": if q == "flac" { "lossless" } else { "exhigh" },
+        "encodeType": if q == "flac" { "flac" } else { "mp3" }
+    });
+
+    let payload_song_url = json!({ "id": id, "ids": [id], "br": br });
+
+    fn extract_url_and_type(json: &Value) -> (String, Option<String>) {
+        let url = json
+            .pointer("/data/url")
+            .or_else(|| json.pointer("/data/0/url"))
+            .or_else(|| json.get("url"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let ty = json
+            .pointer("/data/type")
+            .or_else(|| json.pointer("/data/0/type"))
+            .or_else(|| json.get("type"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        (url, ty)
     }
-    let ext = if q == "flac" { "flac" } else { "mp3" }.to_string();
-    Ok((url, ext))
+
+    let mut last_info: Option<String> = None;
+    for base in bases(cfg)? {
+        let attempts: [(&str, &Value); 3] = [
+            ("/song/download/url", &payload_download_url),
+            ("/song/url/v1", &payload_song_url_v1),
+            ("/song/url", &payload_song_url),
+        ];
+
+        for (path, payload) in attempts {
+            let url = if path.starts_with('/') {
+                format!("{base}{path}")
+            } else {
+                format!("{base}/{path}")
+            };
+            let json = match post_json(http, &append_timestamp(&url), payload, cookie, timeout).await {
+                Ok(v) => v,
+                Err(e) => {
+                    last_info = Some(format!("baseUrl={base} path={path} httpError={e}"));
+                    continue;
+                }
+            };
+            let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
+            if code != 200 && code != 0 {
+                last_info = Some(format!("baseUrl={base} path={path} code={code}"));
+                continue;
+            }
+            let (u, ty) = extract_url_and_type(&json);
+            if u.is_empty() {
+                last_info = Some(format!("baseUrl={base} path={path} emptyUrl"));
+                continue;
+            }
+
+            let ext = ty
+                .as_deref()
+                .map(|s| s.trim().trim_start_matches('.'))
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    if u.contains(".flac") {
+                        Some("flac".to_string())
+                    } else if u.contains(".mp3") {
+                        Some("mp3".to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| expect_ext.to_string());
+            return Ok((u, ext));
+        }
+    }
+
+    Err(MusicError::Other(format!(
+        "netease: failed to get download url (last: {})",
+        last_info.unwrap_or_else(|| "unknown".to_string())
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bases_returns_defaults_when_empty() {
+        let cfg = ProviderConfig::default();
+        let out = bases(&cfg).expect("bases");
+        assert!(!out.is_empty());
+        // Keep behavior stable: empty config should still allow netease provider to work.
+        assert!(out.iter().any(|s| s.contains("xhily")));
+    }
 }

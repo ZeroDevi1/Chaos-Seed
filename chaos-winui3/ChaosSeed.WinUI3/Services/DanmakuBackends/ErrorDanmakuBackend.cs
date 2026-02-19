@@ -15,7 +15,11 @@ public sealed class ErrorDanmakuBackend : IDanmakuBackend
     public string Name { get; }
     public string? InitNotice => _message;
 
-    public event EventHandler<DanmakuMessage>? DanmakuMessageReceived;
+    public event EventHandler<DanmakuMessage>? DanmakuMessageReceived
+    {
+        add { }
+        remove { }
+    }
 
     public Task<DanmakuConnectResult> ConnectAsync(string input, CancellationToken ct)
     {
@@ -41,7 +45,5 @@ public sealed class ErrorDanmakuBackend : IDanmakuBackend
 
     public void Dispose()
     {
-        DanmakuMessageReceived = null;
     }
 }
-

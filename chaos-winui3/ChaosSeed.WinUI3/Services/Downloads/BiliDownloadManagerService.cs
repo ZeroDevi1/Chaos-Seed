@@ -21,6 +21,7 @@ public sealed class BiliDownloadManagerService
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _pollCts = new(StringComparer.Ordinal);
 
     public ObservableCollection<BiliDownloadSessionVm> ActiveSessions { get; } = new();
+    public BiliParseMemoryCache ParseMemory { get; } = new();
 
     public event EventHandler? Changed;
 
@@ -39,11 +40,47 @@ public sealed class BiliDownloadManagerService
 
         ct.ThrowIfCancellationRequested();
 
-        var res = await _backend.DownloadStartAsync(start, ct);
-        var sessionId = (res.SessionId ?? "").Trim();
+        // Prefer BBDown-style task API (daemon/ffi share the same semantics).
+        BiliAuthBundle? bundle = null;
+        try
+        {
+            var a = start.Auth;
+            var cookie = (a?.Cookie ?? "").Trim();
+            var tv = (SettingsService.Instance.Current.BiliTvAccessToken ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(cookie))
+            {
+                bundle = new BiliAuthBundle
+                {
+                    Web = new BiliWebAuth
+                    {
+                        Cookie = cookie,
+                        RefreshToken = string.IsNullOrWhiteSpace(a?.RefreshToken) ? null : a!.RefreshToken!.Trim(),
+                    }
+                };
+            }
+            if (!string.IsNullOrWhiteSpace(tv))
+            {
+                bundle ??= new BiliAuthBundle();
+                bundle.Tv = new BiliTvAuth { AccessToken = tv };
+            }
+        }
+        catch
+        {
+            bundle = null;
+        }
+
+        var taskRes = await _backend.TaskAddAsync(new BiliTaskAddParams
+        {
+            Api = start.Api,
+            Input = start.Input,
+            Auth = bundle,
+            Options = start.Options,
+        }, ct);
+
+        var sessionId = (taskRes.TaskId ?? "").Trim();
         if (string.IsNullOrWhiteSpace(sessionId))
         {
-            throw new InvalidOperationException("empty sessionId");
+            throw new InvalidOperationException("empty taskId");
         }
 
         var vm = new BiliDownloadSessionVm
@@ -74,7 +111,7 @@ public sealed class BiliDownloadManagerService
 
         try
         {
-            await _backend.CancelDownloadAsync(sid, ct);
+            await _backend.TaskCancelAsync(sid, ct);
         }
         catch
         {
@@ -83,7 +120,7 @@ public sealed class BiliDownloadManagerService
 
         try
         {
-            var st = await _backend.DownloadStatusAsync(sid, ct);
+            var st = (await _backend.TaskGetAsync(sid, ct)).Status;
             _dq.TryEnqueue(() =>
             {
                 var vm = ActiveSessions.FirstOrDefault(x => string.Equals(x.SessionId, sid, StringComparison.Ordinal));
@@ -156,7 +193,7 @@ public sealed class BiliDownloadManagerService
                     BiliDownloadStatus st;
                     try
                     {
-                        st = await _backend.DownloadStatusAsync(sid, ct);
+                        st = (await _backend.TaskGetAsync(sid, ct)).Status;
                     }
                     catch
                     {

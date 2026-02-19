@@ -18,7 +18,7 @@ using Microsoft.UI.Xaml.Media.Animation;
 using StreamJsonRpc;
 using Windows.Foundation;
 using Windows.Storage.Streams;
-using VirtualKey = Windows.System.VirtualKey;
+using VirtualKey = global::Windows.System.VirtualKey;
 
 namespace ChaosSeed.WinUI3.Pages;
 

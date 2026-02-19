@@ -17,7 +17,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Newtonsoft.Json.Linq;
 using Windows.Storage.Pickers;
 using Windows.Storage.Streams;
-using VirtualKey = Windows.System.VirtualKey;
+using VirtualKey = global::Windows.System.VirtualKey;
 using WinRT.Interop;
 
 namespace ChaosSeed.WinUI3.Pages;

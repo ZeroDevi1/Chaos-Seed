@@ -78,6 +78,7 @@ public sealed partial class SettingsPage : Page
         MusicNeteaseBaseUrlsBox.Text = s.NeteaseBaseUrls ?? "";
         MusicNeteaseAnonUrlBox.Text = s.NeteaseAnonymousCookieUrl ?? "/register/anonimous";
         MusicAskOutDirToggle.IsOn = s.MusicAskOutDirEachTime;
+        UseNewMusicUiToggle.IsOn = s.UseNewMusicUi;
         MusicPathTemplateBox.Text = string.IsNullOrWhiteSpace(s.MusicPathTemplate)
             ? new AppSettings().MusicPathTemplate
             : s.MusicPathTemplate;
@@ -588,6 +589,18 @@ public sealed partial class SettingsPage : Page
         }
 
         SettingsService.Instance.Update(s => s.MusicAskOutDirEachTime = MusicAskOutDirToggle.IsOn);
+    }
+
+    private void OnUseNewMusicUiToggled(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_init)
+        {
+            return;
+        }
+
+        SettingsService.Instance.Update(s => s.UseNewMusicUi = UseNewMusicUiToggle.IsOn);
     }
 
     private void OnMusicPathTemplateLostFocus(object sender, RoutedEventArgs e)

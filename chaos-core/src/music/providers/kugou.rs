@@ -1,7 +1,8 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use reqwest::Client;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::music::error::MusicError;
 use crate::music::model::{
@@ -9,40 +10,8 @@ use crate::music::model::{
     ProviderConfig,
 };
 
-fn base_url(cfg: &ProviderConfig) -> Result<String, MusicError> {
-    let Some(b) = cfg.kugou_base_url.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
-        return Err(MusicError::NotConfigured(
-            "kugouBaseUrl is not set".to_string(),
-        ));
-    };
-    Ok(b.trim_end_matches('/').to_string())
-}
-
-fn cookie_from_auth(auth: &AuthState) -> Option<String> {
-    let u = auth.kugou.as_ref()?;
-    let token = u.token.trim();
-    let userid = u.userid.trim();
-    if token.is_empty() || userid.is_empty() {
-        return None;
-    }
-    Some(format!("token={token};userid={userid};KUGOU_API_PLATFORM=lite"))
-}
-
-async fn get_json(
-    http: &Client,
-    url: &str,
-    params: &[(&str, String)],
-    timeout: Duration,
-) -> Result<Value, MusicError> {
-    let resp = http
-        .get(url)
-        .query(params)
-        .timeout(timeout)
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(resp.json::<Value>().await?)
-}
+mod client;
+pub mod signatures;
 
 fn qualities_from_item(item: &Value) -> Vec<MusicQuality> {
     let mut out = Vec::new();
@@ -85,7 +54,7 @@ fn qualities_from_item(item: &Value) -> Vec<MusicQuality> {
 
 pub async fn search_tracks(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     keyword: &str,
     page: u32,
     page_size: u32,
@@ -96,15 +65,18 @@ pub async fn search_tracks(
         return Ok(vec![]);
     }
 
-    let base = base_url(cfg)?;
-    let url = format!("{base}/search");
-    let params: Vec<(&str, String)> = vec![
-        ("page", page.max(1).to_string()),
-        ("pagesize", page_size.clamp(1, 50).to_string()),
-        ("type", "song".to_string()),
-        ("keywords", q.to_string()),
-    ];
-    let json = get_json(http, &url, &params, timeout).await?;
+    let kg = client::KugouClient::new(http);
+    let mut params: BTreeMap<String, String> = BTreeMap::new();
+    params.insert("albumhide".to_string(), "0".to_string());
+    params.insert("iscorrection".to_string(), "1".to_string());
+    params.insert("keyword".to_string(), q.to_string());
+    params.insert("nocollect".to_string(), "0".to_string());
+    params.insert("page".to_string(), page.max(1).to_string());
+    params.insert("pagesize".to_string(), page_size.clamp(1, 50).to_string());
+    params.insert("platform".to_string(), "AndroidFilter".to_string());
+    let json = kg
+        .gateway_get("/v3/search/song", "complexsearch.kugou.com", params, None, timeout)
+        .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(vec![]);
@@ -177,7 +149,7 @@ pub async fn search_tracks(
 
 pub async fn search_artists(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     keyword: &str,
     page: u32,
     page_size: u32,
@@ -187,15 +159,18 @@ pub async fn search_artists(
     if q.is_empty() {
         return Ok(vec![]);
     }
-    let base = base_url(cfg)?;
-    let url = format!("{base}/search");
-    let params: Vec<(&str, String)> = vec![
-        ("page", page.max(1).to_string()),
-        ("pagesize", page_size.clamp(1, 50).to_string()),
-        ("type", "singer".to_string()),
-        ("keywords", q.to_string()),
-    ];
-    let json = get_json(http, &url, &params, timeout).await?;
+    let kg = client::KugouClient::new(http);
+    let mut params: BTreeMap<String, String> = BTreeMap::new();
+    params.insert("albumhide".to_string(), "0".to_string());
+    params.insert("iscorrection".to_string(), "1".to_string());
+    params.insert("keyword".to_string(), q.to_string());
+    params.insert("nocollect".to_string(), "0".to_string());
+    params.insert("page".to_string(), page.max(1).to_string());
+    params.insert("pagesize".to_string(), page_size.clamp(1, 50).to_string());
+    params.insert("platform".to_string(), "AndroidFilter".to_string());
+    let json = kg
+        .gateway_get("/v1/search/author", "complexsearch.kugou.com", params, None, timeout)
+        .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(vec![]);
@@ -235,7 +210,7 @@ pub async fn search_artists(
 
 pub async fn search_albums(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     keyword: &str,
     page: u32,
     page_size: u32,
@@ -245,15 +220,18 @@ pub async fn search_albums(
     if q.is_empty() {
         return Ok(vec![]);
     }
-    let base = base_url(cfg)?;
-    let url = format!("{base}/search");
-    let params: Vec<(&str, String)> = vec![
-        ("page", page.max(1).to_string()),
-        ("pagesize", page_size.clamp(1, 50).to_string()),
-        ("type", "album".to_string()),
-        ("keywords", q.to_string()),
-    ];
-    let json = get_json(http, &url, &params, timeout).await?;
+    let kg = client::KugouClient::new(http);
+    let mut params: BTreeMap<String, String> = BTreeMap::new();
+    params.insert("albumhide".to_string(), "0".to_string());
+    params.insert("iscorrection".to_string(), "1".to_string());
+    params.insert("keyword".to_string(), q.to_string());
+    params.insert("nocollect".to_string(), "0".to_string());
+    params.insert("page".to_string(), page.max(1).to_string());
+    params.insert("pagesize".to_string(), page_size.clamp(1, 50).to_string());
+    params.insert("platform".to_string(), "AndroidFilter".to_string());
+    let json = kg
+        .gateway_get("/v1/search/album", "complexsearch.kugou.com", params, None, timeout)
+        .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(vec![]);
@@ -301,23 +279,26 @@ pub async fn search_albums(
 
 pub async fn artist_albums(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     artist_id: &str,
     timeout: Duration,
 ) -> Result<Vec<MusicAlbum>, MusicError> {
-    let base = base_url(cfg)?;
     let id = artist_id.trim();
     if id.is_empty() {
         return Err(MusicError::InvalidInput("empty artist_id".to_string()));
     }
-    let url = format!("{base}/artist/albums");
-    let params: Vec<(&str, String)> = vec![
-        ("id", id.to_string()),
-        ("page", "1".to_string()),
-        ("pagesize", "10000".to_string()),
-        ("sort", "new".to_string()),
-    ];
-    let json = get_json(http, &url, &params, timeout).await?;
+    let kg = client::KugouClient::new(http);
+    let payload = json!({
+        "author_id": id,
+        "pagesize": 10000,
+        "page": 1,
+        "sort": 1,
+        "category": 1,
+        "area_code": "all"
+    });
+    let json = kg
+        .gateway_post("/kmr/v1/author/albums", "openapi.kugou.com", Some("36"), &payload, None, timeout)
+        .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(vec![]);
@@ -354,28 +335,29 @@ pub async fn artist_albums(
 
 pub async fn album_tracks(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     album_id: &str,
     timeout: Duration,
 ) -> Result<Vec<MusicTrack>, MusicError> {
-    let base = base_url(cfg)?;
     let id = album_id.trim();
     if id.is_empty() {
         return Err(MusicError::InvalidInput("empty album_id".to_string()));
     }
 
-    // Paginate /album/songs
-    let url = format!("{base}/album/songs");
+    let kg = client::KugouClient::new(http);
     let mut page = 1u32;
     let page_size = 100u32;
     let mut out: Vec<MusicTrack> = Vec::new();
     loop {
-        let params: Vec<(&str, String)> = vec![
-            ("id", id.to_string()),
-            ("page", page.to_string()),
-            ("page_size", page_size.to_string()),
-        ];
-        let json = get_json(http, &url, &params, timeout).await?;
+        let payload = json!({
+            "album_id": id,
+            "is_buy": "",
+            "page": page,
+            "pagesize": page_size
+        });
+        let json = kg
+            .gateway_post("/v1/album_audio/lite", "openapi.kugou.com", Some("255"), &payload, None, timeout)
+            .await?;
         let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
         if status != 1 {
             break;
@@ -467,60 +449,117 @@ pub async fn album_tracks(
 
 pub async fn track_download_url(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     track_hash: &str,
     quality_id: &str,
     auth: &AuthState,
     timeout: Duration,
 ) -> Result<(String, String), MusicError> {
-    let base = base_url(cfg)?;
     let hash = track_hash.trim();
     if hash.is_empty() {
         return Err(MusicError::InvalidInput("empty track_id".to_string()));
     }
 
-    let quality = match quality_id.trim() {
-        "mp3_128" => "128kmp3",
-        "mp3_320" => "320kmp3",
-        "flac" => "2000kflac",
-        other => other,
+    let Some(user) = auth.kugou.as_ref() else {
+        return Err(MusicError::Unauthorized("kugou: missing token/userid".to_string()));
     };
-
-    let url = format!("{base}/song/url");
-    let mut params: Vec<(&str, String)> = vec![("hash", hash.to_string()), ("quality", quality.to_string())];
-    let Some(cookie) = cookie_from_auth(auth) else {
-        return Err(MusicError::Unauthorized(
-            "kugou: missing token/userid".to_string(),
-        ));
-    };
-    params.push(("cookie", cookie));
-
-    let json = get_json(http, &url, &params, timeout).await?;
-    let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
-    if status != 1 {
-        return Err(MusicError::Other("kugou: download url status!=1".to_string()));
+    let token = user.token.trim();
+    let userid = user.userid.trim();
+    if token.is_empty() || userid.is_empty() {
+        return Err(MusicError::Unauthorized("kugou: missing token/userid".to_string()));
     }
 
-    // download result: url: [ ... ], extName, bitRate
-    let mut chosen = String::new();
-    if let Some(arr) = json.get("url").and_then(|v| v.as_array()) {
-        for u in arr {
-            let s = u.as_str().unwrap_or("").trim();
-            if !s.is_empty() {
-                chosen = s.to_string();
-                break;
+    let kg = client::KugouClient::new(http);
+    let desired_ext = if quality_id.trim() == "flac" { "flac" } else { "mp3" };
+    let qualities = match quality_id.trim() {
+        "flac" => vec!["flac", "320", "128"],
+        "mp3_320" => vec!["320", "128"],
+        "mp3_128" => vec!["128"],
+        _ => vec!["320", "128"],
+    };
+
+    let tracker_key = signatures::sign_key_lite(hash, &kg.device_mid(), userid, kg.appid());
+    let collect_time = kg.now_ms();
+
+    let payload = json!({
+        "area_code": "1",
+        "behavior": "play",
+        "qualities": qualities,
+        "resource": {
+            "album_audio_id": 0,
+            "collect_list_id": "3",
+            "collect_time": collect_time,
+            "hash": hash,
+            "id": 0,
+            "page_id": 1,
+            "type": "audio"
+        },
+        "token": token,
+        "tracker_param": {
+            "all_m": 1,
+            "auth": "",
+            "is_free_part": 0,
+            "key": tracker_key,
+            "module_id": 0,
+            "need_climax": 1,
+            "need_xcdn": 1,
+            "open_time": "",
+            "pid": "411",
+            "pidversion": "3001",
+            "priv_vip_type": "6",
+            "viptoken": ""
+        },
+        "userid": userid,
+        "vip": 0
+    });
+
+    let json = kg.tracker_post("/v6/priv_url", &payload, Some(auth), timeout).await?;
+
+    fn collect_urls(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::String(s) => {
+                let s = s.trim();
+                if s.starts_with("http") {
+                    out.push(s.to_string());
+                }
             }
+            Value::Array(arr) => {
+                for x in arr {
+                    collect_urls(x, out);
+                }
+            }
+            Value::Object(map) => {
+                for (_k, x) in map {
+                    collect_urls(x, out);
+                }
+            }
+            _ => {}
         }
     }
+
+    let mut urls: Vec<String> = Vec::new();
+    collect_urls(&json, &mut urls);
+    let chosen = urls
+        .iter()
+        .find(|u| u.to_lowercase().contains(&format!(".{desired_ext}")))
+        .cloned()
+        .or_else(|| urls.first().cloned())
+        .unwrap_or_default();
     if chosen.is_empty() {
-        return Err(MusicError::Other("kugou: empty url list".to_string()));
+        return Err(MusicError::Other("kugou: empty download url".to_string()));
     }
 
-    let ext = json.get("extName").and_then(|v| v.as_str()).unwrap_or("mp3").trim().to_string();
+    let ext = if chosen.to_lowercase().contains(".flac") {
+        "flac".to_string()
+    } else if chosen.to_lowercase().contains(".mp3") {
+        "mp3".to_string()
+    } else {
+        desired_ext.to_string()
+    };
     Ok((chosen, ext))
 }
 
-// Daemon-facing QR login helpers (kugou API baseUrl).
+// Daemon-facing QR login helpers (direct login-user.kugou.com, no secrets).
 
 #[derive(Debug, Clone)]
 pub struct KugouQr {
@@ -530,33 +569,54 @@ pub struct KugouQr {
 
 pub async fn kugou_qr_create(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     timeout: Duration,
 ) -> Result<KugouQr, MusicError> {
-    let base = base_url(cfg)?;
-    let url = format!("{base}/login/qr/key");
-    let json = get_json(http, &url, &[], timeout).await?;
+    let kg = client::KugouClient::new(http);
+    let mut params: BTreeMap<String, String> = BTreeMap::new();
+    params.insert("appid".to_string(), "1001".to_string()); // QQ
+    params.insert("type".to_string(), "1".to_string());
+    params.insert("plat".to_string(), "4".to_string());
+    params.insert(
+        "qrcode_txt".to_string(),
+        format!(
+            "https://h5.kugou.com/apps/loginQRCode/html/index.html?appid={}&",
+            kg.appid()
+        ),
+    );
+    params.insert("srcappid".to_string(), kg.srcappid().to_string());
+
+    let json = kg.login_user_get("/v2/qrcode", params, timeout).await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
-        return Err(MusicError::Other("kugou: qr/key status!=1".to_string()));
+        return Err(MusicError::Other(format!("kugou: qrcode status={status}")));
     }
-    let key = json.pointer("/data/qrcode").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let img = json.pointer("/data/qrcode_img").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let key = json.pointer("/data/qrcode").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let img = json.pointer("/data/qrcode_img").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if key.is_empty() || img.is_empty() {
-        return Err(MusicError::Parse("kugou: missing qr key/img".to_string()));
+        return Err(MusicError::Parse("kugou: missing qrcode/qrcode_img".to_string()));
     }
     Ok(KugouQr { key, image_base64: img })
 }
 
 pub async fn kugou_qr_poll(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     key: &str,
     timeout: Duration,
 ) -> Result<Option<KugouUserInfo>, MusicError> {
-    let base = base_url(cfg)?;
-    let url = format!("{base}/login/qr/check");
-    let json = get_json(http, &url, &[("key", key.trim().to_string())], timeout).await?;
+    let kg = client::KugouClient::new(http);
+    let q = key.trim();
+    if q.is_empty() {
+        return Err(MusicError::InvalidInput("empty key".to_string()));
+    }
+    let mut params: BTreeMap<String, String> = BTreeMap::new();
+    params.insert("plat".to_string(), "4".to_string());
+    params.insert("appid".to_string(), "1001".to_string()); // QQ
+    params.insert("srcappid".to_string(), kg.srcappid().to_string());
+    params.insert("qrcode".to_string(), q.to_string());
+
+    let json = kg.login_user_get("/v2/get_userinfo_qrcode", params, timeout).await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(None);
@@ -565,8 +625,8 @@ pub async fn kugou_qr_poll(
     if qrstatus != 4 {
         return Ok(None);
     }
-    let token = json.pointer("/data/token").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let userid = json.pointer("/data/userid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let token = json.pointer("/data/token").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let userid = json.pointer("/data/userid").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if token.is_empty() || userid.is_empty() {
         return Ok(None);
     }
@@ -575,67 +635,65 @@ pub async fn kugou_qr_poll(
 
 pub async fn kugou_wx_qr_create(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     timeout: Duration,
 ) -> Result<(String, String), MusicError> {
-    // returns (uuid, qrcode_base64_data_uri)
-    let base = base_url(cfg)?;
-    let url = format!("{base}/login/wx/create");
-    let json = get_json(http, &url, &[], timeout).await?;
-    let err = json.get("errcode").and_then(|v| v.as_i64()).unwrap_or(-1);
-    if err != 0 {
-        return Err(MusicError::Other(format!("kugou: wx/create errcode={err}")));
+    // returns (key, qrcode_base64_data_uri)
+    let kg = client::KugouClient::new(http);
+    let mut params: BTreeMap<String, String> = BTreeMap::new();
+    params.insert("appid".to_string(), "1014".to_string()); // Wechat button mapped to kugou appid=1014
+    params.insert("type".to_string(), "1".to_string());
+    params.insert("plat".to_string(), "4".to_string());
+    params.insert(
+        "qrcode_txt".to_string(),
+        format!(
+            "https://h5.kugou.com/apps/loginQRCode/html/index.html?appid={}&",
+            kg.appid()
+        ),
+    );
+    params.insert("srcappid".to_string(), kg.srcappid().to_string());
+
+    let json = kg.login_user_get("/v2/qrcode", params, timeout).await?;
+    let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
+    if status != 1 {
+        return Err(MusicError::Other(format!("kugou: qrcode status={status}")));
     }
-    let uuid = json.get("uuid").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let img = json.pointer("/qrcode/qrcodebase64").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    if uuid.is_empty() || img.is_empty() {
-        return Err(MusicError::Parse("kugou: missing wx uuid/img".to_string()));
+    let key = json.pointer("/data/qrcode").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let img = json.pointer("/data/qrcode_img").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if key.is_empty() || img.is_empty() {
+        return Err(MusicError::Parse("kugou: missing qrcode/qrcode_img".to_string()));
     }
-    Ok((uuid, format!("data:image/jpeg;base64,{img}")))
+    Ok((key, format!("data:image/png;base64,{img}")))
 }
 
 pub async fn kugou_wx_qr_poll(
     http: &Client,
-    cfg: &ProviderConfig,
+    _cfg: &ProviderConfig,
     uuid: &str,
     timeout: Duration,
 ) -> Result<Option<KugouUserInfo>, MusicError> {
-    let base = base_url(cfg)?;
-    let url = format!("{base}/login/wx/check");
-    let ts = (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs())
-    .to_string();
-    let json = get_json(
-        http,
-        &url,
-        &[("uuid", uuid.to_string()), ("timestamp", ts)],
-        timeout,
-    )
-    .await?;
-    let wx_code = json.get("wx_code").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    if wx_code.is_empty() {
-        return Ok(None);
+    let kg = client::KugouClient::new(http);
+    let q = uuid.trim();
+    if q.is_empty() {
+        return Err(MusicError::InvalidInput("empty key".to_string()));
     }
-    // exchange openplat
-    let open = format!("{base}/login/openplat");
-    let res = get_json(http, &open, &[("code", wx_code)], timeout).await?;
-    let status = res.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
+    let mut params: BTreeMap<String, String> = BTreeMap::new();
+    params.insert("plat".to_string(), "4".to_string());
+    params.insert("appid".to_string(), "1014".to_string()); // mapped wechat
+    params.insert("srcappid".to_string(), kg.srcappid().to_string());
+    params.insert("qrcode".to_string(), q.to_string());
+
+    let json = kg.login_user_get("/v2/get_userinfo_qrcode", params, timeout).await?;
+    let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(None);
     }
-    // `data` is a JSON string in refs; accept both string/object.
-    if let Some(s) = res.get("data").and_then(|v| v.as_str()) {
-        let v: Value = serde_json::from_str(s).unwrap_or(Value::Null);
-        let token = v.get("token").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let userid = v.get("userid").and_then(|v| v.as_i64()).map(|n| n.to_string()).unwrap_or_default();
-        if !token.is_empty() && !userid.is_empty() {
-            return Ok(Some(KugouUserInfo { token, userid }));
-        }
+    let qrstatus = json.pointer("/data/status").and_then(|v| v.as_i64()).unwrap_or(0);
+    if qrstatus != 4 {
+        return Ok(None);
     }
-    let token = res.pointer("/data/token").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let userid = res.pointer("/data/userid").and_then(|v| v.as_i64()).map(|n| n.to_string()).unwrap_or_default();
+    let token = json.pointer("/data/token").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let userid = json.pointer("/data/userid").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if token.is_empty() || userid.is_empty() {
         return Ok(None);
     }

@@ -380,6 +380,7 @@ for (int i = 0; i < 300; i++)
 
 // 4) （可选）阻塞下载：传 MusicDownloadStartParams JSON
 // 注意：WinUI3 推荐走 daemon 的 start/status/cancel 会话式下载。
+// target（MusicDownloadTarget）字段使用 camelCase：albumId / artistId（仍兼容输入 album_id / artist_id）。
 ```
 
 ## 直播目录（首页/分类）

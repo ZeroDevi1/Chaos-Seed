@@ -97,14 +97,55 @@
             <Frame x:Name="ContentFrame" />
         </muxc:NavigationView>
 
+        <!-- In-tree fullscreen music overlay (NOT a Popup) -->
+        <Grid
+            x:Name="MusicOverlayRoot"
+            Grid.RowSpan="2"
+            Visibility="Collapsed"
+            Background="Transparent"
+            IsHitTestVisible="False"
+            IsTabStop="True"
+            KeyDown="OnMusicOverlayKeyDown">
+            <Grid>
+                <!-- Backdrop -->
+                <Grid x:Name="MusicOverlayBackdrop" Tapped="OnMusicOverlayBackdropTapped">
+                    <Image
+                        x:Name="MusicOverlayBackgroundImage"
+                        Stretch="UniformToFill"
+                        Opacity="0.25" />
+                    <Rectangle>
+                        <Rectangle.Fill>
+	                            <AcrylicBrush
+	                                TintColor="#FF0A0A0A"
+	                                TintOpacity="0.72"
+	                                FallbackColor="#FF0A0A0A" />
+	                        </Rectangle.Fill>
+	                    </Rectangle>
+                    <Rectangle Fill="Black" Opacity="0.25" />
+                </Grid>
+
+                <!-- Foreground host -->
+                <Grid Padding="0">
+                    <ContentControl
+                        x:Name="MusicOverlayHost"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch" />
+                </Grid>
+            </Grid>
+        </Grid>
+
         <Popup x:Name="FullScreenPopup" IsLightDismissEnabled="False">
             <Grid
                 x:Name="FullScreenPopupRoot"
-                Background="Black">
+                Background="Transparent">
                 <Grid x:Name="FullScreenBackdrop" Background="Black" Opacity="1" />
                 <Canvas x:Name="FullScreenCanvas">
                     <ContentControl
                         x:Name="FullScreenPlayerHost"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch" />
+                    <ContentControl
+                        x:Name="FullScreenOverlayHost"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch" />
                 </Canvas>

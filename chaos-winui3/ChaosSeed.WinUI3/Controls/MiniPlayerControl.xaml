@@ -160,7 +160,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock x:Name="PosText" Text="00:00" Opacity="0.75" VerticalAlignment="Center" />
-                <Slider
+            <Slider
                     x:Name="PosSlider"
                     Grid.Column="1"
                     Minimum="0"
@@ -174,11 +174,8 @@
                 <TextBlock x:Name="DurText" Grid.Column="2" Text="--:--" Opacity="0.75" VerticalAlignment="Center" />
             </Grid>
 
-            <Popup x:Name="DetailPopup" IsLightDismissEnabled="False">
-                <Grid x:Name="DetailPopupRoot" Background="#66000000">
-                    <controls:NowPlayingDetailControl x:Name="DetailControl" />
-                </Grid>
-            </Popup>
+            <!-- Placeholder for designer; detail control is created on-demand in code-behind -->
+            <ContentControl x:Name="DetailParking" Visibility="Collapsed" />
         </Grid>
     </Border>
 </UserControl>

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using FlyleafLib;
 using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Xaml;
@@ -20,6 +21,39 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
+        try
+        {
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            {
+                try
+                {
+                    if (e.ExceptionObject is Exception ex)
+                    {
+                        AppLog.Exception("AppDomain.UnhandledException", ex);
+                    }
+                    else
+                    {
+                        AppLog.Error($"AppDomain.UnhandledException: {e.ExceptionObject}");
+                    }
+                }
+                catch { }
+            };
+
+            TaskScheduler.UnobservedTaskException += (_, e) =>
+            {
+                try { AppLog.Exception("TaskScheduler.UnobservedTaskException", e.Exception); } catch { }
+                try { e.SetObserved(); } catch { }
+            };
+
+            UnhandledException += (_, e) =>
+            {
+                try { AppLog.Exception("Xaml.UnhandledException", e.Exception); } catch { }
+            };
+        }
+        catch
+        {
+            // ignore
+        }
 #if DEBUG
         AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
 #endif
@@ -86,6 +120,11 @@ public sealed partial class App : Application
     {
         MainWindowInstance = new MainWindow();
         MainWindowInstance.Activate();
+
+        if (!string.IsNullOrWhiteSpace(FlyleafInitError))
+        {
+            AppLog.Error("Flyleaf init error: " + FlyleafInitError);
+        }
 
         // Best-effort: background update check for zip (unpackaged) builds.
         _ = UpdateService.Instance.TryAutoCheckAsync();

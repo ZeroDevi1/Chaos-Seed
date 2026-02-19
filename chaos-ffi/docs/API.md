@@ -153,6 +153,7 @@ char* chaos_now_playing_snapshot_json(
 输入：`MusicDownloadStartParams` JSON；返回：`MusicDownloadStatus` JSON（包含每个 job 的结果与错误信息）。
 
 说明：
+- `target` 字段（`MusicDownloadTarget`）使用 `camelCase`：`albumId` / `artistId`（仍兼容输入 `album_id` / `artist_id`）。
 - `options.pathTemplate`：若提供则使用模板生成文件名（与 daemon 行为对齐）。
 - 下载音频成功后，会 best-effort 额外下载同名 `.lrc`（不影响音频下载结果）。
 

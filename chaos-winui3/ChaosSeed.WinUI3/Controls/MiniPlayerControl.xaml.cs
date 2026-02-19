@@ -20,6 +20,8 @@ public sealed partial class MiniPlayerControl : UserControl
     private bool _seekCommitPending;
     private bool _seekHandlersAttached;
     private bool _updatingPlaylistSelection;
+    private NowPlayingDetailControl? _detailControl;
+    private bool _detailOpen;
 
     public MiniPlayerControl()
     {
@@ -28,17 +30,101 @@ public sealed partial class MiniPlayerControl : UserControl
         {
             MusicPlayerService.Instance.Changed += OnChanged;
             MusicPlayerService.Instance.PlaylistChanged += OnPlaylistChanged;
-            try { DetailControl.CloseRequested += OnDetailCloseRequested; } catch { }
             AttachSeekHandlers();
             UpdateUi();
             EnsureTimer();
         };
         Unloaded += (_, _) =>
         {
+            try { HideDetailOverlay(); } catch { }
             MusicPlayerService.Instance.Changed -= OnChanged;
             MusicPlayerService.Instance.PlaylistChanged -= OnPlaylistChanged;
-            try { DetailControl.CloseRequested -= OnDetailCloseRequested; } catch { }
+            if (_detailControl is not null)
+            {
+                try { _detailControl.CloseRequested -= OnDetailCloseRequested; } catch { }
+            }
         };
+    }
+
+    private NowPlayingDetailControl EnsureDetailControl()
+    {
+        var c = new NowPlayingDetailControl();
+        c.CloseRequested += OnDetailCloseRequested;
+        _detailControl = c;
+        return c;
+    }
+
+    private void ShowDetailOverlay()
+    {
+        if (!_dq.HasThreadAccess)
+        {
+            _dq.TryEnqueue(ShowDetailOverlay);
+            return;
+        }
+
+        if (!MusicPlayerService.Instance.IsOpen)
+        {
+            return;
+        }
+
+        var wnd = App.MainWindowInstance;
+        if (wnd is null)
+        {
+            return;
+        }
+
+        if (SettingsService.Instance.Current.UseNewMusicUi)
+        {
+            try { HideDetailOverlay(); } catch { }
+            wnd.NavigateToMusic();
+            return;
+        }
+
+        try
+        {
+            // Avoid reusing a previous instance (old XamlRoot/event handlers can lead to failfast).
+            if (_detailControl is not null)
+            {
+                try { _detailControl.CloseRequested -= OnDetailCloseRequested; } catch { }
+                _detailControl = null;
+            }
+
+            var detail = EnsureDetailControl();
+            _detailOpen = true;
+
+            wnd.ShowMusicOverlay(detail, MusicPlayerService.Instance.Track?.CoverUrl);
+
+            RoutedEventHandler? onLoaded = null;
+            onLoaded = (_, _) =>
+            {
+                try { detail.Loaded -= onLoaded; } catch { }
+                try { detail.Open(); } catch (Exception ex) { AppLog.Exception("NowPlayingDetailControl.Open", ex); }
+            };
+            detail.Loaded += onLoaded;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Exception("MiniPlayerControl.ShowDetailOverlay", ex);
+        }
+    }
+
+    private void HideDetailOverlay()
+    {
+        if (!_dq.HasThreadAccess)
+        {
+            _dq.TryEnqueue(HideDetailOverlay);
+            return;
+        }
+
+        _detailOpen = false;
+        try { App.MainWindowInstance?.HideMusicOverlay(); }
+        catch (Exception ex) { AppLog.Exception("MainWindow.HideMusicOverlay", ex); }
+
+        if (_detailControl is not null)
+        {
+            try { _detailControl.CloseRequested -= OnDetailCloseRequested; } catch { }
+            _detailControl = null;
+        }
     }
 
     private void AttachSeekHandlers()
@@ -108,6 +194,15 @@ public sealed partial class MiniPlayerControl : UserControl
         catch
         {
             CoverImg.Source = null;
+        }
+
+        if (_detailOpen)
+        {
+            try { App.MainWindowInstance?.UpdateMusicOverlayBackground(svc.Track?.CoverUrl); } catch { }
+            if (!svc.IsOpen)
+            {
+                try { HideDetailOverlay(); } catch { }
+            }
         }
 
         _updatingVolume = true;
@@ -433,28 +528,13 @@ public sealed partial class MiniPlayerControl : UserControl
             return;
         }
 
-        try
-        {
-            DetailControl.Open();
-            DetailPopup.IsOpen = true;
-        }
-        catch
-        {
-            // ignore
-        }
+        ShowDetailOverlay();
     }
 
     private void OnDetailCloseRequested(object? sender, EventArgs e)
     {
         _ = sender;
         _ = e;
-        try
-        {
-            DetailPopup.IsOpen = false;
-        }
-        catch
-        {
-            // ignore
-        }
+        HideDetailOverlay();
     }
 }

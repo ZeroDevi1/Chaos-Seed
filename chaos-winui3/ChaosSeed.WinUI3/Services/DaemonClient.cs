@@ -735,6 +735,34 @@ public sealed class DaemonClient : IDisposable
         }
     }
 
+    public async Task<BiliLoginQr> BiliLoginQrCreateV2Async(string loginType, CancellationToken ct = default)
+    {
+        var lt = (loginType ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(lt))
+        {
+            throw new ArgumentException("empty loginType", nameof(loginType));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliLoginQr>(
+                "bili.login.qrCreate",
+                new { loginType = lt },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.login.qrCreate", ex);
+        }
+    }
+
     public async Task<BiliLoginQrPollResult> BiliLoginQrPollAsync(string sessionId, CancellationToken ct = default)
     {
         var sid = (sessionId ?? "").Trim();
@@ -763,6 +791,58 @@ public sealed class DaemonClient : IDisposable
         }
     }
 
+    public async Task<BiliLoginQrPollResultV2> BiliLoginQrPollV2Async(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliLoginQrPollResultV2>(
+                "bili.login.qrPoll",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.login.qrPoll", ex);
+        }
+    }
+
+    public async Task<BiliCheckLoginResult> BiliCheckLoginAsync(BiliAuthBundle auth, CancellationToken ct = default)
+    {
+        if (auth is null) throw new ArgumentNullException(nameof(auth));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliCheckLoginResult>(
+                "bili.checkLogin",
+                new { auth },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.checkLogin", ex);
+        }
+    }
+
     public async Task<BiliRefreshCookieResult> BiliRefreshCookieAsync(BiliRefreshCookieParams p, CancellationToken ct = default)
     {
         if (p is null) throw new ArgumentNullException(nameof(p));
@@ -785,6 +865,137 @@ public sealed class DaemonClient : IDisposable
         catch (RemoteInvocationException ex)
         {
             throw WrapRpcFailure("bili.refreshCookie", ex);
+        }
+    }
+
+    public async Task<BiliTaskAddResult> BiliTaskAddAsync(BiliTaskAddParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        var input = (p.Input ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            throw new ArgumentException("empty input", nameof(p));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliTaskAddResult>(
+                "bili.task.add",
+                new { api = p.Api, input, auth = p.Auth, options = p.Options },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.task.add", ex);
+        }
+    }
+
+    public async Task<BiliTasksGetResult> BiliTasksGetAsync(CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliTasksGetResult>(
+                "bili.tasks.get",
+                new { },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.tasks.get", ex);
+        }
+    }
+
+    public async Task<BiliTaskDetail> BiliTaskGetAsync(string taskId, CancellationToken ct = default)
+    {
+        var tid = (taskId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(tid))
+        {
+            throw new ArgumentException("empty taskId", nameof(taskId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<BiliTaskDetail>(
+                "bili.task.get",
+                new { taskId = tid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.task.get", ex);
+        }
+    }
+
+    public async Task BiliTaskCancelAsync(string taskId, CancellationToken ct = default)
+    {
+        var tid = (taskId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(tid))
+        {
+            throw new ArgumentException("empty taskId", nameof(taskId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>(
+                "bili.task.cancel",
+                new { taskId = tid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.task.cancel", ex);
+        }
+    }
+
+    public async Task BiliTasksRemoveFinishedAsync(BiliTasksRemoveFinishedParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>(
+                "bili.tasks.removeFinished",
+                new { onlyFailed = p.OnlyFailed, taskId = p.TaskId },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("bili.tasks.removeFinished", ex);
         }
     }
 

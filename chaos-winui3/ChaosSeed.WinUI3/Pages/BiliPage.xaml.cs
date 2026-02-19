@@ -29,10 +29,15 @@ public sealed partial class BiliPage : Page
     {
         InitializeComponent();
 
-        Loaded += (_, _) => InitFromSettings();
+        Loaded += (_, _) =>
+        {
+            InitFromSettings();
+            RestoreParsedFromMemory();
+        };
         Unloaded += (_, _) =>
         {
             try { _loginPollCts?.Cancel(); } catch { }
+            try { PersistParsedToMemory(); } catch { }
         };
     }
 
@@ -61,11 +66,82 @@ public sealed partial class BiliPage : Page
         BackendHintText.Text = string.IsNullOrWhiteSpace(notice) ? "" : $"后端提示：{notice}";
     }
 
+    private void RestoreParsedFromMemory()
+    {
+        var snap = _mgr.ParseMemory.Get();
+        if (snap is null || !snap.HasData)
+        {
+            return;
+        }
+
+        InputBox.Text = string.IsNullOrWhiteSpace(snap.Input) ? (InputBox.Text ?? "") : snap.Input;
+        ParsedTitleText.Text = snap.Title;
+
+        var selected = new HashSet<uint>(snap.SelectedPages ?? Array.Empty<uint>());
+        var useSelected = selected.Count > 0;
+
+        ParsedPages.Clear();
+        foreach (var p in snap.Pages ?? Array.Empty<BiliPageModel>())
+        {
+            var vm = BiliParsedPageVm.From(p);
+            vm.IsSelected = useSelected ? selected.Contains(vm.PageNumber) : true;
+            ParsedPages.Add(vm);
+        }
+
+        if (ParsedPages.Count > 0)
+        {
+            ParsedExpander.Visibility = Visibility.Visible;
+            ParsedExpander.IsExpanded = true;
+            SelectPageBox.Text = !useSelected || selected.Count == ParsedPages.Count
+                ? "ALL"
+                : string.Join(",", selected.OrderBy(x => x));
+        }
+    }
+
+    private void PersistParsedToMemory()
+    {
+        if (ParsedPages.Count == 0)
+        {
+            return;
+        }
+
+        var input = (InputBox.Text ?? "").Trim();
+        var title = (ParsedTitleText.Text ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return;
+        }
+
+        var pages = ParsedPages.Select(x => x.ToModel()).ToArray();
+        var selected = ParsedPages
+            .Where(x => x.IsSelected == true)
+            .Select(x => x.PageNumber)
+            .OrderBy(x => x)
+            .ToArray();
+
+        _mgr.ParseMemory.Set(new BiliParseSnapshot
+        {
+            Input = input,
+            Title = title,
+            Pages = pages,
+            SelectedPages = selected,
+            UpdatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        });
+    }
+
     private void UpdateLoginStatus()
     {
         var s = SettingsService.Instance.Current;
         var hasCookie = !string.IsNullOrWhiteSpace(s.BiliCookie);
-        LoginStatusText.Text = hasCookie ? "已登录（Cookie 已保存）" : "未登录";
+        var hasTv = !string.IsNullOrWhiteSpace(s.BiliTvAccessToken);
+        if (!hasCookie && !hasTv)
+        {
+            LoginStatusText.Text = "未登录";
+            return;
+        }
+        var webText = hasCookie ? "Web: 已登录" : "Web: 未登录";
+        var tvText = hasTv ? "TV: 已登录" : "TV: 未登录";
+        LoginStatusText.Text = $"{webText} / {tvText}";
     }
 
     private void SetInfo(InfoBarSeverity sev, string title, string? msg)
@@ -121,10 +197,17 @@ public sealed partial class BiliPage : Page
     {
         _ = sender;
         _ = e;
-        await StartLoginAsync();
+        await StartLoginAsync("web");
     }
 
-    private async Task StartLoginAsync()
+    private async void OnLoginQrTvClicked(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        await StartLoginAsync("tv");
+    }
+
+    private async Task StartLoginAsync(string loginType)
     {
         ClearInfo();
         _loginPollCts?.Cancel();
@@ -133,16 +216,22 @@ public sealed partial class BiliPage : Page
 
         try
         {
-            var qr = await _mgr.Backend.LoginQrCreateAsync(ct);
+            var lt = (loginType ?? "").Trim().ToLowerInvariant();
+            if (lt != "web" && lt != "tv")
+            {
+                throw new ArgumentException("invalid loginType", nameof(loginType));
+            }
+
+            var qr = await _mgr.Backend.LoginQrCreateV2Async(lt, ct);
             await SetQrAsync(qr);
 
             QrPanel.Visibility = Visibility.Visible;
-            QrHintText.Text = "已生成二维码：请扫码并确认登录。";
+            QrHintText.Text = lt == "tv" ? "已生成 TV 二维码：请扫码并确认登录。" : "已生成 Web 二维码：请扫码并确认登录。";
             UpdateLoginStatus();
 
             while (!ct.IsCancellationRequested)
             {
-                var res = await _mgr.Backend.LoginQrPollAsync(qr.SessionId, ct);
+                var res = await _mgr.Backend.LoginQrPollV2Async(qr.SessionId, ct);
                 var state = (res.State ?? "").Trim().ToLowerInvariant();
                 QrHintText.Text = state switch
                 {
@@ -154,13 +243,37 @@ public sealed partial class BiliPage : Page
 
                 if (string.Equals(state, "done", StringComparison.OrdinalIgnoreCase) && res.Auth is not null)
                 {
-                    var auth = res.Auth;
-                    SettingsService.Instance.Update(s =>
+                    if (lt == "tv")
                     {
-                        s.BiliCookie = string.IsNullOrWhiteSpace(auth.Cookie) ? null : auth.Cookie!.Trim();
-                        s.BiliRefreshToken = string.IsNullOrWhiteSpace(auth.RefreshToken) ? null : auth.RefreshToken!.Trim();
-                    });
-                    SetInfo(InfoBarSeverity.Success, "登录成功", null);
+                        var token = (res.Auth.Tv?.AccessToken ?? "").Trim();
+                        if (string.IsNullOrWhiteSpace(token))
+                        {
+                            SetInfo(InfoBarSeverity.Warning, "TV 登录失败", "accessToken 为空");
+                        }
+                        else
+                        {
+                            SettingsService.Instance.Update(s => s.BiliTvAccessToken = token);
+                            SetInfo(InfoBarSeverity.Success, "TV 登录成功", null);
+                        }
+                    }
+                    else
+                    {
+                        var cookie = (res.Auth.Web?.Cookie ?? "").Trim();
+                        var refresh = (res.Auth.Web?.RefreshToken ?? "").Trim();
+                        if (string.IsNullOrWhiteSpace(cookie))
+                        {
+                            SetInfo(InfoBarSeverity.Warning, "Web 登录失败", "Cookie 为空");
+                        }
+                        else
+                        {
+                            SettingsService.Instance.Update(s =>
+                            {
+                                s.BiliCookie = cookie;
+                                s.BiliRefreshToken = string.IsNullOrWhiteSpace(refresh) ? null : refresh;
+                            });
+                            SetInfo(InfoBarSeverity.Success, "Web 登录成功", null);
+                        }
+                    }
                     QrPanel.Visibility = Visibility.Collapsed;
                     QrImage.Source = null;
                     UpdateLoginStatus();
@@ -240,6 +353,7 @@ public sealed partial class BiliPage : Page
         {
             s.BiliCookie = null;
             s.BiliRefreshToken = null;
+            s.BiliTvAccessToken = null;
         });
         UpdateLoginStatus();
         SetInfo(InfoBarSeverity.Informational, "已清除登录信息", null);
@@ -350,18 +464,35 @@ public sealed partial class BiliPage : Page
 
             ParsedTitleText.Text = v.Title;
 
+            var prev = _mgr.ParseMemory.Get();
+            var prevSelected = prev is not null && string.Equals((prev.Input ?? "").Trim(), input, StringComparison.OrdinalIgnoreCase)
+                ? new HashSet<uint>(prev.SelectedPages ?? Array.Empty<uint>())
+                : null;
+
             ParsedPages.Clear();
             foreach (var p in v.Pages ?? Array.Empty<BiliPageModel>())
             {
-                ParsedPages.Add(BiliParsedPageVm.From(p));
+                var vm = BiliParsedPageVm.From(p);
+                if (prevSelected is not null && prevSelected.Count > 0)
+                {
+                    vm.IsSelected = prevSelected.Contains(vm.PageNumber);
+                }
+                ParsedPages.Add(vm);
             }
 
             ParsedExpander.Visibility = Visibility.Visible;
             ParsedExpander.IsExpanded = true;
             SelectPageBox.Text = "ALL";
+
+            PersistParsedToMemory();
         }
         catch (Exception ex)
         {
+            if (IsBiliNotLoggedIn(ex))
+            {
+                SetInfo(InfoBarSeverity.Warning, "账号未登录", "Cookie 可能失效或未生效：请先扫码登录，或点击“刷新 Cookie”。");
+                return;
+            }
             SetInfo(InfoBarSeverity.Error, "解析失败", ex.Message);
         }
     }
@@ -381,6 +512,7 @@ public sealed partial class BiliPage : Page
 
         try
         {
+            PersistParsedToMemory();
             var s = SettingsService.Instance.Current;
 
             var outDir = await GetOutDirForDownloadAsync(CancellationToken.None);
@@ -450,6 +582,11 @@ public sealed partial class BiliPage : Page
         }
         catch (Exception ex)
         {
+            if (IsBiliNotLoggedIn(ex))
+            {
+                SetInfo(InfoBarSeverity.Warning, "账号未登录", "Cookie 可能失效或未生效：请先扫码登录，或点击“刷新 Cookie”。");
+                return;
+            }
             SetInfo(InfoBarSeverity.Error, "启动失败", ex.Message);
         }
     }
@@ -540,6 +677,29 @@ public sealed partial class BiliPage : Page
 
         _mgr.Remove(vm.SessionId);
     }
+
+    private static bool IsBiliNotLoggedIn(Exception ex)
+    {
+        static bool Hit(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s))
+            {
+                return false;
+            }
+            return s.Contains("code=-101", StringComparison.OrdinalIgnoreCase)
+                || s.Contains("账号未登录", StringComparison.OrdinalIgnoreCase)
+                || s.Contains("未登录", StringComparison.OrdinalIgnoreCase);
+        }
+
+        for (Exception? cur = ex; cur is not null; cur = cur.InnerException)
+        {
+            if (Hit(cur.Message))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 public sealed class BiliParsedPageVm : INotifyPropertyChanged
@@ -570,6 +730,16 @@ public sealed class BiliParsedPageVm : INotifyPropertyChanged
             DurationS = p.DurationS,
             Dimension = p.Dimension,
             IsSelected = true,
+        };
+
+    public BiliPageModel ToModel()
+        => new()
+        {
+            PageNumber = PageNumber,
+            Cid = Cid,
+            PageTitle = PageTitle,
+            DurationS = DurationS,
+            Dimension = Dimension,
         };
 
     public event PropertyChangedEventHandler? PropertyChanged;

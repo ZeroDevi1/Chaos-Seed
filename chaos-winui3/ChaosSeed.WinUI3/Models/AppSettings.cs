@@ -81,6 +81,7 @@ public sealed class AppSettings
     public int MusicDownloadConcurrency { get; set; } = 3;
     public int MusicDownloadRetries { get; set; } = 2;
     public bool MusicDownloadOverwrite { get; set; } = false;
+    public bool UseNewMusicUi { get; set; } = false;
 
     // ----- bilibili video download (MVP: BV/AV) -----
 
@@ -89,6 +90,7 @@ public sealed class AppSettings
     // Auth (persisted in WinUI settings; daemon/ffi does not persist)
     public string? BiliCookie { get; set; }
     public string? BiliRefreshToken { get; set; }
+    public string? BiliTvAccessToken { get; set; }
 
     // Download preferences
     public string? BiliLastOutDir { get; set; }

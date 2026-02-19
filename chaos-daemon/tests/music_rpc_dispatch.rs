@@ -306,6 +306,38 @@ impl ChaosService for TestSvc {
         Ok(BiliRefreshCookieResult { auth: params.auth })
     }
 
+    async fn bili_login_qr_create_v2(
+        &self,
+        params: BiliLoginQrCreateV2Params,
+    ) -> Result<BiliLoginQr, String> {
+        // For tests, route to legacy behavior.
+        let _ = params;
+        self.bili_login_qr_create(BiliLoginQrCreateParams {}).await
+    }
+
+    async fn bili_login_qr_poll_v2(
+        &self,
+        params: BiliLoginQrPollParams,
+    ) -> Result<BiliLoginQrPollResultV2, String> {
+        Ok(BiliLoginQrPollResultV2 {
+            session_id: params.session_id,
+            state: BiliLoginQrState::Scan,
+            message: None,
+            auth: None,
+        })
+    }
+
+    async fn bili_check_login(
+        &self,
+        _params: BiliCheckLoginParams,
+    ) -> Result<BiliCheckLoginResult, String> {
+        Ok(BiliCheckLoginResult {
+            is_login: false,
+            reason: Some("not implemented in tests".to_string()),
+            missing_fields: vec![],
+        })
+    }
+
     async fn bili_parse(&self, params: BiliParseParams) -> Result<BiliParseResult, String> {
         Ok(BiliParseResult {
             videos: vec![BiliParsedVideo {
@@ -351,6 +383,48 @@ impl ChaosService for TestSvc {
     async fn bili_download_cancel(
         &self,
         _params: BiliDownloadCancelParams,
+    ) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
+    async fn bili_task_add(&self, _params: BiliTaskAddParams) -> Result<BiliTaskAddResult, String> {
+        Ok(BiliTaskAddResult {
+            task_id: "t".to_string(),
+        })
+    }
+
+    async fn bili_tasks_get(&self, _params: BiliTasksGetParams) -> Result<BiliTasksGetResult, String> {
+        Ok(BiliTasksGetResult {
+            running: vec![],
+            finished: vec![],
+        })
+    }
+
+    async fn bili_task_get(&self, params: BiliTaskGetParams) -> Result<BiliTaskDetail, String> {
+        Ok(BiliTaskDetail {
+            task: BiliTask {
+                task_id: params.task_id,
+                input: "".to_string(),
+                api: BiliApiType::Auto,
+                created_at_unix_ms: 0,
+                done: true,
+                totals: BiliDownloadTotals { total: 0, done: 0, failed: 0, skipped: 0, canceled: 0 },
+            },
+            status: BiliDownloadStatus {
+                done: true,
+                totals: BiliDownloadTotals { total: 0, done: 0, failed: 0, skipped: 0, canceled: 0 },
+                jobs: vec![],
+            },
+        })
+    }
+
+    async fn bili_task_cancel(&self, _params: BiliTaskCancelParams) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
+    async fn bili_tasks_remove_finished(
+        &self,
+        _params: BiliTasksRemoveFinishedParams,
     ) -> Result<OkReply, String> {
         Ok(OkReply { ok: true })
     }

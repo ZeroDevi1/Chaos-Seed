@@ -14,6 +14,83 @@ public sealed class BiliAuthState
     public string? RefreshToken { get; set; }
 }
 
+public sealed class BiliWebAuth
+{
+    [JsonProperty("cookie")]
+    [JsonPropertyName("cookie")]
+    public string Cookie { get; set; } = "";
+
+    [JsonProperty("refreshToken")]
+    [JsonPropertyName("refreshToken")]
+    public string? RefreshToken { get; set; }
+}
+
+public sealed class BiliTvAuth
+{
+    [JsonProperty("accessToken")]
+    [JsonPropertyName("accessToken")]
+    public string AccessToken { get; set; } = "";
+}
+
+public sealed class BiliAuthBundle
+{
+    [JsonProperty("web")]
+    [JsonPropertyName("web")]
+    public BiliWebAuth? Web { get; set; }
+
+    [JsonProperty("tv")]
+    [JsonPropertyName("tv")]
+    public BiliTvAuth? Tv { get; set; }
+}
+
+public sealed class BiliLoginQrCreateV2Params
+{
+    [JsonProperty("loginType")]
+    [JsonPropertyName("loginType")]
+    public string LoginType { get; set; } = "web"; // "web" | "tv"
+}
+
+public sealed class BiliLoginQrPollResultV2
+{
+    [JsonProperty("sessionId")]
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = "";
+
+    [JsonProperty("state")]
+    [JsonPropertyName("state")]
+    public string State { get; set; } = "";
+
+    [JsonProperty("message")]
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    [JsonProperty("auth")]
+    [JsonPropertyName("auth")]
+    public BiliAuthBundle? Auth { get; set; }
+}
+
+public sealed class BiliCheckLoginParams
+{
+    [JsonProperty("auth")]
+    [JsonPropertyName("auth")]
+    public BiliAuthBundle Auth { get; set; } = new();
+}
+
+public sealed class BiliCheckLoginResult
+{
+    [JsonProperty("isLogin")]
+    [JsonPropertyName("isLogin")]
+    public bool IsLogin { get; set; }
+
+    [JsonProperty("reason")]
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    [JsonProperty("missingFields")]
+    [JsonPropertyName("missingFields")]
+    public string[] MissingFields { get; set; } = Array.Empty<string>();
+}
+
 public sealed class BiliLoginQr
 {
     [JsonProperty("sessionId")]
@@ -324,4 +401,106 @@ public sealed class BiliDownloadCancelParams
     [JsonProperty("sessionId")]
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = "";
+}
+
+public sealed class BiliTaskAddParams
+{
+    [JsonProperty("api")]
+    [JsonPropertyName("api")]
+    public string Api { get; set; } = "auto";
+
+    [JsonProperty("input")]
+    [JsonPropertyName("input")]
+    public string Input { get; set; } = "";
+
+    [JsonProperty("auth")]
+    [JsonPropertyName("auth")]
+    public BiliAuthBundle? Auth { get; set; }
+
+    [JsonProperty("options")]
+    [JsonPropertyName("options")]
+    public BiliDownloadOptions Options { get; set; } = new();
+}
+
+public sealed class BiliTaskAddResult
+{
+    [JsonProperty("taskId")]
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; set; } = "";
+}
+
+public sealed class BiliTask
+{
+    [JsonProperty("taskId")]
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; set; } = "";
+
+    [JsonProperty("input")]
+    [JsonPropertyName("input")]
+    public string Input { get; set; } = "";
+
+    [JsonProperty("api")]
+    [JsonPropertyName("api")]
+    public string Api { get; set; } = "auto";
+
+    [JsonProperty("createdAtUnixMs")]
+    [JsonPropertyName("createdAtUnixMs")]
+    public long CreatedAtUnixMs { get; set; }
+
+    [JsonProperty("done")]
+    [JsonPropertyName("done")]
+    public bool Done { get; set; }
+
+    [JsonProperty("totals")]
+    [JsonPropertyName("totals")]
+    public BiliDownloadTotals Totals { get; set; } = new();
+}
+
+public sealed class BiliTasksGetParams { }
+
+public sealed class BiliTasksGetResult
+{
+    [JsonProperty("running")]
+    [JsonPropertyName("running")]
+    public BiliTask[] Running { get; set; } = Array.Empty<BiliTask>();
+
+    [JsonProperty("finished")]
+    [JsonPropertyName("finished")]
+    public BiliTask[] Finished { get; set; } = Array.Empty<BiliTask>();
+}
+
+public sealed class BiliTaskGetParams
+{
+    [JsonProperty("taskId")]
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; set; } = "";
+}
+
+public sealed class BiliTaskDetail
+{
+    [JsonProperty("task")]
+    [JsonPropertyName("task")]
+    public BiliTask Task { get; set; } = new();
+
+    [JsonProperty("status")]
+    [JsonPropertyName("status")]
+    public BiliDownloadStatus Status { get; set; } = new();
+}
+
+public sealed class BiliTaskCancelParams
+{
+    [JsonProperty("taskId")]
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; set; } = "";
+}
+
+public sealed class BiliTasksRemoveFinishedParams
+{
+    [JsonProperty("onlyFailed")]
+    [JsonPropertyName("onlyFailed")]
+    public bool? OnlyFailed { get; set; }
+
+    [JsonProperty("taskId")]
+    [JsonPropertyName("taskId")]
+    public string? TaskId { get; set; }
 }
