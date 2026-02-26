@@ -23,6 +23,9 @@ use chaos_proto::{
     BiliApiType, BiliTask, BiliTaskAddParams, BiliTaskAddResult,
     BiliTaskCancelParams, BiliTaskDetail, BiliTaskGetParams, BiliTasksGetParams, BiliTasksGetResult,
     BiliTasksRemoveFinishedParams,
+    // tts
+    TtsAudioResult, TtsJobState, TtsSftCancelParams, TtsSftStartParams,
+    TtsSftStartResult, TtsSftStatus, TtsSftStatusParams,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -190,6 +193,30 @@ impl ChaosService for FakeSvc {
             lyrics_translation: None,
             debug: None,
         }])
+    }
+
+    async fn tts_sft_start(&self, _params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
+        Ok(TtsSftStartResult { session_id: "tts".to_string() })
+    }
+
+    async fn tts_sft_status(&self, _params: TtsSftStatusParams) -> Result<TtsSftStatus, String> {
+        Ok(TtsSftStatus {
+            done: true,
+            state: TtsJobState::Done,
+            stage: Some("done".to_string()),
+            error: None,
+            result: Some(TtsAudioResult {
+                mime: "audio/wav".to_string(),
+                wav_base64: "".to_string(),
+                sample_rate: 24000,
+                channels: 1,
+                duration_ms: 0,
+            }),
+        })
+    }
+
+    async fn tts_sft_cancel(&self, _params: TtsSftCancelParams) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
     }
 
     async fn live_open(

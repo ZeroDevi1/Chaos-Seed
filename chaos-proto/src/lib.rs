@@ -32,6 +32,11 @@ pub const METHOD_MUSIC_DOWNLOAD_START: &str = "music.download.start";
 pub const METHOD_MUSIC_DOWNLOAD_STATUS: &str = "music.download.status";
 pub const METHOD_MUSIC_DOWNLOAD_CANCEL: &str = "music.download.cancel";
 
+// TTS (CosyVoice SFT)
+pub const METHOD_TTS_SFT_START: &str = "tts.sft.start";
+pub const METHOD_TTS_SFT_STATUS: &str = "tts.sft.status";
+pub const METHOD_TTS_SFT_CANCEL: &str = "tts.sft.cancel";
+
 // Bilibili video download (BV/AV) - MVP
 pub const METHOD_BILI_LOGIN_QR_CREATE: &str = "bili.loginQrCreate";
 pub const METHOD_BILI_LOGIN_QR_POLL: &str = "bili.loginQrPoll";
@@ -57,6 +62,98 @@ pub const METHOD_LIVE_DIR_CATEGORY_ROOMS: &str = "liveDir.categoryRooms";
 pub const METHOD_LIVE_DIR_SEARCH_ROOMS: &str = "liveDir.searchRooms";
 
 pub const NOTIF_DANMAKU_MESSAGE: &str = "danmaku.message";
+
+// -----------------------------
+// TTS DTOs
+// -----------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TtsPromptStrategy {
+    Inject,
+    GuidePrefix,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsSftStartParams {
+    pub model_dir: String,
+    pub spk_id: String,
+    pub text: String,
+    #[serde(default)]
+    pub prompt_text: String,
+    #[serde(default)]
+    pub prompt_strategy: Option<TtsPromptStrategy>,
+    #[serde(default)]
+    pub guide_sep: Option<String>,
+    #[serde(default)]
+    pub speed: Option<f64>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub top_k: Option<u32>,
+    #[serde(default)]
+    pub win_size: Option<u32>,
+    #[serde(default)]
+    pub tau_r: Option<f64>,
+    #[serde(default)]
+    pub text_frontend: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsSftStartResult {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TtsJobState {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Canceled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsSftStatusParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsSftCancelParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsAudioResult {
+    pub mime: String,
+    pub wav_base64: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsSftStatus {
+    pub done: bool,
+    pub state: TtsJobState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<TtsAudioResult>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

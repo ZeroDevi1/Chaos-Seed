@@ -12,6 +12,7 @@ base64 = "0.22"
 chaos-app = { path = "../chaos-app" }
 chaos-core = { path = "../chaos-core" }
 chaos-proto = { path = "../chaos-proto" }
+chaos-tts = { path = "../chaos-tts" }
 fastrand = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies"] }
 serde = { version = "1", features = ["derive"] }

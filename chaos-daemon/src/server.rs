@@ -19,6 +19,8 @@ use chaos_proto::{
     METHOD_MUSIC_QQ_LOGIN_QR_CREATE, METHOD_MUSIC_QQ_LOGIN_QR_POLL, METHOD_MUSIC_QQ_REFRESH_COOKIE,
     METHOD_MUSIC_SEARCH_ALBUMS, METHOD_MUSIC_SEARCH_ARTISTS, METHOD_MUSIC_SEARCH_TRACKS,
     METHOD_MUSIC_TRACK_PLAY_URL,
+    // tts
+    METHOD_TTS_SFT_CANCEL, METHOD_TTS_SFT_START, METHOD_TTS_SFT_STATUS,
     // bili
     METHOD_BILI_DOWNLOAD_CANCEL, METHOD_BILI_DOWNLOAD_START, METHOD_BILI_DOWNLOAD_STATUS,
     METHOD_BILI_LOGIN_QR_CREATE, METHOD_BILI_LOGIN_QR_POLL, METHOD_BILI_PARSE,
@@ -38,6 +40,8 @@ use chaos_proto::{
     BiliCheckLoginParams, BiliCheckLoginResult,
     BiliTaskAddParams, BiliTaskAddResult, BiliTaskCancelParams, BiliTaskDetail,
     BiliTaskGetParams, BiliTasksGetParams, BiliTasksGetResult, BiliTasksRemoveFinishedParams,
+    // tts types
+    TtsSftStartParams, TtsSftStartResult, TtsSftStatusParams, TtsSftCancelParams, TtsSftStatus,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -83,6 +87,22 @@ pub trait ChaosService: Send + Sync + 'static {
         &self,
         params: LyricsSearchParams,
     ) -> impl Future<Output = Result<Vec<LyricsSearchResult>, String>> + Send;
+
+    // ----- tts (CosyVoice SFT) -----
+    fn tts_sft_start(
+        &self,
+        params: TtsSftStartParams,
+    ) -> impl Future<Output = Result<TtsSftStartResult, String>> + Send;
+
+    fn tts_sft_status(
+        &self,
+        params: TtsSftStatusParams,
+    ) -> impl Future<Output = Result<TtsSftStatus, String>> + Send;
+
+    fn tts_sft_cancel(
+        &self,
+        params: TtsSftCancelParams,
+    ) -> impl Future<Output = Result<OkReply, String>> + Send;
 
     fn live_open(
         &self,
@@ -327,7 +347,8 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                 let _ = write_lsp_frame(&mut w, &bytes).await;
             }
 
-            frame = read_lsp_frame(&mut br, 4 * 1024 * 1024) => {
+            // TTS can return large base64 WAV payloads; allow larger frames.
+            frame = read_lsp_frame(&mut br, 64 * 1024 * 1024) => {
                 let frame = frame?;
                 let req: JsonRpcRequest = match serde_json::from_slice(&frame) {
                     Ok(v) => v,
@@ -422,6 +443,75 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                             }
                         };
                         match svc.lyrics_search(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_TTS_SFT_START => {
+                        let params: TtsSftStartParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.tts_sft_start(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_TTS_SFT_STATUS => {
+                        let params: TtsSftStatusParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.tts_sft_status(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_TTS_SFT_CANCEL => {
+                        let params: TtsSftCancelParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.tts_sft_cancel(params).await {
                             Ok(res) => {
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());

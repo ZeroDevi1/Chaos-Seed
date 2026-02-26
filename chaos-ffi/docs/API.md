@@ -17,18 +17,18 @@
 
 ### `uint32_t chaos_ffi_api_version(void)`
 
-返回 API 版本号。当前为 `7`。
+返回 API 版本号。当前为 `9`。
 
 ### `char* chaos_ffi_version_json(void)`
 
 返回：
 
 ```json
-{"version":"0.4.6","git":"unknown","api":8}
+{"version":"0.4.6","git":"unknown","api":9}
 ```
 
 当前为：
-- `api = 8`（新增 bilibili 普通视频下载：登录/刷新/解析/下载任务）。
+- `api = 9`（新增 TTS：CosyVoice3 SFT 推理任务）。
 
 ### `char* chaos_ffi_last_error_json(void)`
 
@@ -218,6 +218,80 @@ char* chaos_subtitle_search_json(
 返回 `ThunderSubtitleItem` 的 JSON 数组（直接序列化 `chaos-core` 中的结构）。
 
 示例元素（仅展示字段形状）：
+
+## TTS（CosyVoice3 SFT 推理）
+
+说明：
+- 本接口返回 **WAV(base64)**，便于跨语言/跨进程传输；客户端可自行落盘后播放。
+- 推理任务为异步：`start` 返回 `sessionId`，随后轮询 `status` 获取结果；可随时 `cancel`。
+
+### `char* chaos_tts_sft_start_json(const char* params_json_utf8)`
+
+输入：`TtsSftStartParams` JSON（camelCase），示例：
+
+```json
+{
+  "modelDir": "D:/models/Fun-CosyVoice3-0.5B-dream-sft-pack",
+  "spkId": "dream",
+  "text": "你好",
+  "promptText": "<|endofprompt|>",
+  "promptStrategy": "inject",
+  "guideSep": "。 ",
+  "speed": 1.0,
+  "seed": 1986,
+  "temperature": 1.0,
+  "topP": 0.75,
+  "topK": 20,
+  "winSize": 10,
+  "tauR": 1.0,
+  "textFrontend": true
+}
+```
+
+返回：`TtsSftStartResult` JSON：
+
+```json
+{ "sessionId": "tts_sft_..." }
+```
+
+### `char* chaos_tts_sft_status_json(const char* session_id_utf8)`
+
+返回：`TtsSftStatus` JSON：
+
+```json
+{
+  "done": false,
+  "state": "running",
+  "stage": "llm",
+  "error": null,
+  "result": null
+}
+```
+
+完成后 `result` 非空：
+
+```json
+{
+  "done": true,
+  "state": "done",
+  "stage": "done",
+  "result": {
+    "mime": "audio/wav",
+    "wavBase64": "...",
+    "sampleRate": 24000,
+    "channels": 1,
+    "durationMs": 1234
+  }
+}
+```
+
+### `char* chaos_tts_sft_cancel_json(const char* session_id_utf8)`
+
+返回：`OkReply` JSON：
+
+```json
+{ "ok": true }
+```
 
 ```json
 {"name":"...","ext":"srt","url":"...","score":9.8,"languages":["zh","en"]}

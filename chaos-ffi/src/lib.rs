@@ -81,9 +81,16 @@ use chaos_proto::{
     BiliTasksGetParams,
     BiliTasksGetResult,
     BiliTasksRemoveFinishedParams,
+    // tts
+    TtsAudioResult,
+    TtsJobState,
+    TtsPromptStrategy,
+    TtsSftStartParams,
+    TtsSftStartResult,
+    TtsSftStatus,
 };
 
-const API_VERSION: u32 = 8;
+const API_VERSION: u32 = 9;
 
 fn ensure_rustls_provider() {
     static ONCE: OnceLock<()> = OnceLock::new();
@@ -4189,6 +4196,57 @@ fn bili_state() -> &'static Mutex<BiliFfiState> {
     })
 }
 
+// -----------------------------
+// TTS (FFI)
+// -----------------------------
+
+struct TtsSession {
+    status: Arc<tokio::sync::Mutex<TtsSftStatus>>,
+    cancel: Arc<AtomicBool>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+struct TtsFfiState {
+    engines: HashMap<String, Arc<chaos_tts::CosyVoiceEngine>>,
+    sessions: HashMap<String, TtsSession>,
+    sem: Arc<tokio::sync::Semaphore>,
+}
+
+fn tts_state() -> &'static Mutex<TtsFfiState> {
+    static STATE: OnceLock<Mutex<TtsFfiState>> = OnceLock::new();
+    STATE.get_or_init(|| {
+        Mutex::new(TtsFfiState {
+            engines: HashMap::new(),
+            sessions: HashMap::new(),
+            sem: Arc::new(tokio::sync::Semaphore::new(1)),
+        })
+    })
+}
+
+fn tts_get_engine(model_dir: &str) -> Result<Arc<chaos_tts::CosyVoiceEngine>, String> {
+    let key = model_dir.trim().to_string();
+    if key.is_empty() {
+        return Err("modelDir is empty".into());
+    }
+
+    {
+        let locked = tts_state().lock().map_err(|_| "tts state poisoned".to_string())?;
+        if let Some(e) = locked.engines.get(&key) {
+            return Ok(e.clone());
+        }
+    }
+
+    let engine = {
+        let pack = chaos_tts::CosyVoicePack::load(&key).map_err(|e| e.to_string())?;
+        let engine = chaos_tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
+        Arc::new(engine)
+    };
+
+    let mut locked = tts_state().lock().map_err(|_| "tts state poisoned".to_string())?;
+    locked.engines.entry(key).or_insert_with(|| engine.clone());
+    Ok(engine)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn chaos_ffi_api_version() -> u32 {
     API_VERSION
@@ -5008,6 +5066,284 @@ pub extern "C" fn chaos_danmaku_disconnect(handle: *mut c_void) -> i32 {
     }
 }
 
+// -----------------------------
+// TTS (CosyVoice SFT) - FFI JSON
+// -----------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let raw = require_cstr(params_json_utf8, "params_json_utf8")?;
+        let params: TtsSftStartParams = serde_json::from_str(raw).map_err(|e| {
+            set_last_error("invalid params_json_utf8", Some(e.to_string()));
+        })?;
+
+        let model_dir = params.model_dir.trim().to_string();
+        if model_dir.is_empty() {
+            set_last_error("modelDir is empty", None);
+            return Err(());
+        }
+        let spk_id = params.spk_id.trim().to_string();
+        if spk_id.is_empty() {
+            set_last_error("spkId is empty", None);
+            return Err(());
+        }
+
+        let session_id = gen_session_id("tts_sft");
+        let status = Arc::new(tokio::sync::Mutex::new(TtsSftStatus {
+            done: false,
+            state: TtsJobState::Pending,
+            stage: Some("loading".to_string()),
+            error: None,
+            result: None,
+        }));
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let sem = {
+            let st = tts_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("tts state poisoned", None);
+            })?;
+            locked.sem.clone()
+        };
+
+        let status2 = status.clone();
+        let cancel2 = cancel.clone();
+
+        let prompt_strategy = params.prompt_strategy.unwrap_or(TtsPromptStrategy::Inject);
+        let guide_sep = params.guide_sep.unwrap_or_else(|| " ".to_string());
+        let speed = params.speed.unwrap_or(1.0).max(0.01);
+        let seed = params.seed.unwrap_or(1986);
+        let temperature = params.temperature.unwrap_or(1.0).max(1e-6);
+        let top_p = params.top_p.unwrap_or(0.6).clamp(1e-6, 1.0);
+        let top_k = params.top_k.unwrap_or(10).max(1);
+        let win_size = params.win_size.unwrap_or(10).max(1);
+        let tau_r = params.tau_r.unwrap_or(1.0).max(0.0);
+        let text_frontend = params.text_frontend.unwrap_or(true);
+
+        let text = params.text.clone();
+        let prompt_text = params.prompt_text.clone();
+
+        let handle = runtime().spawn(async move {
+            let _permit = sem
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("semaphore acquire");
+
+            {
+                let mut st = status2.lock().await;
+                st.state = TtsJobState::Running;
+                st.stage = Some("loading".to_string());
+            }
+
+            let model_dir_for_engine = model_dir.clone();
+            let engine = match tokio::task::spawn_blocking(move || tts_get_engine(&model_dir_for_engine)).await {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => {
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = TtsJobState::Failed;
+                    st.stage = Some("loading".to_string());
+                    st.error = Some(e);
+                    return;
+                }
+                Err(e) => {
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = TtsJobState::Failed;
+                    st.stage = Some("loading".to_string());
+                    st.error = Some(e.to_string());
+                    return;
+                }
+            };
+
+            {
+                let mut st = status2.lock().await;
+                st.stage = Some("llm".to_string());
+            }
+
+            let prompt_strategy2 = match prompt_strategy {
+                TtsPromptStrategy::Inject => chaos_tts::PromptStrategy::Inject,
+                TtsPromptStrategy::GuidePrefix => chaos_tts::PromptStrategy::GuidePrefix,
+            };
+
+            let params2 = chaos_tts::TtsSftParams {
+                model_dir: model_dir.clone(),
+                spk_id: spk_id.clone(),
+                text,
+                prompt_text,
+                prompt_strategy: prompt_strategy2,
+                guide_sep,
+                speed: speed as f32,
+                seed,
+                sampling: chaos_tts::SamplingConfig {
+                    temperature: temperature as f32,
+                    top_p: top_p as f32,
+                    top_k: top_k as usize,
+                    win_size: win_size as usize,
+                    tau_r: tau_r as f32,
+                },
+                text_frontend,
+            };
+
+            let cancel_for_run = cancel2.clone();
+            let res = tokio::task::spawn_blocking(move || {
+                engine.synthesize_sft_with_cancel(&params2, Some(cancel_for_run.as_ref()))
+            })
+            .await;
+
+            match res {
+                Ok(Ok(r)) => {
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = TtsJobState::Done;
+                    st.stage = Some("done".to_string());
+                    st.result = Some(TtsAudioResult {
+                        mime: r.mime,
+                        wav_base64: r.wav_base64,
+                        sample_rate: r.sample_rate,
+                        channels: r.channels,
+                        duration_ms: r.duration_ms,
+                    });
+                }
+                Ok(Err(e)) => {
+                    let canceled = cancel2.load(Ordering::Relaxed)
+                        || e.to_string().to_lowercase().contains("canceled");
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = if canceled { TtsJobState::Canceled } else { TtsJobState::Failed };
+                    st.stage = Some(if canceled { "canceled" } else { "failed" }.to_string());
+                    st.error = Some(e.to_string());
+                }
+                Err(e) => {
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = TtsJobState::Failed;
+                    st.stage = Some("failed".to_string());
+                    st.error = Some(e.to_string());
+                }
+            }
+        });
+
+        {
+            let st = tts_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("tts state poisoned", None);
+            })?;
+            locked.sessions.insert(
+                session_id.clone(),
+                TtsSession {
+                    status,
+                    cancel,
+                    handle,
+                },
+            );
+        }
+
+        let out = TtsSftStartResult { session_id };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize tts start result", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_tts_sft_start_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_tts_sft_status_json(session_id_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?
+            .trim()
+            .to_string();
+        if sid.is_empty() {
+            set_last_error("session_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        let status = {
+            let st = tts_state();
+            let locked = st.lock().map_err(|_| {
+                set_last_error("tts state poisoned", None);
+            })?;
+            let Some(sess) = locked.sessions.get(&sid) else {
+                set_last_error("tts session not found", None);
+                return Err(());
+            };
+            Arc::clone(&sess.status)
+        };
+
+        let out = runtime().block_on(async move { status.lock().await.clone() });
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error("failed to serialize tts status", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_tts_sft_status_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_tts_sft_cancel_json(session_id_utf8: *const c_char) -> *mut c_char {
+    let res = std::panic::catch_unwind(|| -> Result<String, ()> {
+        let sid = require_cstr(session_id_utf8, "session_id_utf8")?
+            .trim()
+            .to_string();
+        if sid.is_empty() {
+            set_last_error("session_id_utf8 is empty", None);
+            return Err(());
+        }
+
+        let (cancel, status) = {
+            let st = tts_state();
+            let mut locked = st.lock().map_err(|_| {
+                set_last_error("tts state poisoned", None);
+            })?;
+            let Some(sess) = locked.sessions.get_mut(&sid) else {
+                set_last_error("tts session not found", None);
+                return Err(());
+            };
+            sess.handle.abort();
+            (Arc::clone(&sess.cancel), Arc::clone(&sess.status))
+        };
+
+        cancel.store(true, Ordering::Relaxed);
+        runtime().block_on(async move {
+            let mut st = status.lock().await;
+            st.done = true;
+            st.state = TtsJobState::Canceled;
+            st.stage = Some("canceled".to_string());
+            st.error = None;
+        });
+
+        serde_json::to_string(&OkReply { ok: true }).map_err(|e| {
+            set_last_error("failed to serialize ok reply", Some(e.to_string()));
+        })
+    });
+
+    match res {
+        Ok(Ok(s)) => ok_json(s),
+        Ok(Err(())) => ptr::null_mut(),
+        Err(_) => {
+            set_last_error("panic in chaos_tts_sft_cancel_json", None);
+            ptr::null_mut()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5046,6 +5382,16 @@ mod tests {
         let item = c("{not json}");
         let out = c("/tmp");
         let p = chaos_subtitle_download_item_json(item.as_ptr(), out.as_ptr(), 1000, 0, 0);
+        assert!(p.is_null());
+        let err = chaos_ffi_last_error_json();
+        assert!(!err.is_null());
+        chaos_ffi_string_free(err);
+    }
+
+    #[test]
+    fn tts_start_rejects_bad_json() {
+        let bad = c("{not json}");
+        let p = chaos_tts_sft_start_json(bad.as_ptr());
         assert!(p.is_null());
         let err = chaos_ffi_last_error_json();
         assert!(!err.is_null());

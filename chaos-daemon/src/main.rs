@@ -31,6 +31,9 @@ mod win {
         BiliRefreshCookieParams, BiliRefreshCookieResult, BiliTask, BiliTaskAddParams, BiliTaskAddResult,
         BiliTaskCancelParams, BiliTaskDetail, BiliTaskGetParams, BiliTasksGetParams, BiliTasksGetResult,
         BiliTasksRemoveFinishedParams,
+        // tts
+        TtsAudioResult, TtsJobState, TtsPromptStrategy, TtsSftCancelParams, TtsSftStartParams,
+        TtsSftStartResult, TtsSftStatus, TtsSftStatusParams,
     };
     use std::env;
     use std::str::FromStr;
@@ -45,7 +48,7 @@ mod win {
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncRead, AsyncWrite, Stdin, Stdout};
     use tokio::sync::mpsc;
-    use tokio::sync::Mutex;
+    use tokio::sync::{Mutex, Semaphore};
     use tokio::fs;
 
     const DEFAULT_NETEASE_BASE_URLS: &[&str] = &[
@@ -452,10 +455,237 @@ mod win {
         }
     }
 
+    #[derive(Debug)]
+    struct TtsSession {
+        status: Arc<Mutex<TtsSftStatus>>,
+        cancel: Arc<AtomicBool>,
+        handle: tokio::task::JoinHandle<()>,
+    }
+
+    #[derive(Debug)]
+    struct TtsManager {
+        engines: Mutex<HashMap<String, Arc<chaos_tts::CosyVoiceEngine>>>,
+        sessions: Mutex<HashMap<String, TtsSession>>,
+        sem: Arc<Semaphore>,
+    }
+
+    impl TtsManager {
+        fn new() -> Self {
+            Self {
+                engines: Mutex::new(HashMap::new()),
+                sessions: Mutex::new(HashMap::new()),
+                sem: Arc::new(Semaphore::new(1)),
+            }
+        }
+
+        async fn get_engine(&self, model_dir: &str) -> Result<Arc<chaos_tts::CosyVoiceEngine>, String> {
+            let key = model_dir.trim().to_string();
+            if key.is_empty() {
+                return Err("modelDir is empty".into());
+            }
+            {
+                let locked = self.engines.lock().await;
+                if let Some(e) = locked.get(&key) {
+                    return Ok(e.clone());
+                }
+            }
+
+            // Loading/optimizing tract plans can be expensive; do it off the async scheduler.
+            let key2 = key.clone();
+            let engine = tokio::task::spawn_blocking(move || -> Result<Arc<chaos_tts::CosyVoiceEngine>, String> {
+                let pack = chaos_tts::CosyVoicePack::load(&key2).map_err(|e| e.to_string())?;
+                let engine = chaos_tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
+                Ok(Arc::new(engine))
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+
+            let mut locked = self.engines.lock().await;
+            locked.insert(key, engine.clone());
+            Ok(engine)
+        }
+
+        async fn start(self: Arc<Self>, params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
+            let session_id = gen_session_id("tts_sft");
+
+            let status = Arc::new(Mutex::new(TtsSftStatus {
+                done: false,
+                state: TtsJobState::Pending,
+                stage: Some("loading".to_string()),
+                error: None,
+                result: None,
+            }));
+            let cancel = Arc::new(AtomicBool::new(false));
+
+            let status2 = status.clone();
+            let cancel2 = cancel.clone();
+            let model_dir = params.model_dir.trim().to_string();
+            let spk_id = params.spk_id.trim().to_string();
+            let text = params.text.clone();
+            let prompt_text = params.prompt_text.clone();
+
+            let prompt_strategy = params.prompt_strategy.unwrap_or(TtsPromptStrategy::Inject);
+            let guide_sep = params.guide_sep.unwrap_or_else(|| " ".to_string());
+
+            let speed = params.speed.unwrap_or(1.0).max(0.01);
+            let seed = params.seed.unwrap_or(1986);
+
+            let temperature = params.temperature.unwrap_or(1.0).max(1e-6);
+            let top_p = params.top_p.unwrap_or(0.6).clamp(1e-6, 1.0);
+            let top_k = params.top_k.unwrap_or(10).max(1);
+            let win_size = params.win_size.unwrap_or(10).max(1);
+            let tau_r = params.tau_r.unwrap_or(1.0).max(0.0);
+            let text_frontend = params.text_frontend.unwrap_or(true);
+
+            let mgr = self.clone();
+
+            let handle = tokio::spawn(async move {
+                // Use owned permit so it can live inside the spawned task.
+                let _permit = mgr
+                    .sem
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("semaphore acquire");
+
+                {
+                    let mut st = status2.lock().await;
+                    st.state = TtsJobState::Running;
+                    st.stage = Some("loading".to_string());
+                }
+
+                let engine = match mgr.get_engine(&model_dir).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let mut st = status2.lock().await;
+                        st.done = true;
+                        st.state = TtsJobState::Failed;
+                        st.stage = Some("loading".to_string());
+                        st.error = Some(e);
+                        return;
+                    }
+                };
+
+                {
+                    let mut st = status2.lock().await;
+                    st.stage = Some("llm".to_string());
+                }
+
+                let prompt_strategy2 = match prompt_strategy {
+                    TtsPromptStrategy::Inject => chaos_tts::PromptStrategy::Inject,
+                    TtsPromptStrategy::GuidePrefix => chaos_tts::PromptStrategy::GuidePrefix,
+                };
+
+                let params2 = chaos_tts::TtsSftParams {
+                    model_dir: model_dir.clone(),
+                    spk_id: spk_id.clone(),
+                    text,
+                    prompt_text,
+                    prompt_strategy: prompt_strategy2,
+                    guide_sep,
+                    speed: speed as f32,
+                    seed,
+                    sampling: chaos_tts::SamplingConfig {
+                        temperature: temperature as f32,
+                        top_p: top_p as f32,
+                        top_k: top_k as usize,
+                        win_size: win_size as usize,
+                        tau_r: tau_r as f32,
+                    },
+                    text_frontend,
+                };
+
+                let res = tokio::task::spawn_blocking(move || {
+                    engine.synthesize_sft_with_cancel(&params2, Some(cancel2.as_ref()))
+                })
+                .await;
+
+                match res {
+                    Ok(Ok(r)) => {
+                        let mut st = status2.lock().await;
+                        st.done = true;
+                        st.state = TtsJobState::Done;
+                        st.stage = Some("done".to_string());
+                        st.result = Some(TtsAudioResult {
+                            mime: r.mime,
+                            wav_base64: r.wav_base64,
+                            sample_rate: r.sample_rate,
+                            channels: r.channels,
+                            duration_ms: r.duration_ms,
+                        });
+                    }
+                    Ok(Err(e)) => {
+                        let canceled = cancel2.load(Ordering::Relaxed) || e.to_string().to_lowercase().contains("canceled");
+                        let mut st = status2.lock().await;
+                        st.done = true;
+                        st.state = if canceled { TtsJobState::Canceled } else { TtsJobState::Failed };
+                        st.stage = Some(if canceled { "canceled" } else { "failed" }.to_string());
+                        st.error = Some(e.to_string());
+                    }
+                    Err(e) => {
+                        let mut st = status2.lock().await;
+                        st.done = true;
+                        st.state = TtsJobState::Failed;
+                        st.stage = Some("failed".to_string());
+                        st.error = Some(e.to_string());
+                    }
+                }
+            });
+
+            {
+                let mut locked = self.sessions.lock().await;
+                locked.insert(
+                    session_id.clone(),
+                    TtsSession {
+                        status,
+                        cancel,
+                        handle,
+                    },
+                );
+            }
+
+            Ok(TtsSftStartResult { session_id })
+        }
+
+        async fn status(&self, params: TtsSftStatusParams) -> Result<TtsSftStatus, String> {
+            let sid = params.session_id.trim().to_string();
+            if sid.is_empty() {
+                return Err("sessionId is empty".into());
+            }
+            let locked = self.sessions.lock().await;
+            let Some(sess) = locked.get(&sid) else {
+                return Err("session not found".into());
+            };
+            Ok(sess.status.lock().await.clone())
+        }
+
+        async fn cancel(&self, params: TtsSftCancelParams) -> Result<OkReply, String> {
+            let sid = params.session_id.trim().to_string();
+            if sid.is_empty() {
+                return Err("sessionId is empty".into());
+            }
+            let mut locked = self.sessions.lock().await;
+            let Some(sess) = locked.get_mut(&sid) else {
+                return Err("session not found".into());
+            };
+            sess.cancel.store(true, Ordering::Relaxed);
+            sess.handle.abort();
+            {
+                let mut st = sess.status.lock().await;
+                st.done = true;
+                st.state = TtsJobState::Canceled;
+                st.stage = Some("canceled".to_string());
+                st.error = None;
+            }
+            Ok(OkReply { ok: true })
+        }
+    }
+
     struct Svc {
         app: std::sync::Arc<ChaosApp>,
         music: Arc<MusicManager>,
         bili: Arc<BiliManager>,
+        tts: Arc<TtsManager>,
     }
 
     impl chaos_daemon::ChaosService for Svc {
@@ -646,6 +876,18 @@ mod win {
                     debug: x.debug,
                 })
                 .collect())
+        }
+
+        async fn tts_sft_start(&self, params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
+            self.tts.clone().start(params).await
+        }
+
+        async fn tts_sft_status(&self, params: TtsSftStatusParams) -> Result<TtsSftStatus, String> {
+            self.tts.status(params).await
+        }
+
+        async fn tts_sft_cancel(&self, params: TtsSftCancelParams) -> Result<OkReply, String> {
+            self.tts.cancel(params).await
         }
 
         async fn live_open(
@@ -3464,7 +3706,8 @@ mod win {
             let app = Arc::new(ChaosApp::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let music = Arc::new(MusicManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let bili = Arc::new(BiliManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
-            let svc = Svc { app, music, bili };
+            let tts = Arc::new(TtsManager::new());
+            let svc = Svc { app, music, bili, tts };
 
             run_jsonrpc_over_lsp(&svc, rw, auth_token)
                 .await
@@ -3487,7 +3730,8 @@ mod win {
             let app = Arc::new(ChaosApp::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let music = Arc::new(MusicManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let bili = Arc::new(BiliManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
-            let svc = Svc { app, music, bili };
+            let tts = Arc::new(TtsManager::new());
+            let svc = Svc { app, music, bili, tts };
 
             run_jsonrpc_over_lsp(&svc, server, auth_token)
                 .await

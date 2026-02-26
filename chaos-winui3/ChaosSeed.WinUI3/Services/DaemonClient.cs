@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Models.Bili;
 using ChaosSeed.WinUI3.Models.Music;
+using ChaosSeed.WinUI3.Models.Tts;
 using StreamJsonRpc;
 using StreamJsonRpc.Protocol;
 using StreamJsonRpc.Reflection;
@@ -708,6 +709,102 @@ public sealed class DaemonClient : IDisposable
         catch (RemoteInvocationException ex)
         {
             throw WrapRpcFailure("music.download.cancel", ex);
+        }
+    }
+
+    // ----- tts (CosyVoice SFT) -----
+
+    public async Task<TtsSftStartResult> TtsSftStartAsync(TtsSftStartParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            // Use explicit payload to make the JSON stable and independent of serializer naming-policy.
+            var payload = new
+            {
+                modelDir = (p.ModelDir ?? "").Trim(),
+                spkId = (p.SpkId ?? "").Trim(),
+                text = (p.Text ?? "").Trim(),
+                promptText = p.PromptText,
+                promptStrategy = p.PromptStrategy,
+                guideSep = p.GuideSep,
+                speed = p.Speed,
+                seed = p.Seed,
+                temperature = p.Temperature,
+                topP = p.TopP,
+                topK = p.TopK,
+                winSize = p.WinSize,
+                tauR = p.TauR,
+                textFrontend = p.TextFrontend,
+            };
+            return await _rpc.InvokeWithParameterObjectAsync<TtsSftStartResult>("tts.sft.start", payload, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("tts.sft.start", ex);
+        }
+    }
+
+    public async Task<TtsSftStatus> TtsSftStatusAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            return await _rpc.InvokeWithParameterObjectAsync<TtsSftStatus>(
+                "tts.sft.status",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("tts.sft.status", ex);
+        }
+    }
+
+    public async Task TtsSftCancelAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>(
+                "tts.sft.cancel",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("tts.sft.cancel", ex);
         }
     }
 

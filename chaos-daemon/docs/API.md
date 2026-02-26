@@ -63,6 +63,7 @@ daemon 会把弹幕以 **服务器通知**的形式推给客户端：
 - `daemon.ping`
 - `nowPlaying.snapshot`
 - `lyrics.search`
+- `tts.sft.start` / `tts.sft.status` / `tts.sft.cancel`
 - `music.config.set`
 - `music.searchTracks` / `music.searchAlbums` / `music.searchArtists`
 - `music.albumTracks` / `music.artistAlbums`
@@ -192,6 +193,24 @@ result：`LyricsSearchResult[]`（按 `quality` 排序，best-effort）
   "debug": null
 }
 ```
+
+### `tts.sft.start` / `tts.sft.status` / `tts.sft.cancel`（CosyVoice3 SFT 推理）
+
+说明：
+- 任务式接口：`start` 返回 `sessionId`，随后轮询 `status` 获取进度/结果；可随时 `cancel`。
+- 音频结果以 `wavBase64` 返回（WAV/PCM16）。
+
+`tts.sft.start` params：`TtsSftStartParams`
+
+`tts.sft.start` result：`TtsSftStartResult`
+
+`tts.sft.status` params：`TtsSftStatusParams`
+
+`tts.sft.status` result：`TtsSftStatus`
+
+`tts.sft.cancel` params：`TtsSftCancelParams`
+
+`tts.sft.cancel` result：`OkReply`
 
 ## 音乐下载（歌曲搜索 / 登录 / 下载会话）
 
