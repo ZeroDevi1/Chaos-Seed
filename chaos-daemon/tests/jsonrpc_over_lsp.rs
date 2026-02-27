@@ -1,31 +1,104 @@
-use chaos_daemon::{ChaosService, read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame};
+use chaos_daemon::{
+    ChaosService, DaemonNotif, read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame,
+};
 use chaos_proto::{
-    DanmakuConnectParams, DanmakuConnectResult, DanmakuDisconnectParams, DanmakuFetchImageParams,
-    DanmakuFetchImageResult, DanmakuMessage, LiveCloseParams, LiveDirCategoriesParams,
-    LiveDirCategory, LiveDirCategoryRoomsParams, LiveDirRecommendRoomsParams, LiveDirRoomCard,
-    LiveDirRoomListResult, LiveDirSearchRoomsParams, LiveDirSubCategory, LiveOpenParams,
-    LiveOpenResult, LivestreamDecodeManifestParams, LivestreamDecodeManifestResult, LivestreamInfo,
-    LivestreamPlaybackHints, LivestreamVariant, LyricsSearchParams, LyricsSearchResult,
-    NowPlayingSession, NowPlayingSnapshot, NowPlayingSnapshotParams,
-    // music
-    KugouUserInfo, MusicAlbum, MusicAlbumTracksParams, MusicArtist, MusicArtistAlbumsParams,
-    MusicDownloadCancelParams, MusicDownloadStartParams, MusicDownloadStartResult, MusicDownloadStatus,
-    MusicDownloadStatusParams, MusicDownloadTotals, MusicLoginQr, MusicLoginQrCreateParams, MusicLoginQrPollParams,
-    MusicLoginQrPollResult, MusicLoginQrState, MusicProviderConfig, MusicRefreshCookieParams,
-    MusicSearchParams, MusicTrack, MusicTrackPlayUrlParams, MusicTrackPlayUrlResult, OkReply, QqMusicCookie,
+    BiliApiType,
+    BiliCheckLoginParams,
+    BiliCheckLoginResult,
     // bilibili video download (MVP)
-    BiliDownloadCancelParams, BiliDownloadStartParams,
-    BiliDownloadStartResult, BiliDownloadStatus, BiliDownloadStatusParams, BiliDownloadTotals,
-    BiliLoginQr, BiliLoginQrCreateParams, BiliLoginQrPollParams, BiliLoginQrPollResult, BiliLoginQrState,
-    BiliLoginQrCreateV2Params, BiliLoginQrPollResultV2,
-    BiliCheckLoginParams, BiliCheckLoginResult,
-    BiliParseParams, BiliParseResult, BiliRefreshCookieParams, BiliRefreshCookieResult,
-    BiliApiType, BiliTask, BiliTaskAddParams, BiliTaskAddResult,
-    BiliTaskCancelParams, BiliTaskDetail, BiliTaskGetParams, BiliTasksGetParams, BiliTasksGetResult,
+    BiliDownloadCancelParams,
+    BiliDownloadStartParams,
+    BiliDownloadStartResult,
+    BiliDownloadStatus,
+    BiliDownloadStatusParams,
+    BiliDownloadTotals,
+    BiliLoginQr,
+    BiliLoginQrCreateParams,
+    BiliLoginQrCreateV2Params,
+    BiliLoginQrPollParams,
+    BiliLoginQrPollResult,
+    BiliLoginQrPollResultV2,
+    BiliLoginQrState,
+    BiliParseParams,
+    BiliParseResult,
+    BiliRefreshCookieParams,
+    BiliRefreshCookieResult,
+    BiliTask,
+    BiliTaskAddParams,
+    BiliTaskAddResult,
+    BiliTaskCancelParams,
+    BiliTaskDetail,
+    BiliTaskGetParams,
+    BiliTasksGetParams,
+    BiliTasksGetResult,
     BiliTasksRemoveFinishedParams,
+    DanmakuConnectParams,
+    DanmakuConnectResult,
+    DanmakuDisconnectParams,
+    DanmakuFetchImageParams,
+    DanmakuFetchImageResult,
+    DanmakuMessage,
+    // music
+    KugouUserInfo,
+    LiveCloseParams,
+    LiveDirCategoriesParams,
+    LiveDirCategory,
+    LiveDirCategoryRoomsParams,
+    LiveDirRecommendRoomsParams,
+    LiveDirRoomCard,
+    LiveDirRoomListResult,
+    LiveDirSearchRoomsParams,
+    LiveDirSubCategory,
+    LiveOpenParams,
+    LiveOpenResult,
+    LivestreamDecodeManifestParams,
+    LivestreamDecodeManifestResult,
+    LivestreamInfo,
+    LivestreamPlaybackHints,
+    LivestreamVariant,
+    LlmChatParams,
+    LlmChatResult,
+    // llm + voice chat
+    LlmConfigSetParams,
+    LyricsSearchParams,
+    LyricsSearchResult,
+    MusicAlbum,
+    MusicAlbumTracksParams,
+    MusicArtist,
+    MusicArtistAlbumsParams,
+    MusicDownloadCancelParams,
+    MusicDownloadStartParams,
+    MusicDownloadStartResult,
+    MusicDownloadStatus,
+    MusicDownloadStatusParams,
+    MusicDownloadTotals,
+    MusicLoginQr,
+    MusicLoginQrCreateParams,
+    MusicLoginQrPollParams,
+    MusicLoginQrPollResult,
+    MusicLoginQrState,
+    MusicProviderConfig,
+    MusicRefreshCookieParams,
+    MusicSearchParams,
+    MusicTrack,
+    MusicTrackPlayUrlParams,
+    MusicTrackPlayUrlResult,
+    NowPlayingSession,
+    NowPlayingSnapshot,
+    NowPlayingSnapshotParams,
+    OkReply,
+    QqMusicCookie,
     // tts
-    TtsAudioResult, TtsJobState, TtsSftCancelParams, TtsSftStartParams,
-    TtsSftStartResult, TtsSftStatus, TtsSftStatusParams,
+    TtsAudioResult,
+    TtsJobState,
+    TtsSftCancelParams,
+    TtsSftStartParams,
+    TtsSftStartResult,
+    TtsSftStatus,
+    TtsSftStatusParams,
+    VoiceChatStreamCancelParams,
+    VoiceChatStreamStartParams,
+    VoiceChatStreamStartResult,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -196,7 +269,9 @@ impl ChaosService for FakeSvc {
     }
 
     async fn tts_sft_start(&self, _params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
-        Ok(TtsSftStartResult { session_id: "tts".to_string() })
+        Ok(TtsSftStartResult {
+            session_id: "tts".to_string(),
+        })
     }
 
     async fn tts_sft_status(&self, _params: TtsSftStatusParams) -> Result<TtsSftStatus, String> {
@@ -216,6 +291,44 @@ impl ChaosService for FakeSvc {
     }
 
     async fn tts_sft_cancel(&self, _params: TtsSftCancelParams) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
+    // ----- llm -----
+
+    async fn llm_config_set(&self, _params: LlmConfigSetParams) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
+    async fn llm_chat(&self, params: LlmChatParams) -> Result<LlmChatResult, String> {
+        // 测试用：回显最后一条消息（若无则返回空字符串）。
+        let text = params
+            .messages
+            .last()
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        Ok(LlmChatResult { text })
+    }
+
+    // ----- voice chat stream -----
+
+    async fn voice_chat_stream_start(
+        &self,
+        _params: VoiceChatStreamStartParams,
+        _notif_tx: mpsc::UnboundedSender<DaemonNotif>,
+    ) -> Result<VoiceChatStreamStartResult, String> {
+        Ok(VoiceChatStreamStartResult {
+            session_id: "voice_chat_test".to_string(),
+            sample_rate: 24_000,
+            channels: 1,
+            format: "pcm16le".to_string(),
+        })
+    }
+
+    async fn voice_chat_stream_cancel(
+        &self,
+        _params: VoiceChatStreamCancelParams,
+    ) -> Result<OkReply, String> {
         Ok(OkReply { ok: true })
     }
 
@@ -295,23 +408,38 @@ impl ChaosService for FakeSvc {
         Ok(OkReply { ok: true })
     }
 
-    async fn music_search_tracks(&self, _params: MusicSearchParams) -> Result<Vec<MusicTrack>, String> {
+    async fn music_search_tracks(
+        &self,
+        _params: MusicSearchParams,
+    ) -> Result<Vec<MusicTrack>, String> {
         Ok(vec![])
     }
 
-    async fn music_search_albums(&self, _params: MusicSearchParams) -> Result<Vec<MusicAlbum>, String> {
+    async fn music_search_albums(
+        &self,
+        _params: MusicSearchParams,
+    ) -> Result<Vec<MusicAlbum>, String> {
         Ok(vec![])
     }
 
-    async fn music_search_artists(&self, _params: MusicSearchParams) -> Result<Vec<MusicArtist>, String> {
+    async fn music_search_artists(
+        &self,
+        _params: MusicSearchParams,
+    ) -> Result<Vec<MusicArtist>, String> {
         Ok(vec![])
     }
 
-    async fn music_album_tracks(&self, _params: MusicAlbumTracksParams) -> Result<Vec<MusicTrack>, String> {
+    async fn music_album_tracks(
+        &self,
+        _params: MusicAlbumTracksParams,
+    ) -> Result<Vec<MusicTrack>, String> {
         Ok(vec![])
     }
 
-    async fn music_artist_albums(&self, _params: MusicArtistAlbumsParams) -> Result<Vec<MusicAlbum>, String> {
+    async fn music_artist_albums(
+        &self,
+        _params: MusicArtistAlbumsParams,
+    ) -> Result<Vec<MusicAlbum>, String> {
         Ok(vec![])
     }
 
@@ -529,7 +657,10 @@ impl ChaosService for FakeSvc {
         })
     }
 
-    async fn bili_tasks_get(&self, _params: BiliTasksGetParams) -> Result<BiliTasksGetResult, String> {
+    async fn bili_tasks_get(
+        &self,
+        _params: BiliTasksGetParams,
+    ) -> Result<BiliTasksGetResult, String> {
         Ok(BiliTasksGetResult {
             running: vec![],
             finished: vec![],
@@ -544,11 +675,23 @@ impl ChaosService for FakeSvc {
                 api: BiliApiType::Auto,
                 created_at_unix_ms: 0,
                 done: true,
-                totals: BiliDownloadTotals { total: 0, done: 0, failed: 0, skipped: 0, canceled: 0 },
+                totals: BiliDownloadTotals {
+                    total: 0,
+                    done: 0,
+                    failed: 0,
+                    skipped: 0,
+                    canceled: 0,
+                },
             },
             status: BiliDownloadStatus {
                 done: true,
-                totals: BiliDownloadTotals { total: 0, done: 0, failed: 0, skipped: 0, canceled: 0 },
+                totals: BiliDownloadTotals {
+                    total: 0,
+                    done: 0,
+                    failed: 0,
+                    skipped: 0,
+                    canceled: 0,
+                },
                 jobs: vec![],
             },
         })

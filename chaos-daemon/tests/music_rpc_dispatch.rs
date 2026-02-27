@@ -1,4 +1,6 @@
-use chaos_daemon::{ChaosService, read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame};
+use chaos_daemon::{
+    ChaosService, DaemonNotif, read_lsp_frame, run_jsonrpc_over_lsp, write_lsp_frame,
+};
 use chaos_proto::*;
 use serde_json::{Value, json};
 use tokio::io::BufReader;
@@ -25,7 +27,10 @@ impl ChaosService for TestSvc {
                 cover: None,
                 is_living: true,
             },
-            playback: LivestreamPlaybackHints { referer: None, user_agent: None },
+            playback: LivestreamPlaybackHints {
+                referer: None,
+                user_agent: None,
+            },
             variants: vec![],
         })
     }
@@ -88,7 +93,9 @@ impl ChaosService for TestSvc {
     }
 
     async fn tts_sft_start(&self, _params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
-        Ok(TtsSftStartResult { session_id: "tts".to_string() })
+        Ok(TtsSftStartResult {
+            session_id: "tts".to_string(),
+        })
     }
 
     async fn tts_sft_status(&self, _params: TtsSftStatusParams) -> Result<TtsSftStatus, String> {
@@ -111,11 +118,54 @@ impl ChaosService for TestSvc {
         Ok(OkReply { ok: true })
     }
 
+    // ----- llm -----
+
+    async fn llm_config_set(&self, _params: LlmConfigSetParams) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
+    async fn llm_chat(&self, params: LlmChatParams) -> Result<LlmChatResult, String> {
+        // 测试用：回显最后一条消息（若无则返回空字符串）。
+        let text = params
+            .messages
+            .last()
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        Ok(LlmChatResult { text })
+    }
+
+    // ----- voice chat stream -----
+
+    async fn voice_chat_stream_start(
+        &self,
+        _params: VoiceChatStreamStartParams,
+        _notif_tx: tokio::sync::mpsc::UnboundedSender<DaemonNotif>,
+    ) -> Result<VoiceChatStreamStartResult, String> {
+        Ok(VoiceChatStreamStartResult {
+            session_id: "voice_chat_test".to_string(),
+            sample_rate: 24_000,
+            channels: 1,
+            format: "pcm16le".to_string(),
+        })
+    }
+
+    async fn voice_chat_stream_cancel(
+        &self,
+        _params: VoiceChatStreamCancelParams,
+    ) -> Result<OkReply, String> {
+        Ok(OkReply { ok: true })
+    }
+
     async fn live_open(
         &self,
         _params: LiveOpenParams,
-    ) -> Result<(LiveOpenResult, tokio::sync::mpsc::UnboundedReceiver<DanmakuMessage>), String>
-    {
+    ) -> Result<
+        (
+            LiveOpenResult,
+            tokio::sync::mpsc::UnboundedReceiver<DanmakuMessage>,
+        ),
+        String,
+    > {
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok((
             LiveOpenResult {
@@ -141,8 +191,13 @@ impl ChaosService for TestSvc {
     async fn danmaku_connect(
         &self,
         _params: DanmakuConnectParams,
-    ) -> Result<(DanmakuConnectResult, tokio::sync::mpsc::UnboundedReceiver<DanmakuMessage>), String>
-    {
+    ) -> Result<
+        (
+            DanmakuConnectResult,
+            tokio::sync::mpsc::UnboundedReceiver<DanmakuMessage>,
+        ),
+        String,
+    > {
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok((
             DanmakuConnectResult {
@@ -173,23 +228,38 @@ impl ChaosService for TestSvc {
         Ok(OkReply { ok: true })
     }
 
-    async fn music_search_tracks(&self, _params: MusicSearchParams) -> Result<Vec<MusicTrack>, String> {
+    async fn music_search_tracks(
+        &self,
+        _params: MusicSearchParams,
+    ) -> Result<Vec<MusicTrack>, String> {
         Ok(vec![])
     }
 
-    async fn music_search_albums(&self, _params: MusicSearchParams) -> Result<Vec<MusicAlbum>, String> {
+    async fn music_search_albums(
+        &self,
+        _params: MusicSearchParams,
+    ) -> Result<Vec<MusicAlbum>, String> {
         Ok(vec![])
     }
 
-    async fn music_search_artists(&self, _params: MusicSearchParams) -> Result<Vec<MusicArtist>, String> {
+    async fn music_search_artists(
+        &self,
+        _params: MusicSearchParams,
+    ) -> Result<Vec<MusicArtist>, String> {
         Ok(vec![])
     }
 
-    async fn music_album_tracks(&self, _params: MusicAlbumTracksParams) -> Result<Vec<MusicTrack>, String> {
+    async fn music_album_tracks(
+        &self,
+        _params: MusicAlbumTracksParams,
+    ) -> Result<Vec<MusicTrack>, String> {
         Ok(vec![])
     }
 
-    async fn music_artist_albums(&self, _params: MusicArtistAlbumsParams) -> Result<Vec<MusicAlbum>, String> {
+    async fn music_artist_albums(
+        &self,
+        _params: MusicArtistAlbumsParams,
+    ) -> Result<Vec<MusicAlbum>, String> {
         Ok(vec![])
     }
 
@@ -417,7 +487,10 @@ impl ChaosService for TestSvc {
         })
     }
 
-    async fn bili_tasks_get(&self, _params: BiliTasksGetParams) -> Result<BiliTasksGetResult, String> {
+    async fn bili_tasks_get(
+        &self,
+        _params: BiliTasksGetParams,
+    ) -> Result<BiliTasksGetResult, String> {
         Ok(BiliTasksGetResult {
             running: vec![],
             finished: vec![],
@@ -432,11 +505,23 @@ impl ChaosService for TestSvc {
                 api: BiliApiType::Auto,
                 created_at_unix_ms: 0,
                 done: true,
-                totals: BiliDownloadTotals { total: 0, done: 0, failed: 0, skipped: 0, canceled: 0 },
+                totals: BiliDownloadTotals {
+                    total: 0,
+                    done: 0,
+                    failed: 0,
+                    skipped: 0,
+                    canceled: 0,
+                },
             },
             status: BiliDownloadStatus {
                 done: true,
-                totals: BiliDownloadTotals { total: 0, done: 0, failed: 0, skipped: 0, canceled: 0 },
+                totals: BiliDownloadTotals {
+                    total: 0,
+                    done: 0,
+                    failed: 0,
+                    skipped: 0,
+                    canceled: 0,
+                },
                 jobs: vec![],
             },
         })
@@ -486,24 +571,54 @@ async fn music_methods_are_dispatchable() {
     });
 
     // ping(auth)
-    let resp = rpc_call(&mut cw, &mut br, 1, "daemon.ping", json!({ "authToken": "token" })).await;
+    let resp = rpc_call(
+        &mut cw,
+        &mut br,
+        1,
+        "daemon.ping",
+        json!({ "authToken": "token" }),
+    )
+    .await;
     assert!(resp.get("result").is_some());
 
     // music.config.set
     let resp = rpc_call(&mut cw, &mut br, 2, "music.config.set", json!({})).await;
-    assert_eq!(resp.pointer("/result/ok").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        resp.pointer("/result/ok").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 
     // music.searchTracks
-    let resp = rpc_call(&mut cw, &mut br, 3, "music.searchTracks", json!({ "service":"qq", "keyword":"k", "page":1, "pageSize":10 })).await;
+    let resp = rpc_call(
+        &mut cw,
+        &mut br,
+        3,
+        "music.searchTracks",
+        json!({ "service":"qq", "keyword":"k", "page":1, "pageSize":10 }),
+    )
+    .await;
     assert!(resp.get("result").is_some());
 
     // music.trackPlayUrl
-    let resp = rpc_call(&mut cw, &mut br, 4, "music.trackPlayUrl", json!({ "service":"qq", "trackId":"1" })).await;
-    assert_eq!(resp.pointer("/result/ext").and_then(|v| v.as_str()), Some("mp3"));
+    let resp = rpc_call(
+        &mut cw,
+        &mut br,
+        4,
+        "music.trackPlayUrl",
+        json!({ "service":"qq", "trackId":"1" }),
+    )
+    .await;
+    assert_eq!(
+        resp.pointer("/result/ext").and_then(|v| v.as_str()),
+        Some("mp3")
+    );
 
     // bili.loginQrCreate
     let resp = rpc_call(&mut cw, &mut br, 5, "bili.loginQrCreate", json!({})).await;
-    assert_eq!(resp.pointer("/result/sessionId").and_then(|v| v.as_str()), Some("sid"));
+    assert_eq!(
+        resp.pointer("/result/sessionId").and_then(|v| v.as_str()),
+        Some("sid")
+    );
 
     server_task.abort();
 }

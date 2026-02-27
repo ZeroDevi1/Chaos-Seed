@@ -325,6 +325,29 @@ impl CosyVoiceEngine {
         // Absolute safety cap to avoid runaway on bad packs/config.
         max_len = max_len.min(200_000);
 
+        // 基本一致性校验：
+        // - stopTokenStart 表示「token_id >= stopTokenStart 即停止」。
+        // - 若 logits 的 vocab_size <= stopTokenStart，则永远采样不到 stop token，最终会跑到 max_len：
+        //   推理很慢 + 音频大概率是噪声/电音（tokens 已经跑飞）。
+        fn ensure_stop_token_reachable(
+            stop_start: i64,
+            vocab_size: usize,
+            stage: &'static str,
+        ) -> Result<(), TtsError> {
+            if vocab_size == 0 {
+                return Err(TtsError::Onnx(format!(
+                    "{stage}: logits vocab_size is 0 (invalid model output)"
+                )));
+            }
+            let vocab_i64 = vocab_size as i64;
+            if stop_start >= vocab_i64 {
+                return Err(TtsError::InvalidArg(format!(
+                    "{stage}: stopTokenStart={stop_start} is >= logits_vocab_size={vocab_size}; stop token range is unreachable. Fix pack.json stopTokenStart (or re-export pack)."
+                )));
+            }
+            Ok(())
+        }
+
         #[cfg(feature = "onnx-ort")]
         if let Some(ort) = &self.ort {
             use ort::value::{DynValue, Tensor};
@@ -385,6 +408,7 @@ impl CosyVoiceEngine {
                 let mut ctx: Vec<i64> = input_ids.to_vec();
                 let mut decoded: Vec<i64> = Vec::new();
                 let mut decoded_u32: Vec<u32> = Vec::new();
+                let mut vocab_size_seen: Option<usize> = None;
                 // 性能/质量折中：PrefillOnly 每步都要跑一次 llm_prefill；默认只保留最后 N 个 token 作为上下文，避免 O(n^2)。
                 let prefill_window = std::env::var("CHAOS_COSYVOICE_ORT_PREFILL_WINDOW")
                     .ok()
@@ -422,6 +446,14 @@ impl CosyVoiceEngine {
                     })?;
                     let mut step_scores = ort_extract_last_logits(&logits_v)?;
 
+                    if vocab_size_seen.is_none() {
+                        ensure_stop_token_reachable(
+                            stop_start,
+                            step_scores.len(),
+                            "llm_prefill(prefill_only)",
+                        )?;
+                        vocab_size_seen = Some(step_scores.len());
+                    }
                     // Optional guard: avoid stop tokens too early.
                     if decoded.len() < min_len {
                         let start = stop_start.max(0) as usize;
@@ -444,7 +476,12 @@ impl CosyVoiceEngine {
                     decoded_u32.push(token_u32);
                     ctx.push(token);
                 }
-
+                if decoded.len() >= max_len {
+                    return Err(TtsError::Onnx(format!(
+                        "LLM reached max_len={max_len} without emitting stop token (stopTokenStart={stop_start}, logits_vocab_size={}). This usually means pack.json stopTokenStart is wrong or the exported LLM has no stop token.",
+                        vocab_size_seen.unwrap_or(0)
+                    )));
+                }
                 return Ok(decoded);
             }
 
@@ -467,6 +504,7 @@ impl CosyVoiceEngine {
                 .ok_or_else(|| TtsError::Onnx("ort: llm_prefill missing logits output".into()))?;
             let mut last_logits = ort_extract_last_logits(&logits_v)?;
 
+            ensure_stop_token_reachable(stop_start, last_logits.len(), "llm_prefill")?;
             // 将 prefill 的 KV cache 输出按 decode 的 past_* 输入顺序对齐，避免“输出顺序 != 输入顺序”导致形状错配。
             let mut past: Vec<DynValue> =
                 Vec::with_capacity(ort.llm_decode.io.inputs.len().saturating_sub(1));
@@ -481,6 +519,7 @@ impl CosyVoiceEngine {
 
             let mut decoded: Vec<i64> = Vec::new();
             let mut decoded_u32: Vec<u32> = Vec::new();
+            ensure_stop_token_reachable(stop_start, last_logits.len(), "llm_prefill(tract)")?;
             while decoded.len() < max_len {
                 if let Some(c) = cancel {
                     if c.load(Ordering::Relaxed) {
@@ -575,6 +614,12 @@ impl CosyVoiceEngine {
                 past = new_past;
             }
 
+            if decoded.len() >= max_len {
+                return Err(TtsError::Onnx(format!(
+                    "LLM reached max_len={max_len} without emitting stop token (stopTokenStart={stop_start}, logits_vocab_size={}). This usually means pack.json stopTokenStart is wrong or the exported LLM has no stop token.",
+                    last_logits.len()
+                )));
+            }
             return Ok(decoded);
         }
 
@@ -643,6 +688,12 @@ impl CosyVoiceEngine {
                 }
                 last_logits = extract_last_logits(&out[0])?;
                 past = out.iter().skip(1).cloned().collect();
+            }
+            if decoded.len() >= max_len {
+                return Err(TtsError::Onnx(format!(
+                    "LLM reached max_len={max_len} without emitting stop token (stopTokenStart={stop_start}, logits_vocab_size={}). This usually means pack.json stopTokenStart is wrong or the exported LLM has no stop token.",
+                    last_logits.len()
+                )));
             }
             return Ok(decoded);
         }
