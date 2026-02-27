@@ -809,8 +809,41 @@ impl CosyVoiceEngine {
                     let mel_t: ort::value::Tensor<f32> = mel_v
                         .downcast()
                         .map_err(|e| TtsError::Onnx(format!("ort: mel is not f32 tensor: {e}")))?;
-                    let (_shape, data) = mel_t.extract_raw_tensor();
-                    mel_chunks.push(data.to_vec());
+                    let (shape, data) = mel_t.extract_raw_tensor();
+                    // 兼容不同导出：flow 图的 mel 可能是 [1, 80, T] 或 [1, T, 80]。
+                    // 引擎内部统一转成 [1, 80, T] 的 flatten（按通道连续），方便拼接与送入 HiFT。
+                    let mel_vec = if shape.len() == 3 && shape.get(0).copied().unwrap_or(0) == 1 {
+                        let d1 = shape[1] as usize;
+                        let d2 = shape[2] as usize;
+                        if d1 == 80 {
+                            data.to_vec()
+                        } else if d2 == 80 {
+                            let t = d1;
+                            let channels = 80usize;
+                            if data.len() != t * channels {
+                                return Err(TtsError::Onnx(format!(
+                                    "ort: flow mel data len mismatch: shape={shape:?} data_len={}",
+                                    data.len()
+                                )));
+                            }
+                            let mut out = vec![0.0f32; channels * t];
+                            for ti in 0..t {
+                                for ch in 0..channels {
+                                    let src = ti * channels + ch; // [T, 80]
+                                    let dst = ch * t + ti; // [80, T]
+                                    out[dst] = data[src];
+                                }
+                            }
+                            out
+                        } else {
+                            return Err(TtsError::Onnx(format!(
+                                "ort: flow mel shape unsupported: {shape:?} (expected [1,80,T] or [1,T,80])"
+                            )));
+                        }
+                    } else {
+                        data.to_vec()
+                    };
+                    mel_chunks.push(mel_vec);
                 }
 
                 // 拼接 mel（layout: [1, 80, T]，flatten 为按通道连续）。
@@ -873,7 +906,34 @@ impl CosyVoiceEngine {
             let mel_t: ort::value::Tensor<f32> = mel_v
                 .downcast()
                 .map_err(|e| TtsError::Onnx(format!("ort: mel is not f32 tensor: {e}")))?;
-            let (_shape, data) = mel_t.extract_raw_tensor();
+            let (shape, data) = mel_t.extract_raw_tensor();
+            // 兼容 [1,80,T] / [1,T,80]。
+            if shape.len() == 3 && shape.get(0).copied().unwrap_or(0) == 1 {
+                let d1 = shape[1] as usize;
+                let d2 = shape[2] as usize;
+                if d1 == 80 {
+                    return Ok(data.to_vec());
+                }
+                if d2 == 80 {
+                    let t = d1;
+                    let channels = 80usize;
+                    if data.len() != t * channels {
+                        return Err(TtsError::Onnx(format!(
+                            "ort: flow mel data len mismatch: shape={shape:?} data_len={}",
+                            data.len()
+                        )));
+                    }
+                    let mut out = vec![0.0f32; channels * t];
+                    for ti in 0..t {
+                        for ch in 0..channels {
+                            let src = ti * channels + ch;
+                            let dst = ch * t + ti;
+                            out[dst] = data[src];
+                        }
+                    }
+                    return Ok(out);
+                }
+            }
             return Ok(data.to_vec());
         }
 
@@ -1348,6 +1408,25 @@ fn load_onnx_ort_backend(pack: &CosyVoicePack) -> Result<OrtBackend, TtsError> {
         .or_else(|| {
             use ort::value::ValueType;
 
+            // 若 flow 图的 speech_tokens 输入是固定长度（例如 [1, 256]），优先从 input shape 推断 chunk_len。
+            // 一些导出会把 mel 的时间维导出成动态 -1，导致“从输出 shape 推断”失效。
+            let tok_name = flow_infer
+                .io
+                .inputs
+                .get(0)
+                .map(|s| s.as_str())
+                .unwrap_or("speech_tokens");
+            if let Some(inp) = flow_infer.session.inputs.iter().find(|i| i.name == tok_name) {
+                if let ValueType::Tensor { dimensions, .. } = &inp.input_type {
+                    if dimensions.len() == 2 {
+                        let tok_len = dimensions[1];
+                        if tok_len > 0 {
+                            return Some(tok_len as usize);
+                        }
+                    }
+                }
+            }
+
             let mel_name = flow_infer
                 .io
                 .outputs
@@ -1362,7 +1441,10 @@ fn load_onnx_ort_backend(pack: &CosyVoicePack) -> Result<OrtBackend, TtsError> {
             if dimensions.len() != 3 {
                 return None;
             }
-            let mel_t = dimensions[2];
+            // 兼容：flow 输出可能是 [1,80,T] 或 [1,T,80]；这里用“哪个维度等于 80”来判定时间维。
+            let d1 = dimensions[1];
+            let d2 = dimensions[2];
+            let mel_t = if d1 == 80 { d2 } else if d2 == 80 { d1 } else { return None };
             if mel_t <= 0 {
                 return None;
             }
