@@ -29,6 +29,17 @@ The exact filenames can be overridden via `pack.json`'s `files` section.
 V1 uses the `tract-onnx` backend by default for higher ONNX operator coverage and a smoother build
 experience (no external build tools).
 
+### ORT + CUDA（可选）
+
+如需在 Windows 上使用 ONNX Runtime 的 CUDA Execution Provider：
+
+- 编译开启：`-p chaos-core --features onnx-ort-cuda`
+- 运行时可选环境变量：
+  - `CHAOS_ORT_EP=cpu|cuda|auto`（默认 `auto`；若开启 `onnx-ort-cuda` 则会优先尝试 CUDA）
+  - `CHAOS_ORT_CUDA_DEVICE_ID=0`（可选）
+
+备注：即使编译启用 CUDA，若机器缺少对应的 CUDA runtime / cuDNN DLL（或未加入 PATH），运行时也会自动回落到 CPU。
+
 If you want to experiment with `candle-onnx`, note that some versions of `candle-onnx` require
 `protoc` to be installed at build time.
 

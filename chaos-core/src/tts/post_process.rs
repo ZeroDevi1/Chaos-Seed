@@ -1,5 +1,5 @@
-use crate::tts::vad::{EnergyVad, VadConfig, VadEngine};
 use crate::tts::TtsError;
+use crate::tts::vad::{EnergyVad, VadConfig, VadEngine};
 
 #[derive(Debug, Clone)]
 pub struct TrimConfig {
@@ -35,8 +35,24 @@ impl Default for TrimConfig {
 ///
 /// V1 behavior:
 /// - Prompt-trim: optional ratio-based prefix removal (caller must provide ratio).
-/// - VAD-trim: pure-Rust energy VAD (Silero is planned, but may be enabled later behind feature).
-pub fn trim_output_pcm16(pcm16: &[i16], sample_rate: u32, cfg: &TrimConfig) -> Result<Vec<i16>, TtsError> {
+/// - VAD-trim: caller-provided VAD backend (default: pure-Rust energy VAD).
+pub fn trim_output_pcm16(
+    pcm16: &[i16],
+    sample_rate: u32,
+    cfg: &TrimConfig,
+) -> Result<Vec<i16>, TtsError> {
+    let vad = EnergyVad::default();
+    trim_output_pcm16_with_engine(pcm16, sample_rate, cfg, &vad)
+}
+
+/// Same as [`trim_output_pcm16`], but allows the caller to choose a VAD backend
+/// (e.g. Energy VAD vs Silero VAD).
+pub fn trim_output_pcm16_with_engine(
+    pcm16: &[i16],
+    sample_rate: u32,
+    cfg: &TrimConfig,
+    vad: &dyn VadEngine,
+) -> Result<Vec<i16>, TtsError> {
     if sample_rate == 0 {
         return Err(TtsError::InvalidArg("sample_rate must be > 0".into()));
     }
@@ -50,14 +66,15 @@ pub fn trim_output_pcm16(pcm16: &[i16], sample_rate: u32, cfg: &TrimConfig) -> R
     if cfg.enable_prompt_trim {
         if let Some(r) = cfg.prompt_prefix_ratio {
             if r.is_finite() && r > 0.0 {
-                let drop = ((pcm16.len() as f32) * r).round().clamp(0.0, pcm16.len() as f32) as usize;
+                let drop = ((pcm16.len() as f32) * r)
+                    .round()
+                    .clamp(0.0, pcm16.len() as f32) as usize;
                 start = start.max(drop.min(end));
             }
         }
     }
 
     if cfg.enable_vad_trim && start < end {
-        let vad = EnergyVad::default();
         let mut vad_cfg = cfg.vad.clone();
         vad_cfg.pad_ms = cfg.pad_ms;
         let segs = vad.detect_segments(&pcm16[start..end], sample_rate, &vad_cfg)?;
@@ -75,4 +92,3 @@ pub fn trim_output_pcm16(pcm16: &[i16], sample_rate: u32, cfg: &TrimConfig) -> R
     }
     Ok(pcm16[start..end].to_vec())
 }
-

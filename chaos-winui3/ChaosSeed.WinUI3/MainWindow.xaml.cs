@@ -159,6 +159,12 @@ public sealed partial class MainWindow : Window
                     new DrillInNavigationTransitionInfo()
                 );
                 break;
+            case "tts":
+                ContentFrame.Navigate(typeof(TtsDebugPage), null, new DrillInNavigationTransitionInfo());
+                break;
+            case "voiceChat":
+                ContentFrame.Navigate(typeof(VoiceChatPage), null, new DrillInNavigationTransitionInfo());
+                break;
             case "bili":
                 ContentFrame.Navigate(typeof(BiliPage), null, new DrillInNavigationTransitionInfo());
                 break;

@@ -3,66 +3,99 @@ name = "chaos-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
 description = "Core business logic for chaos-seed (subtitle + danmaku)."
+license.workspace = true
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs", "process"] }
-# Enable gzip/brotli decoding: some upstream APIs (e.g. Huya) may return compressed bodies even when we don't request it.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli", "deflate", "cookies", "stream"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "1"
-fastrand = "2"
-tokio-tungstenite = { version = "0.28.0", default-features = false, features = ["connect", "native-tls-vendored", "url"] }
-futures-util = "0.3"
-url = "2"
-flate2 = "1"
-regex = "1"
-tokio-util = "0.7"
 base64 = "0.22"
 bytes = "1"
-md5 = "0.7"
-prost = "0.13"
-prost-derive = "0.13"
-rustls = { version = "0.23", features = ["tls12"] }
-strsim = "0.11"
-urlencoding = "2"
-rsa = { version = "0.9", features = ["pem"] }
-sha2 = "0.10"
-hex = "0.4"
-qrcode = "0.14"
-image = { version = "0.25", default-features = false, features = ["png"] }
-
-# ----- voice chat / tts -----
-futures = "0.3"
-tokio-stream = "0.1"
-tracing = "0.1"
-dirs = "6"
-
-hound = "3"
-rand = "0.8"
-rand_chacha = "0.3"
-tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
-rubato = "0.16"
-
 # ONNX runtime (pure Rust).
 # Note: CosyVoice packs can be complex; we keep tract as a fallback backend.
 candle-core = { version = "0.8", optional = true }
 candle-onnx = { version = "0.8", optional = true }
-tract-onnx = { version = "0.23.0-dev.2", optional = true }
+dirs = "6"
+fastrand = "2"
+flate2 = "1"
+# ----- voice chat / tts -----
+futures = "0.3"
+futures-util = "0.3"
+hex = "0.4"
+hound = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+md5 = "0.7"
+ndarray = { version = "0.15.6", optional = true }
+# ONNX Runtime (onnxruntime.dll). Used as a robust backend for large LLM ONNX graphs.
+# CUDA EP 通过 feature `onnx-ort-cuda` 显式开启，避免默认下载/打包 GPU 依赖。
+ort = { version = "=2.0.0-rc.9", optional = true }
+# Pin ort-sys to match silero-vad-rs's ort (=2.0.0-rc.9) to avoid ort/ort-sys API mismatches.
+ort-sys = { version = "=2.0.0-rc.9", optional = true }
+prost = "0.13"
+prost-derive = "0.13"
+qrcode = "0.14"
+rand = "0.8"
+rand_chacha = "0.3"
+regex = "1"
+# Enable gzip/brotli decoding: some upstream APIs (e.g. Huya) may return compressed bodies even when we don't request it.
+reqwest = { version = "0.12", default-features = false, features = [
+  "brotli",
+  "cookies",
+  "deflate",
+  "gzip",
+  "json",
+  "rustls-tls",
+  "stream"
+] }
+rsa = { version = "0.9", features = ["pem"] }
+rubato = "0.16"
+rustls = { version = "0.23", features = ["tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+silero-vad-rs = { version = "0.1.2", optional = true }
+strsim = "0.11"
+thiserror = "1"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+tokio = { version = "1", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "process",
+  "rt-multi-thread",
+  "sync",
+  "time"
+] }
+tokio-stream = "0.1"
+tokio-tungstenite = { version = "0.28.0", default-features = false, features = [
+  "connect",
+  "native-tls-vendored",
+  "url"
+] }
+tokio-util = "0.7"
+tracing = "0.1"
 tract-core = { version = "0.23.0-dev.2", optional = true }
-
-[features]
-default = ["onnx-tract"]
-onnx-candle = ["dep:candle-core", "dep:candle-onnx"]
-onnx-tract = ["dep:tract-onnx", "dep:tract-core"]
-live-tests = []
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Foundation", "Media_Control", "Storage_Streams"] }
+tract-hir = { version = "0.23.0-dev.2", optional = true }
+tract-onnx = { version = "0.23.0-dev.2", optional = true }
+url = "2"
+urlencoding = "2"
 
 [dev-dependencies]
-tempfile = "3"
-httpmock = "0.7"
 chaos-proto = { path = "../chaos-proto" }
+httpmock = "0.7"
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Foundation",
+  "Media_Control",
+  "Storage_Streams"
+] }
+
+[features]
+default = ["onnx-ort"]
+live-tests = []
+onnx-candle = ["dep:candle-core", "dep:candle-onnx"]
+onnx-ort = ["dep:ort"]
+onnx-ort-cuda = ["onnx-ort", "ort/cuda"]
+onnx-tract = ["dep:tract-core", "dep:tract-hir", "dep:tract-onnx"]
+silero-vad = ["dep:ndarray", "dep:ort-sys", "dep:silero-vad-rs"]

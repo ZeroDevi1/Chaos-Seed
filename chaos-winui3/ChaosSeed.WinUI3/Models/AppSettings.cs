@@ -83,6 +83,12 @@ public sealed class AppSettings
     public bool MusicDownloadOverwrite { get; set; } = false;
     public bool UseNewMusicUi { get; set; } = false;
 
+    // ----- tts (CosyVoice) -----
+
+    // CosyVoice pack 目录（默认读取程序目录下的 models/cosyvoice/pack，方便打包分发）。
+    public string? TtsCosyVoicePackDir { get; set; }
+    public string TtsLastSpkId { get; set; } = "dream";
+
     // ----- bilibili video download (MVP: BV/AV) -----
 
     public LiveBackendMode BiliBackendMode { get; set; } = LiveBackendMode.Auto;

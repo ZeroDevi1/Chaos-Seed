@@ -10,7 +10,7 @@ description = "Windows daemon backend for chaos-seed (NamedPipe JSON-RPC)."
 anyhow = "1"
 base64 = "0.22"
 chaos-app = { path = "../chaos-app" }
-chaos-core = { path = "../chaos-core" }
+chaos-core = { path = "../chaos-core", features = ["silero-vad"] }
 chaos-proto = { path = "../chaos-proto" }
 fastrand = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies"] }

@@ -19,6 +19,13 @@ sync_to_win.sh
 /chaos-winui3/**/AppPackages
 *.user
 
+# Local CosyVoice ONNX packs (large files, keep out of git)
+/models/cosyvoice/pack/**
+!/models/cosyvoice/pack/.gitkeep
+
+# Local inference outputs
+/out_wav/**
+
 # Local MSIX signing certs (never commit private keys)
 *.msix.pfx
 *.msix.cer

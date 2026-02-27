@@ -13,10 +13,15 @@ pub mod vad;
 pub mod wav;
 
 pub use cosyvoice::{CosyVoiceEngine, CosyVoicePack, CosyVoicePackConfig, Spk2Info, TtsSftParams};
-pub use post_process::{TrimConfig, trim_output_pcm16};
+pub use post_process::{TrimConfig, trim_output_pcm16, trim_output_pcm16_with_engine};
 pub use sampling::{SamplingConfig, sample_ras_next};
-pub use text::{END_OF_PROMPT, PromptStrategy, ResolvedTtsText, resolve_tts_text_basic};
-pub use vad::{VadConfig, VadEngine, VadSegment, VadError};
+pub use text::{
+    END_OF_PROMPT, PromptStrategy, ResolvedTtsText, compute_guide_prefix_ratio_tokens,
+    resolve_tts_text_basic,
+};
+#[cfg(feature = "silero-vad")]
+pub use vad::SileroVad;
+pub use vad::{EnergyVad, VadConfig, VadEngine, VadError, VadSegment};
 pub use wav::{TtsPcm16Result, TtsWavResult};
 
 #[derive(Debug, thiserror::Error)]
@@ -38,4 +43,3 @@ pub enum TtsError {
     #[error("not implemented: {0}")]
     NotImplemented(&'static str),
 }
-

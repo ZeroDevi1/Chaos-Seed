@@ -11,8 +11,21 @@ public sealed class TtsService
         _daemon = daemon ?? throw new ArgumentNullException(nameof(daemon));
     }
 
-    public async Task<string> SynthesizeSftToWavFileAsync(
+    public Task<TtsSftStartResult> StartSftAsync(TtsSftStartParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+        return _daemon.TtsSftStartAsync(p, ct);
+    }
+
+    public Task<TtsSftStatus> StatusAsync(string sessionId, CancellationToken ct = default) =>
+        _daemon.TtsSftStatusAsync(sessionId, ct);
+
+    public Task CancelAsync(string sessionId, CancellationToken ct = default) =>
+        _daemon.TtsSftCancelAsync(sessionId, ct);
+
+    public async Task<(string SessionId, TtsAudioResult Meta, byte[] WavBytes)> SynthesizeSftToWavBytesAsync(
         TtsSftStartParams p,
+        IProgress<TtsSftStatus>? progress = null,
         TimeSpan? pollInterval = null,
         CancellationToken ct = default
     )
@@ -31,6 +44,7 @@ public sealed class TtsService
         {
             ct.ThrowIfCancellationRequested();
             var st = await _daemon.TtsSftStatusAsync(sid, ct);
+            progress?.Report(st);
             if (!st.Done)
             {
                 await Task.Delay(interval, ct);
@@ -62,16 +76,28 @@ public sealed class TtsService
                 throw new InvalidOperationException("invalid base64 wav payload", ex);
             }
 
-            var root = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ChaosSeed.WinUI3",
-                "tts"
-            );
-            Directory.CreateDirectory(root);
-
-            var path = Path.Combine(root, $"{sid}.wav");
-            await File.WriteAllBytesAsync(path, wav, ct);
-            return path;
+            return (sid, st.Result, wav);
         }
+    }
+
+    // 兼容旧代码：落盘到 LocalAppData。新 UI（TTS 调试页）默认只保存在内存中。
+    public async Task<string> SynthesizeSftToWavFileAsync(
+        TtsSftStartParams p,
+        TimeSpan? pollInterval = null,
+        CancellationToken ct = default
+    )
+    {
+        var (sid, _meta, wav) = await SynthesizeSftToWavBytesAsync(p, null, pollInterval, ct);
+
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ChaosSeed.WinUI3",
+            "tts"
+        );
+        Directory.CreateDirectory(root);
+
+        var path = Path.Combine(root, $"{sid}.wav");
+        await File.WriteAllBytesAsync(path, wav, ct);
+        return path;
     }
 }

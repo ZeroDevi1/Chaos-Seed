@@ -7,53 +7,131 @@ mod win {
     use chaos_core::{bili_video, lyrics, music, now_playing};
     use chaos_daemon::run_jsonrpc_over_lsp;
     use chaos_proto::{
-        DanmakuConnectParams, DanmakuConnectResult, DanmakuDisconnectParams,
-        DanmakuFetchImageParams, LiveCloseParams, LiveDirCategoriesParams, LiveDirCategory,
-        LiveDirCategoryRoomsParams, LiveDirRecommendRoomsParams, LiveDirRoomListResult,
-        LiveDirSearchRoomsParams, LiveOpenParams, LivestreamDecodeManifestParams,
-        LivestreamDecodeManifestResult, LyricsSearchParams, LyricsSearchResult, NowPlayingSession,
-        NowPlayingSnapshot, NowPlayingSnapshotParams, NowPlayingThumbnail, PreferredQuality,
-        // music
-        KugouUserInfo, MusicAlbum, MusicAlbumTracksParams, MusicArtist, MusicArtistAlbumsParams,
-        MusicAuthState, MusicDownloadCancelParams, MusicDownloadJobResult,
-        MusicDownloadStartParams, MusicDownloadStartResult, MusicDownloadStatus, MusicDownloadStatusParams,
-        MusicDownloadTarget, MusicDownloadTotals, MusicJobState, MusicLoginQr, MusicLoginQrCreateParams,
-        MusicLoginQrPollParams, MusicLoginQrPollResult, MusicLoginQrState, MusicLoginType,
-        MusicProviderConfig, MusicRefreshCookieParams, MusicSearchParams, MusicService, MusicTrack,
-        OkReply, QqMusicCookie,
         // bili
-        BiliApiType, BiliAuthBundle, BiliTvAuth, BiliWebAuth, BiliAuthState, BiliCheckLoginParams, BiliCheckLoginResult,
-        BiliDownloadCancelParams, BiliDownloadJobStatus, BiliDownloadStartParams,
-        BiliDownloadStartResult, BiliDownloadStatus, BiliDownloadStatusParams, BiliDownloadTotals,
-        BiliJobPhase, BiliJobState, BiliLoginQr, BiliLoginQrCreateParams, BiliLoginQrCreateV2Params,
-        BiliLoginQrPollParams, BiliLoginQrPollResult, BiliLoginQrPollResultV2, BiliLoginQrState,
-        BiliLoginType, BiliPage, BiliParseParams, BiliParseResult, BiliParsedVideo,
-        BiliRefreshCookieParams, BiliRefreshCookieResult, BiliTask, BiliTaskAddParams, BiliTaskAddResult,
-        BiliTaskCancelParams, BiliTaskDetail, BiliTaskGetParams, BiliTasksGetParams, BiliTasksGetResult,
+        BiliApiType,
+        BiliAuthBundle,
+        BiliAuthState,
+        BiliCheckLoginParams,
+        BiliCheckLoginResult,
+        BiliDownloadCancelParams,
+        BiliDownloadJobStatus,
+        BiliDownloadStartParams,
+        BiliDownloadStartResult,
+        BiliDownloadStatus,
+        BiliDownloadStatusParams,
+        BiliDownloadTotals,
+        BiliJobPhase,
+        BiliJobState,
+        BiliLoginQr,
+        BiliLoginQrCreateParams,
+        BiliLoginQrCreateV2Params,
+        BiliLoginQrPollParams,
+        BiliLoginQrPollResult,
+        BiliLoginQrPollResultV2,
+        BiliLoginQrState,
+        BiliLoginType,
+        BiliPage,
+        BiliParseParams,
+        BiliParseResult,
+        BiliParsedVideo,
+        BiliRefreshCookieParams,
+        BiliRefreshCookieResult,
+        BiliTask,
+        BiliTaskAddParams,
+        BiliTaskAddResult,
+        BiliTaskCancelParams,
+        BiliTaskDetail,
+        BiliTaskGetParams,
+        BiliTasksGetParams,
+        BiliTasksGetResult,
         BiliTasksRemoveFinishedParams,
-        // tts
-        TtsAudioResult, TtsJobState, TtsPromptStrategy, TtsSftCancelParams, TtsSftStartParams,
-        TtsSftStartResult, TtsSftStatus, TtsSftStatusParams,
+        BiliTvAuth,
+        BiliWebAuth,
         // llm + voice chat
-        ChatMessage, LlmChatParams, LlmChatResult, LlmConfigSetParams, ReasoningMode,
-        VoiceChatChunkNotif, VoiceChatStreamCancelParams, VoiceChatStreamStartParams,
+        ChatMessage,
+        DanmakuConnectParams,
+        DanmakuConnectResult,
+        DanmakuDisconnectParams,
+        DanmakuFetchImageParams,
+        // music
+        KugouUserInfo,
+        LiveCloseParams,
+        LiveDirCategoriesParams,
+        LiveDirCategory,
+        LiveDirCategoryRoomsParams,
+        LiveDirRecommendRoomsParams,
+        LiveDirRoomListResult,
+        LiveDirSearchRoomsParams,
+        LiveOpenParams,
+        LivestreamDecodeManifestParams,
+        LivestreamDecodeManifestResult,
+        LlmChatParams,
+        LlmChatResult,
+        LlmConfigSetParams,
+        LyricsSearchParams,
+        LyricsSearchResult,
+        MusicAlbum,
+        MusicAlbumTracksParams,
+        MusicArtist,
+        MusicArtistAlbumsParams,
+        MusicAuthState,
+        MusicDownloadCancelParams,
+        MusicDownloadJobResult,
+        MusicDownloadStartParams,
+        MusicDownloadStartResult,
+        MusicDownloadStatus,
+        MusicDownloadStatusParams,
+        MusicDownloadTarget,
+        MusicDownloadTotals,
+        MusicJobState,
+        MusicLoginQr,
+        MusicLoginQrCreateParams,
+        MusicLoginQrPollParams,
+        MusicLoginQrPollResult,
+        MusicLoginQrState,
+        MusicLoginType,
+        MusicProviderConfig,
+        MusicRefreshCookieParams,
+        MusicSearchParams,
+        MusicService,
+        MusicTrack,
+        NowPlayingSession,
+        NowPlayingSnapshot,
+        NowPlayingSnapshotParams,
+        NowPlayingThumbnail,
+        OkReply,
+        PreferredQuality,
+        QqMusicCookie,
+        ReasoningMode,
+        // tts
+        TtsAudioResult,
+        TtsJobState,
+        TtsPromptStrategy,
+        TtsSftCancelParams,
+        TtsSftStartParams,
+        TtsSftStartResult,
+        TtsSftStatus,
+        TtsSftStatusParams,
+        VoiceChatChunkNotif,
+        VoiceChatStreamCancelParams,
+        VoiceChatStreamStartParams,
         VoiceChatStreamStartResult,
     };
-    use std::env;
-    use std::str::FromStr;
     use std::collections::{HashMap, HashSet};
+    use std::env;
+    use std::path::PathBuf;
+    use std::pin::Pin;
+    use std::str::FromStr;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
-    use std::path::PathBuf;
-    use std::pin::Pin;
     use std::task::{Context, Poll};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::fs;
     use tokio::io::{AsyncRead, AsyncWrite, Stdin, Stdout};
     use tokio::sync::mpsc;
     use tokio::sync::{Mutex, Semaphore};
-    use tokio::fs;
 
     const DEFAULT_NETEASE_BASE_URLS: &[&str] = &[
         "http://plugin.changsheng.space:3000",
@@ -162,7 +240,9 @@ mod win {
                 content.push_str(&t);
             }
         }
-        fs::write(&lrc_path, content).await.map_err(|e| e.to_string())?;
+        fs::write(&lrc_path, content)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -222,7 +302,10 @@ mod win {
             .filter(|s| !s.is_empty())
             .collect();
         if netease.is_empty() {
-            netease = DEFAULT_NETEASE_BASE_URLS.iter().map(|s| s.to_string()).collect();
+            netease = DEFAULT_NETEASE_BASE_URLS
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
         }
 
         let anon = cfg
@@ -320,17 +403,26 @@ mod win {
             .and_then(|w| w.refresh_token)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        bili_video::auth::AuthState { cookie, refresh_token }
+        bili_video::auth::AuthState {
+            cookie,
+            refresh_token,
+        }
     }
 
     fn map_core_web_auth_to_bundle(a: bili_video::auth::AuthState) -> Option<BiliAuthBundle> {
-        let cookie = a.cookie.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())?;
+        let cookie = a
+            .cookie
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())?;
         let refresh_token = a
             .refresh_token
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         Some(BiliAuthBundle {
-            web: Some(BiliWebAuth { cookie, refresh_token }),
+            web: Some(BiliWebAuth {
+                cookie,
+                refresh_token,
+            }),
             tv: None,
         })
     }
@@ -482,7 +574,10 @@ mod win {
             }
         }
 
-        async fn get_engine(&self, model_dir: &str) -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
+        async fn get_engine(
+            &self,
+            model_dir: &str,
+        ) -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
             let key = model_dir.trim().to_string();
             if key.is_empty() {
                 return Err("modelDir is empty".into());
@@ -496,11 +591,15 @@ mod win {
 
             // Loading/optimizing tract plans can be expensive; do it off the async scheduler.
             let key2 = key.clone();
-            let engine = tokio::task::spawn_blocking(move || -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
-                let pack = chaos_core::tts::CosyVoicePack::load(&key2).map_err(|e| e.to_string())?;
-                let engine = chaos_core::tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
-                Ok(Arc::new(engine))
-            })
+            let engine = tokio::task::spawn_blocking(
+                move || -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
+                    let pack =
+                        chaos_core::tts::CosyVoicePack::load(&key2).map_err(|e| e.to_string())?;
+                    let engine =
+                        chaos_core::tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
+                    Ok(Arc::new(engine))
+                },
+            )
             .await
             .map_err(|e| e.to_string())??;
 
@@ -509,7 +608,10 @@ mod win {
             Ok(engine)
         }
 
-        async fn start(self: Arc<Self>, params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
+        async fn start(
+            self: Arc<Self>,
+            params: TtsSftStartParams,
+        ) -> Result<TtsSftStartResult, String> {
             let session_id = gen_session_id("tts_sft");
 
             let status = Arc::new(Mutex::new(TtsSftStatus {
@@ -599,12 +701,93 @@ mod win {
                     text_frontend,
                 };
 
-                let res = tokio::task::spawn_blocking(move || engine.synthesize_wav_bytes_with_cancel(&params2, Some(cancel2.as_ref())))
+                {
+                    let mut st = status2.lock().await;
+                    st.stage = Some("infer".to_string());
+                }
+
+                let cancel_for_run = cancel2.clone();
+                let res = tokio::task::spawn_blocking(
+                    move || -> Result<chaos_core::tts::TtsWavResult, String> {
+                        let pcm = engine
+                            .synthesize_pcm16_with_cancel(&params2, Some(cancel_for_run.as_ref()))
+                            .map_err(|e| e.to_string())?;
+
+                        // 1) guide_prefix：按 tokenizer token 估算前缀占比，把“情绪 prompt”读出来的那一段裁掉。
+                        // 2) 然后再做一次 VAD 裁剪，去掉首尾静音/多余 padding。
+                        let mut trim = chaos_core::tts::TrimConfig::default();
+                        trim.enable_vad_trim = true;
+
+                        if matches!(
+                            params2.prompt_strategy,
+                            chaos_core::tts::PromptStrategy::GuidePrefix
+                        ) {
+                            let add_special = engine.pack().cfg.tokenizer_add_special_tokens;
+                            let r = chaos_core::tts::compute_guide_prefix_ratio_tokens(
+                                &engine.pack().tokenizer,
+                                add_special,
+                                &params2.text,
+                                &params2.prompt_text,
+                                &params2.guide_sep,
+                                params2.text_frontend,
+                            )
+                            .map_err(|e| e.to_string())?;
+                            if let Some(r) = r {
+                                trim.enable_prompt_trim = true;
+                                trim.prompt_prefix_ratio = Some(r);
+                            }
+                        }
+
+                        // 优先用 silero-vad-rs（需要 modelDir/silero_vad.onnx 存在），否则退化到能量 VAD。
+                        let silero_model =
+                            std::path::PathBuf::from(&params2.model_dir).join("silero_vad.onnx");
+                        let trimmed_pcm16 = if silero_model.exists() {
+                            // silero 的 threshold 是概率（0..1），默认配置是给能量 VAD 用的，这里调整一下。
+                            trim.vad.threshold = 0.5;
+                            let vad = chaos_core::tts::SileroVad::new(&silero_model)
+                                .map_err(|e| e.to_string())?;
+                            chaos_core::tts::trim_output_pcm16_with_engine(
+                                &pcm.pcm16,
+                                pcm.sample_rate,
+                                &trim,
+                                &vad,
+                            )
+                            .map_err(|e| e.to_string())?
+                        } else {
+                            let vad = chaos_core::tts::EnergyVad::default();
+                            chaos_core::tts::trim_output_pcm16_with_engine(
+                                &pcm.pcm16,
+                                pcm.sample_rate,
+                                &trim,
+                                &vad,
+                            )
+                            .map_err(|e| e.to_string())?
+                        };
+
+                        let wav_bytes = chaos_core::tts::wav::encode_wav_pcm16_mono(
+                            pcm.sample_rate,
+                            &trimmed_pcm16,
+                        )
+                        .map_err(|e| e.to_string())?;
+                        let duration_ms =
+                            chaos_core::tts::wav::duration_ms(pcm.sample_rate, trimmed_pcm16.len());
+
+                        Ok(chaos_core::tts::TtsWavResult {
+                            sample_rate: pcm.sample_rate,
+                            channels: 1,
+                            duration_ms,
+                            wav_bytes,
+                        })
+                    },
+                )
                 .await;
 
                 match res {
                     Ok(Ok(r)) => {
-                        let wav_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &r.wav_bytes);
+                        let wav_b64 = base64::Engine::encode(
+                            &base64::engine::general_purpose::STANDARD,
+                            &r.wav_bytes,
+                        );
                         let mut st = status2.lock().await;
                         st.done = true;
                         st.state = TtsJobState::Done;
@@ -618,10 +801,15 @@ mod win {
                         });
                     }
                     Ok(Err(e)) => {
-                        let canceled = cancel2.load(Ordering::Relaxed) || e.to_string().to_lowercase().contains("canceled");
+                        let canceled = cancel2.load(Ordering::Relaxed)
+                            || e.to_string().to_lowercase().contains("canceled");
                         let mut st = status2.lock().await;
                         st.done = true;
-                        st.state = if canceled { TtsJobState::Canceled } else { TtsJobState::Failed };
+                        st.state = if canceled {
+                            TtsJobState::Canceled
+                        } else {
+                            TtsJobState::Failed
+                        };
                         st.stage = Some(if canceled { "canceled" } else { "failed" }.to_string());
                         st.error = Some(e.to_string());
                     }
@@ -709,7 +897,8 @@ mod win {
             }
 
             let timeout_ms = params.timeout_ms.unwrap_or(30_000).max(1);
-            let default_temperature = params.default_temperature.unwrap_or(0.7).clamp(0.0, 5.0) as f32;
+            let default_temperature =
+                params.default_temperature.unwrap_or(0.7).clamp(0.0, 5.0) as f32;
 
             let cfg = chaos_core::llm::LlmConfig {
                 base_url,
@@ -798,6 +987,7 @@ mod win {
 
             let session_id = gen_session_id("voice_chat");
             let cancel = tokio_util::sync::CancellationToken::new();
+            let cancel2 = cancel.clone();
 
             let mgr2 = self.clone();
             let sid2 = session_id.clone();
@@ -816,7 +1006,7 @@ mod win {
                     llm,
                     engine,
                     notif_tx,
-                    cancel.clone(),
+                    cancel2.clone(),
                 )
                 .await;
 
@@ -827,10 +1017,7 @@ mod win {
 
             {
                 let mut locked = self.sessions.lock().await;
-                locked.insert(
-                    session_id.clone(),
-                    VoiceChatSession { cancel, handle },
-                );
+                locked.insert(session_id.clone(), VoiceChatSession { cancel, handle });
             }
 
             Ok(VoiceChatStreamStartResult {
@@ -946,7 +1133,8 @@ mod win {
                     for s in chunk.pcm16 {
                         bytes.extend_from_slice(&s.to_le_bytes());
                     }
-                    let pcm_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+                    let pcm_b64 =
+                        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
                     let notif = VoiceChatChunkNotif {
                         session_id: session_id.clone(),
                         seq: chunk.seq,
@@ -1174,7 +1362,10 @@ mod win {
                 .collect())
         }
 
-        async fn tts_sft_start(&self, params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
+        async fn tts_sft_start(
+            &self,
+            params: TtsSftStartParams,
+        ) -> Result<TtsSftStartResult, String> {
             self.tts.clone().start(params).await
         }
 
@@ -1421,8 +1612,7 @@ mod win {
             )
             .await
             .map_err(|e| e.to_string())?;
-            let base64 =
-                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+            let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
 
             {
                 let mut sessions = self.music.qq_sessions.lock().await;
@@ -1506,9 +1696,7 @@ mod win {
                     let sigx = sig_or_code.ok_or_else(|| "missing ptsigx".to_string())?;
                     let uin = uin.ok_or_else(|| "missing uin".to_string())?;
                     let code = music::providers::qq_login::authorize_qq_and_get_code(
-                        &sess.http,
-                        &sigx,
-                        &uin,
+                        &sess.http, &sigx, &uin,
                     )
                     .await
                     .map_err(|e| e.to_string())?;
@@ -1829,8 +2017,9 @@ mod win {
                 let retries = opts.retries.min(10);
                 let overwrite = opts.overwrite;
 
-                let (tx, rx) =
-                    tokio::sync::mpsc::channel::<(u32, MusicTrack, Option<u32>)>(items.len().max(1));
+                let (tx, rx) = tokio::sync::mpsc::channel::<(u32, MusicTrack, Option<u32>)>(
+                    items.len().max(1),
+                );
                 for (idx, (t, no)) in items.into_iter().enumerate() {
                     let _ = tx.send((idx as u32, t, no)).await;
                 }
@@ -1871,47 +2060,57 @@ mod win {
                             let chosen_quality = choose_quality_id(&track, &req_quality)
                                 .unwrap_or_else(|| req_quality.clone());
 
-                            let res: Result<(PathBuf, Option<u64>, Option<String>), String> = async {
-                                let (url, ext) = client
-                                    .track_download_url(core_svc, &track.id, &chosen_quality, &auth)
+                            let res: Result<(PathBuf, Option<u64>, Option<String>), String> =
+                                async {
+                                    let (url, ext) = client
+                                        .track_download_url(
+                                            core_svc,
+                                            &track.id,
+                                            &chosen_quality,
+                                            &auth,
+                                        )
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                    let path = if let Some(tpl) = path_template.as_deref() {
+                                        music::util::build_track_path_by_template(
+                                            &out_dir,
+                                            tpl,
+                                            &track.artists,
+                                            track.album.as_deref(),
+                                            track_no,
+                                            &track.title,
+                                            &ext,
+                                        )
+                                    } else {
+                                        music::util::build_track_path(
+                                            &out_dir,
+                                            &track.artists,
+                                            track.album.as_deref(),
+                                            track_no,
+                                            &track.title,
+                                            &ext,
+                                        )
+                                    };
+                                    if path.exists() && !overwrite {
+                                        return Ok((
+                                            path,
+                                            None,
+                                            Some("skipped: target exists".to_string()),
+                                        ));
+                                    }
+                                    let bytes = music::download::download_url_to_file(
+                                        &client.http,
+                                        &url,
+                                        &path,
+                                        client.timeout,
+                                        retries,
+                                        overwrite,
+                                    )
                                     .await
                                     .map_err(|e| e.to_string())?;
-                                let path = if let Some(tpl) = path_template.as_deref() {
-                                    music::util::build_track_path_by_template(
-                                        &out_dir,
-                                        tpl,
-                                        &track.artists,
-                                        track.album.as_deref(),
-                                        track_no,
-                                        &track.title,
-                                        &ext,
-                                    )
-                                } else {
-                                    music::util::build_track_path(
-                                        &out_dir,
-                                        &track.artists,
-                                        track.album.as_deref(),
-                                        track_no,
-                                        &track.title,
-                                        &ext,
-                                    )
-                                };
-                                if path.exists() && !overwrite {
-                                    return Ok((path, None, Some("skipped: target exists".to_string())));
+                                    Ok((path, Some(bytes), None))
                                 }
-                                let bytes = music::download::download_url_to_file(
-                                    &client.http,
-                                    &url,
-                                    &path,
-                                    client.timeout,
-                                    retries,
-                                    overwrite,
-                                )
-                                .await
-                                .map_err(|e| e.to_string())?;
-                                Ok((path, Some(bytes), None))
-                            }
-                            .await;
+                                .await;
 
                             match res {
                                 Ok((path, bytes, skipped_msg)) => {
@@ -2365,9 +2564,10 @@ mod win {
                     })
                 }
                 bili_video::parse::ParsedInput::BangumiEpisode { ep_id } => {
-                    let season = bili_video::pgc::fetch_pgc_season_by_ep_id(&client, &ep_id, cookie)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    let season =
+                        bili_video::pgc::fetch_pgc_season_by_ep_id(&client, &ep_id, cookie)
+                            .await
+                            .map_err(|e| e.to_string())?;
                     let pages = season
                         .episodes
                         .iter()
@@ -2380,12 +2580,20 @@ mod win {
                             dimension: None,
                         })
                         .collect::<Vec<_>>();
-                    let first_aid = season.episodes.first().map(|e| e.aid.clone()).unwrap_or_default();
+                    let first_aid = season
+                        .episodes
+                        .first()
+                        .map(|e| e.aid.clone())
+                        .unwrap_or_default();
                     Ok(BiliParseResult {
                         videos: vec![BiliParsedVideo {
                             aid: first_aid,
                             bvid: "".to_string(),
-                            title: if season.title.trim().is_empty() { format!("ep{ep_id}") } else { season.title },
+                            title: if season.title.trim().is_empty() {
+                                format!("ep{ep_id}")
+                            } else {
+                                season.title
+                            },
                             desc: None,
                             pic: season.cover,
                             owner_name: None,
@@ -2396,9 +2604,10 @@ mod win {
                     })
                 }
                 bili_video::parse::ParsedInput::BangumiSeason { season_id } => {
-                    let season = bili_video::pgc::fetch_pgc_season_by_season_id(&client, &season_id, cookie)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    let season =
+                        bili_video::pgc::fetch_pgc_season_by_season_id(&client, &season_id, cookie)
+                            .await
+                            .map_err(|e| e.to_string())?;
                     let pages = season
                         .episodes
                         .iter()
@@ -2411,12 +2620,20 @@ mod win {
                             dimension: None,
                         })
                         .collect::<Vec<_>>();
-                    let first_aid = season.episodes.first().map(|e| e.aid.clone()).unwrap_or_default();
+                    let first_aid = season
+                        .episodes
+                        .first()
+                        .map(|e| e.aid.clone())
+                        .unwrap_or_default();
                     Ok(BiliParseResult {
                         videos: vec![BiliParsedVideo {
                             aid: first_aid,
                             bvid: "".to_string(),
-                            title: if season.title.trim().is_empty() { format!("ss{season_id}") } else { season.title },
+                            title: if season.title.trim().is_empty() {
+                                format!("ss{season_id}")
+                            } else {
+                                season.title
+                            },
                             desc: None,
                             pic: season.cover,
                             owner_name: None,
@@ -2491,7 +2708,8 @@ mod win {
 
                 let mut auth = map_bili_auth_to_core(params2.auth);
                 if auth.cookie.is_some() && auth.refresh_token.is_some() {
-                    if let Ok(a) = bili_video::auth::refresh_cookie_if_needed(&client, &auth).await {
+                    if let Ok(a) = bili_video::auth::refresh_cookie_if_needed(&client, &auth).await
+                    {
                         auth = a;
                     }
                 }
@@ -2594,12 +2812,7 @@ mod win {
                     let page = &view.pages[page_idx];
 
                     let base_play = match bili_video::playurl::fetch_playurl_dash(
-                        &client,
-                        &view.bvid,
-                        &view.aid,
-                        &page.cid,
-                        0,
-                        cookie,
+                        &client, &view.bvid, &view.aid, &page.cid, 0, cookie,
                     )
                     .await
                     {
@@ -2624,12 +2837,7 @@ mod win {
 
                     let play = if qn != base_play.quality {
                         bili_video::playurl::fetch_playurl_dash(
-                            &client,
-                            &view.bvid,
-                            &view.aid,
-                            &page.cid,
-                            qn,
-                            cookie,
+                            &client, &view.bvid, &view.aid, &page.cid, qn, cookie,
                         )
                         .await
                         .unwrap_or(base_play)
@@ -2637,7 +2845,10 @@ mod win {
                         base_play
                     };
 
-                    let (v, a) = match bili_video::playurl::pick_dash_tracks(&play, &params2.options.encoding_priority) {
+                    let (v, a) = match bili_video::playurl::pick_dash_tracks(
+                        &play,
+                        &params2.options.encoding_priority,
+                    ) {
                         Ok(x) => x,
                         Err(e) => {
                             let mut st = status2.lock().await;
@@ -2768,7 +2979,11 @@ mod win {
                     if let Err(e) = video_res {
                         let mut st = status2.lock().await;
                         if let Some(j) = st.jobs.get_mut(job_idx) {
-                            j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed };
+                            j.state = if cancel2.load(Ordering::Relaxed) {
+                                BiliJobState::Canceled
+                            } else {
+                                BiliJobState::Failed
+                            };
                             j.error = Some(e.to_string());
                         }
                         recompute_totals(&mut st);
@@ -2832,7 +3047,11 @@ mod win {
                     if let Err(e) = audio_res {
                         let mut st = status2.lock().await;
                         if let Some(j) = st.jobs.get_mut(job_idx) {
-                            j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed };
+                            j.state = if cancel2.load(Ordering::Relaxed) {
+                                BiliJobState::Canceled
+                            } else {
+                                BiliJobState::Failed
+                            };
                             j.error = Some(e.to_string());
                         }
                         recompute_totals(&mut st);
@@ -2848,12 +3067,20 @@ mod win {
                                 j.phase = BiliJobPhase::Subtitle;
                             }
                         }
-                        if let Ok(subs) = bili_video::subtitle::fetch_subtitles(&client, &view.bvid, &page.cid, cookie).await {
+                        if let Ok(subs) = bili_video::subtitle::fetch_subtitles(
+                            &client, &view.bvid, &page.cid, cookie,
+                        )
+                        .await
+                        {
                             for s in subs {
                                 if cancel2.load(Ordering::Relaxed) {
                                     break;
                                 }
-                                if let Ok(srt) = bili_video::subtitle::download_subtitle_srt(&client, &s.url, cookie).await {
+                                if let Ok(srt) = bili_video::subtitle::download_subtitle_srt(
+                                    &client, &s.url, cookie,
+                                )
+                                .await
+                                {
                                     let lang = music::util::sanitize_component(&s.lang);
                                     let path = out_mp4.with_extension(format!("{lang}.srt"));
                                     let _ = tokio::fs::write(&path, srt).await;
@@ -2923,7 +3150,11 @@ mod win {
                         Err(e) => {
                             let mut st = status2.lock().await;
                             if let Some(j) = st.jobs.get_mut(job_idx) {
-                                j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed };
+                                j.state = if cancel2.load(Ordering::Relaxed) {
+                                    BiliJobState::Canceled
+                                } else {
+                                    BiliJobState::Failed
+                                };
                                 j.error = Some(e.to_string());
                             }
                             recompute_totals(&mut st);
@@ -2934,7 +3165,10 @@ mod win {
                 let mut st = status2.lock().await;
                 if cancel2.load(Ordering::Relaxed) {
                     for j in st.jobs.iter_mut() {
-                        if matches!(j.state, BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing) {
+                        if matches!(
+                            j.state,
+                            BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing
+                        ) {
                             j.state = BiliJobState::Canceled;
                         }
                     }
@@ -2996,7 +3230,10 @@ mod win {
             let mut st = sess.status.lock().await;
             if !st.done {
                 for j in st.jobs.iter_mut() {
-                    if matches!(j.state, BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing) {
+                    if matches!(
+                        j.state,
+                        BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing
+                    ) {
                         j.state = BiliJobState::Canceled;
                     }
                 }
@@ -3119,7 +3356,9 @@ mod win {
                     refresh_token: web_refresh,
                 };
                 if web_auth.cookie.is_some() && web_auth.refresh_token.is_some() {
-                    if let Ok(a) = bili_video::auth::refresh_cookie_if_needed(&client, &web_auth).await {
+                    if let Ok(a) =
+                        bili_video::auth::refresh_cookie_if_needed(&client, &web_auth).await
+                    {
                         web_auth = a;
                     }
                 }
@@ -3139,166 +3378,195 @@ mod win {
                     owner_mid: String,
                 }
 
-                let (all_count, jobs): (usize, Vec<JobInput>) = match bili_video::parse::parse_input(&client, &input2).await {
-                    Ok(bili_video::parse::ParsedInput::Video(vid)) => {
-                        let view = match bili_video::parse::fetch_view_info(&client, &vid, cookie).await {
-                            Ok(v) => v,
-                            Err(e) => {
-                                let mut st = status2.lock().await;
-                                st.done = true;
-                                st.totals.failed = 1;
-                                st.totals.total = 1;
-                                st.jobs = vec![BiliDownloadJobStatus {
-                                    index: 0,
-                                    page_number: None,
-                                    cid: None,
-                                    title: "view".to_string(),
-                                    state: BiliJobState::Failed,
-                                    phase: BiliJobPhase::Parse,
-                                    bytes_downloaded: 0,
-                                    bytes_total: None,
-                                    speed_bps: None,
-                                    path: None,
-                                    error: Some(e.to_string()),
-                                }];
-                                return;
-                            }
-                        };
+                let (all_count, jobs): (usize, Vec<JobInput>) =
+                    match bili_video::parse::parse_input(&client, &input2).await {
+                        Ok(bili_video::parse::ParsedInput::Video(vid)) => {
+                            let view =
+                                match bili_video::parse::fetch_view_info(&client, &vid, cookie)
+                                    .await
+                                {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        let mut st = status2.lock().await;
+                                        st.done = true;
+                                        st.totals.failed = 1;
+                                        st.totals.total = 1;
+                                        st.jobs = vec![BiliDownloadJobStatus {
+                                            index: 0,
+                                            page_number: None,
+                                            cid: None,
+                                            title: "view".to_string(),
+                                            state: BiliJobState::Failed,
+                                            phase: BiliJobPhase::Parse,
+                                            bytes_downloaded: 0,
+                                            bytes_total: None,
+                                            speed_bps: None,
+                                            path: None,
+                                            error: Some(e.to_string()),
+                                        }];
+                                        return;
+                                    }
+                                };
 
-                        let indices = bili_video::select_page::select_page_indices(view.pages.len(), &options.select_page)
+                            let indices = bili_video::select_page::select_page_indices(
+                                view.pages.len(),
+                                &options.select_page,
+                            )
                             .unwrap_or_else(|_| (0..view.pages.len()).collect());
 
-                        let jobs = indices
-                            .iter()
-                            .map(|&pi| {
-                                let p = &view.pages[pi];
-                                JobInput {
-                                    page_number: p.page_number,
-                                    cid: p.cid.clone(),
-                                    title: p.page_title.clone(),
-                                    dimension: p.dimension.clone(),
-                                    aid: view.aid.clone(),
-                                    bvid: view.bvid.clone(),
-                                    ep_id: None,
-                                    video_title: view.title.clone(),
-                                    owner_name: view.owner_name.clone().unwrap_or_default(),
-                                    owner_mid: view.owner_mid.clone().unwrap_or_default(),
+                            let jobs = indices
+                                .iter()
+                                .map(|&pi| {
+                                    let p = &view.pages[pi];
+                                    JobInput {
+                                        page_number: p.page_number,
+                                        cid: p.cid.clone(),
+                                        title: p.page_title.clone(),
+                                        dimension: p.dimension.clone(),
+                                        aid: view.aid.clone(),
+                                        bvid: view.bvid.clone(),
+                                        ep_id: None,
+                                        video_title: view.title.clone(),
+                                        owner_name: view.owner_name.clone().unwrap_or_default(),
+                                        owner_mid: view.owner_mid.clone().unwrap_or_default(),
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            (view.pages.len(), jobs)
+                        }
+                        Ok(bili_video::parse::ParsedInput::BangumiEpisode { ep_id }) => {
+                            let season = match bili_video::pgc::fetch_pgc_season_by_ep_id(
+                                &client, &ep_id, cookie,
+                            )
+                            .await
+                            {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    let mut st = status2.lock().await;
+                                    st.done = true;
+                                    st.totals.failed = 1;
+                                    st.totals.total = 1;
+                                    st.jobs = vec![BiliDownloadJobStatus {
+                                        index: 0,
+                                        page_number: None,
+                                        cid: None,
+                                        title: "pgc".to_string(),
+                                        state: BiliJobState::Failed,
+                                        phase: BiliJobPhase::Parse,
+                                        bytes_downloaded: 0,
+                                        bytes_total: None,
+                                        speed_bps: None,
+                                        path: None,
+                                        error: Some(e.to_string()),
+                                    }];
+                                    return;
                                 }
-                            })
-                            .collect::<Vec<_>>();
-                        (view.pages.len(), jobs)
-                    }
-                    Ok(bili_video::parse::ParsedInput::BangumiEpisode { ep_id }) => {
-                        let season = match bili_video::pgc::fetch_pgc_season_by_ep_id(&client, &ep_id, cookie).await {
-                            Ok(s) => s,
-                            Err(e) => {
-                                let mut st = status2.lock().await;
-                                st.done = true;
-                                st.totals.failed = 1;
-                                st.totals.total = 1;
-                                st.jobs = vec![BiliDownloadJobStatus {
-                                    index: 0,
-                                    page_number: None,
-                                    cid: None,
-                                    title: "pgc".to_string(),
-                                    state: BiliJobState::Failed,
-                                    phase: BiliJobPhase::Parse,
-                                    bytes_downloaded: 0,
-                                    bytes_total: None,
-                                    speed_bps: None,
-                                    path: None,
-                                    error: Some(e.to_string()),
-                                }];
-                                return;
-                            }
-                        };
+                            };
 
-                        let indices = bili_video::select_page::select_page_indices(season.episodes.len(), &options.select_page)
+                            let indices = bili_video::select_page::select_page_indices(
+                                season.episodes.len(),
+                                &options.select_page,
+                            )
                             .unwrap_or_else(|_| (0..season.episodes.len()).collect());
-                        let jobs = indices
-                            .iter()
-                            .filter_map(|&ei| season.episodes.get(ei).map(|e| (ei, e)))
-                            .map(|(ei, e)| JobInput {
-                                page_number: (ei as u32) + 1,
-                                cid: e.cid.clone(),
-                                title: e.title.clone(),
-                                dimension: None,
-                                aid: e.aid.clone(),
-                                bvid: "".to_string(),
-                                ep_id: Some(e.ep_id.clone()),
-                                video_title: if season.title.trim().is_empty() { format!("ep{ep_id}") } else { season.title.clone() },
-                                owner_name: "".to_string(),
-                                owner_mid: "".to_string(),
-                            })
-                            .collect::<Vec<_>>();
-                        (season.episodes.len(), jobs)
-                    }
-                    Ok(bili_video::parse::ParsedInput::BangumiSeason { season_id }) => {
-                        let season = match bili_video::pgc::fetch_pgc_season_by_season_id(&client, &season_id, cookie).await {
-                            Ok(s) => s,
-                            Err(e) => {
-                                let mut st = status2.lock().await;
-                                st.done = true;
-                                st.totals.failed = 1;
-                                st.totals.total = 1;
-                                st.jobs = vec![BiliDownloadJobStatus {
-                                    index: 0,
-                                    page_number: None,
-                                    cid: None,
-                                    title: "pgc".to_string(),
-                                    state: BiliJobState::Failed,
-                                    phase: BiliJobPhase::Parse,
-                                    bytes_downloaded: 0,
-                                    bytes_total: None,
-                                    speed_bps: None,
-                                    path: None,
-                                    error: Some(e.to_string()),
-                                }];
-                                return;
-                            }
-                        };
+                            let jobs = indices
+                                .iter()
+                                .filter_map(|&ei| season.episodes.get(ei).map(|e| (ei, e)))
+                                .map(|(ei, e)| JobInput {
+                                    page_number: (ei as u32) + 1,
+                                    cid: e.cid.clone(),
+                                    title: e.title.clone(),
+                                    dimension: None,
+                                    aid: e.aid.clone(),
+                                    bvid: "".to_string(),
+                                    ep_id: Some(e.ep_id.clone()),
+                                    video_title: if season.title.trim().is_empty() {
+                                        format!("ep{ep_id}")
+                                    } else {
+                                        season.title.clone()
+                                    },
+                                    owner_name: "".to_string(),
+                                    owner_mid: "".to_string(),
+                                })
+                                .collect::<Vec<_>>();
+                            (season.episodes.len(), jobs)
+                        }
+                        Ok(bili_video::parse::ParsedInput::BangumiSeason { season_id }) => {
+                            let season = match bili_video::pgc::fetch_pgc_season_by_season_id(
+                                &client, &season_id, cookie,
+                            )
+                            .await
+                            {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    let mut st = status2.lock().await;
+                                    st.done = true;
+                                    st.totals.failed = 1;
+                                    st.totals.total = 1;
+                                    st.jobs = vec![BiliDownloadJobStatus {
+                                        index: 0,
+                                        page_number: None,
+                                        cid: None,
+                                        title: "pgc".to_string(),
+                                        state: BiliJobState::Failed,
+                                        phase: BiliJobPhase::Parse,
+                                        bytes_downloaded: 0,
+                                        bytes_total: None,
+                                        speed_bps: None,
+                                        path: None,
+                                        error: Some(e.to_string()),
+                                    }];
+                                    return;
+                                }
+                            };
 
-                        let indices = bili_video::select_page::select_page_indices(season.episodes.len(), &options.select_page)
+                            let indices = bili_video::select_page::select_page_indices(
+                                season.episodes.len(),
+                                &options.select_page,
+                            )
                             .unwrap_or_else(|_| (0..season.episodes.len()).collect());
-                        let jobs = indices
-                            .iter()
-                            .filter_map(|&ei| season.episodes.get(ei).map(|e| (ei, e)))
-                            .map(|(ei, e)| JobInput {
-                                page_number: (ei as u32) + 1,
-                                cid: e.cid.clone(),
-                                title: e.title.clone(),
-                                dimension: None,
-                                aid: e.aid.clone(),
-                                bvid: "".to_string(),
-                                ep_id: Some(e.ep_id.clone()),
-                                video_title: if season.title.trim().is_empty() { format!("ss{season_id}") } else { season.title.clone() },
-                                owner_name: "".to_string(),
-                                owner_mid: "".to_string(),
-                            })
-                            .collect::<Vec<_>>();
-                        (season.episodes.len(), jobs)
-                    }
-                    Err(e) => {
-                        let mut st = status2.lock().await;
-                        st.done = true;
-                        st.totals.failed = 1;
-                        st.totals.total = 1;
-                        st.jobs = vec![BiliDownloadJobStatus {
-                            index: 0,
-                            page_number: None,
-                            cid: None,
-                            title: "parse".to_string(),
-                            state: BiliJobState::Failed,
-                            phase: BiliJobPhase::Parse,
-                            bytes_downloaded: 0,
-                            bytes_total: None,
-                            speed_bps: None,
-                            path: None,
-                            error: Some(e.to_string()),
-                        }];
-                        return;
-                    }
-                };
+                            let jobs = indices
+                                .iter()
+                                .filter_map(|&ei| season.episodes.get(ei).map(|e| (ei, e)))
+                                .map(|(ei, e)| JobInput {
+                                    page_number: (ei as u32) + 1,
+                                    cid: e.cid.clone(),
+                                    title: e.title.clone(),
+                                    dimension: None,
+                                    aid: e.aid.clone(),
+                                    bvid: "".to_string(),
+                                    ep_id: Some(e.ep_id.clone()),
+                                    video_title: if season.title.trim().is_empty() {
+                                        format!("ss{season_id}")
+                                    } else {
+                                        season.title.clone()
+                                    },
+                                    owner_name: "".to_string(),
+                                    owner_mid: "".to_string(),
+                                })
+                                .collect::<Vec<_>>();
+                            (season.episodes.len(), jobs)
+                        }
+                        Err(e) => {
+                            let mut st = status2.lock().await;
+                            st.done = true;
+                            st.totals.failed = 1;
+                            st.totals.total = 1;
+                            st.jobs = vec![BiliDownloadJobStatus {
+                                index: 0,
+                                page_number: None,
+                                cid: None,
+                                title: "parse".to_string(),
+                                state: BiliJobState::Failed,
+                                phase: BiliJobPhase::Parse,
+                                bytes_downloaded: 0,
+                                bytes_total: None,
+                                speed_bps: None,
+                                path: None,
+                                error: Some(e.to_string()),
+                            }];
+                            return;
+                        }
+                    };
 
                 {
                     let mut st = status2.lock().await;
@@ -3349,26 +3617,51 @@ mod win {
                         qn: i32,
                         cookie: Option<&str>,
                         tv_token: Option<&str>,
-                    ) -> Result<(bili_video::playurl::PlayurlInfo, bool), bili_video::BiliError> {
+                    ) -> Result<(bili_video::playurl::PlayurlInfo, bool), bili_video::BiliError>
+                    {
                         let web = async {
                             if is_pgc {
-                                bili_video::playurl::fetch_playurl_dash_pgc_web(client, aid, cid, ep_id.unwrap_or(""), qn, cookie).await
+                                bili_video::playurl::fetch_playurl_dash_pgc_web(
+                                    client,
+                                    aid,
+                                    cid,
+                                    ep_id.unwrap_or(""),
+                                    qn,
+                                    cookie,
+                                )
+                                .await
                             } else {
-                                bili_video::playurl::fetch_playurl_dash(client, bvid, aid, cid, qn, cookie).await
+                                bili_video::playurl::fetch_playurl_dash(
+                                    client, bvid, aid, cid, qn, cookie,
+                                )
+                                .await
                             }
                         };
                         let tv = async {
                             if is_pgc {
-                                bili_video::playurl::fetch_playurl_dash_pgc_tv(client, aid, cid, ep_id.unwrap_or(""), qn, tv_token).await
+                                bili_video::playurl::fetch_playurl_dash_pgc_tv(
+                                    client,
+                                    aid,
+                                    cid,
+                                    ep_id.unwrap_or(""),
+                                    qn,
+                                    tv_token,
+                                )
+                                .await
                             } else {
-                                bili_video::playurl::fetch_playurl_dash_tv(client, aid, cid, qn, tv_token).await
+                                bili_video::playurl::fetch_playurl_dash_tv(
+                                    client, aid, cid, qn, tv_token,
+                                )
+                                .await
                             }
                         };
                         match api {
                             BiliApiType::Web | BiliApiType::Auto => match web.await {
                                 Ok(p) => Ok((p, false)),
                                 Err(e) => {
-                                    if tv_token.is_some() && bili_video::api_error_code(&e) == Some(-101) {
+                                    if tv_token.is_some()
+                                        && bili_video::api_error_code(&e) == Some(-101)
+                                    {
                                         Ok((tv.await?, true))
                                     } else {
                                         Err(e)
@@ -3376,8 +3669,12 @@ mod win {
                                 }
                             },
                             BiliApiType::Tv => Ok((tv.await?, false)),
-                            BiliApiType::Intl => Err(bili_video::BiliError::InvalidInput("api=intl is not supported yet".to_string())),
-                            BiliApiType::App => Err(bili_video::BiliError::InvalidInput("api=app is not supported yet".to_string())),
+                            BiliApiType::Intl => Err(bili_video::BiliError::InvalidInput(
+                                "api=intl is not supported yet".to_string(),
+                            )),
+                            BiliApiType::App => Err(bili_video::BiliError::InvalidInput(
+                                "api=app is not supported yet".to_string(),
+                            )),
                         }
                     }
 
@@ -3408,7 +3705,11 @@ mod win {
                         }
                     };
                     let mut used_tv_fallback = used_tv0;
-                    let effective_api = if used_tv_fallback { BiliApiType::Tv } else { api };
+                    let effective_api = if used_tv_fallback {
+                        BiliApiType::Tv
+                    } else {
+                        api
+                    };
 
                     let qn = bili_video::playurl::choose_qn_by_dfn_priority(
                         &base_play.accept_quality,
@@ -3442,7 +3743,10 @@ mod win {
                         base_play
                     };
 
-                    let (v, a) = match bili_video::playurl::pick_dash_tracks(&play, &options.encoding_priority) {
+                    let (v, a) = match bili_video::playurl::pick_dash_tracks(
+                        &play,
+                        &options.encoding_priority,
+                    ) {
                         Ok(x) => x,
                         Err(e) => {
                             let mut st = status2.lock().await;
@@ -3526,7 +3830,8 @@ mod win {
                             headers.insert(reqwest::header::REFERER, v);
                         }
                     } else if !job.aid.trim().is_empty() {
-                        let referer = format!("https://www.bilibili.com/video/av{}", job.aid.trim());
+                        let referer =
+                            format!("https://www.bilibili.com/video/av{}", job.aid.trim());
                         if let Ok(v) = reqwest::header::HeaderValue::from_str(&referer) {
                             headers.insert(reqwest::header::REFERER, v);
                         }
@@ -3543,7 +3848,10 @@ mod win {
                         }
                     }
                     let prog_downloaded = Arc::new(std::sync::atomic::AtomicU64::new(0));
-                    let prog_t0 = std::sync::Arc::new(std::sync::Mutex::new((std::time::Instant::now(), 0u64)));
+                    let prog_t0 = std::sync::Arc::new(std::sync::Mutex::new((
+                        std::time::Instant::now(),
+                        0u64,
+                    )));
 
                     let video_prog: bili_video::download::ProgressCb = Arc::new({
                         let status2 = status2.clone();
@@ -3599,7 +3907,8 @@ mod win {
                                 }
                                 // Best-effort cleanup before retrying another URL.
                                 let _ = tokio::fs::remove_file(&video_tmp).await;
-                                let _ = tokio::fs::remove_file(video_tmp.with_extension("part")).await;
+                                let _ =
+                                    tokio::fs::remove_file(video_tmp.with_extension("part")).await;
 
                                 match bili_video::download::download_to_file_ranged(
                                     &client.http,
@@ -3628,7 +3937,11 @@ mod win {
                     if let Err(e) = video_res {
                         let mut st = status2.lock().await;
                         if let Some(j) = st.jobs.get_mut(job_idx) {
-                            j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed };
+                            j.state = if cancel2.load(Ordering::Relaxed) {
+                                BiliJobState::Canceled
+                            } else {
+                                BiliJobState::Failed
+                            };
                             j.error = Some(e.to_string());
                         }
                         recompute_totals(&mut st);
@@ -3680,7 +3993,8 @@ mod win {
                                     break;
                                 }
                                 let _ = tokio::fs::remove_file(&audio_tmp).await;
-                                let _ = tokio::fs::remove_file(audio_tmp.with_extension("part")).await;
+                                let _ =
+                                    tokio::fs::remove_file(audio_tmp.with_extension("part")).await;
 
                                 match bili_video::download::download_to_file_ranged(
                                     &client.http,
@@ -3708,7 +4022,11 @@ mod win {
                     if let Err(e) = audio_res {
                         let mut st = status2.lock().await;
                         if let Some(j) = st.jobs.get_mut(job_idx) {
-                            j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed };
+                            j.state = if cancel2.load(Ordering::Relaxed) {
+                                BiliJobState::Canceled
+                            } else {
+                                BiliJobState::Failed
+                            };
                             j.error = Some(e.to_string());
                         }
                         recompute_totals(&mut st);
@@ -3717,7 +4035,10 @@ mod win {
 
                     // ----- subtitle download -----
                     let mut sub_paths: Vec<std::path::PathBuf> = Vec::new();
-                    if options.download_subtitle && job.ep_id.is_none() && !cancel2.load(Ordering::Relaxed) {
+                    if options.download_subtitle
+                        && job.ep_id.is_none()
+                        && !cancel2.load(Ordering::Relaxed)
+                    {
                         {
                             let mut st = status2.lock().await;
                             if let Some(j) = st.jobs.get_mut(job_idx) {
@@ -3725,12 +4046,20 @@ mod win {
                             }
                         }
                         if !job.bvid.trim().is_empty() {
-                            if let Ok(subs) = bili_video::subtitle::fetch_subtitles(&client, &job.bvid, &job.cid, cookie).await {
+                            if let Ok(subs) = bili_video::subtitle::fetch_subtitles(
+                                &client, &job.bvid, &job.cid, cookie,
+                            )
+                            .await
+                            {
                                 for s in subs {
                                     if cancel2.load(Ordering::Relaxed) {
                                         break;
                                     }
-                                    if let Ok(srt) = bili_video::subtitle::download_subtitle_srt(&client, &s.url, cookie).await {
+                                    if let Ok(srt) = bili_video::subtitle::download_subtitle_srt(
+                                        &client, &s.url, cookie,
+                                    )
+                                    .await
+                                    {
                                         let lang = music::util::sanitize_component(&s.lang);
                                         let path = out_mp4.with_extension(format!("{lang}.srt"));
                                         let _ = tokio::fs::write(&path, srt).await;
@@ -3759,7 +4088,10 @@ mod win {
                             j.phase = BiliJobPhase::Mux;
                             j.path = Some(out_mp4.to_string_lossy().to_string());
                             if used_tv_fallback && j.error.is_none() {
-                                j.error = Some("info: web playurl returned -101, used tv token fallback".to_string());
+                                j.error = Some(
+                                    "info: web playurl returned -101, used tv token fallback"
+                                        .to_string(),
+                                );
                             }
                         }
                         recompute_totals(&mut st);
@@ -3798,7 +4130,10 @@ mod win {
                                 j.phase = BiliJobPhase::Mux;
                                 j.path = Some(out_mp4.to_string_lossy().to_string());
                                 if used_tv_fallback && j.error.is_none() {
-                                    j.error = Some("info: web playurl returned -101, used tv token fallback".to_string());
+                                    j.error = Some(
+                                        "info: web playurl returned -101, used tv token fallback"
+                                            .to_string(),
+                                    );
                                 }
                             }
                             recompute_totals(&mut st);
@@ -3806,7 +4141,11 @@ mod win {
                         Err(e) => {
                             let mut st = status2.lock().await;
                             if let Some(j) = st.jobs.get_mut(job_idx) {
-                                j.state = if cancel2.load(Ordering::Relaxed) { BiliJobState::Canceled } else { BiliJobState::Failed };
+                                j.state = if cancel2.load(Ordering::Relaxed) {
+                                    BiliJobState::Canceled
+                                } else {
+                                    BiliJobState::Failed
+                                };
                                 j.error = Some(e.to_string());
                             }
                             recompute_totals(&mut st);
@@ -3817,7 +4156,10 @@ mod win {
                 let mut st = status2.lock().await;
                 if cancel2.load(Ordering::Relaxed) {
                     for j in st.jobs.iter_mut() {
-                        if matches!(j.state, BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing) {
+                        if matches!(
+                            j.state,
+                            BiliJobState::Pending | BiliJobState::Running | BiliJobState::Muxing
+                        ) {
                             j.state = BiliJobState::Canceled;
                         }
                     }
@@ -3841,7 +4183,9 @@ mod win {
                 );
             }
 
-            Ok(BiliTaskAddResult { task_id: session_id })
+            Ok(BiliTaskAddResult {
+                task_id: session_id,
+            })
         }
 
         async fn bili_tasks_get(
@@ -3892,10 +4236,7 @@ mod win {
             Ok(BiliTasksGetResult { running, finished })
         }
 
-        async fn bili_task_get(
-            &self,
-            params: BiliTaskGetParams,
-        ) -> Result<BiliTaskDetail, String> {
+        async fn bili_task_get(&self, params: BiliTaskGetParams) -> Result<BiliTaskDetail, String> {
             let tid = params.task_id.trim().to_string();
             if tid.is_empty() {
                 return Err("taskId is empty".to_string());
@@ -3929,12 +4270,11 @@ mod win {
             Ok(BiliTaskDetail { task, status: st })
         }
 
-        async fn bili_task_cancel(
-            &self,
-            params: BiliTaskCancelParams,
-        ) -> Result<OkReply, String> {
-            self.bili_download_cancel(BiliDownloadCancelParams { session_id: params.task_id })
-                .await
+        async fn bili_task_cancel(&self, params: BiliTaskCancelParams) -> Result<OkReply, String> {
+            self.bili_download_cancel(BiliDownloadCancelParams {
+                session_id: params.task_id,
+            })
+            .await
         }
 
         async fn bili_tasks_remove_finished(
@@ -3942,7 +4282,10 @@ mod win {
             params: BiliTasksRemoveFinishedParams,
         ) -> Result<OkReply, String> {
             let only_failed = params.only_failed.unwrap_or(false);
-            let filter_id = params.task_id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+            let filter_id = params
+                .task_id
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
 
             let snapshot = {
                 let downloads = self.bili.downloads.lock().await;
@@ -4082,7 +4425,9 @@ mod win {
         let opt = CliOptions::parse(env::args().skip(1)).map_err(|e| anyhow::anyhow!("{e}"))?;
         match opt.transport {
             TransportMode::Stdio => run_stdio(&opt.auth_token).await,
-            TransportMode::NamedPipe { pipe_name } => run_named_pipe(&pipe_name, &opt.auth_token).await,
+            TransportMode::NamedPipe { pipe_name } => {
+                run_named_pipe(&pipe_name, &opt.auth_token).await
+            }
         }
     }
 }

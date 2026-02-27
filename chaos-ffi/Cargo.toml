@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 base64 = "0.22"
-chaos-core = { path = "../chaos-core" }
+chaos-core = { path = "../chaos-core", features = ["silero-vad"] }
 chaos-proto = { path = "../chaos-proto" }
 fastrand = "2"
 libc = "0.2"

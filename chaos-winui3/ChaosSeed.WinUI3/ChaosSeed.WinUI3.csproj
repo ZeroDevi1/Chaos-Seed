@@ -63,6 +63,8 @@
     <RustProfile Condition="'$(Configuration)'!='Release'">debug</RustProfile>
     <ChaosDaemonExe>$(RustTargetDir)\$(RustProfile)\chaos-daemon.exe</ChaosDaemonExe>
     <ChaosFfiDll>$(RustTargetDir)\$(RustProfile)\chaos_ffi.dll</ChaosFfiDll>
+    <!-- 约定：将 CosyVoice ONNX pack 放在 repo 根目录 models/cosyvoice/pack（不进 git） -->
+    <CosyVoicePackSrcDir>$(SolutionDir)..\models\cosyvoice\pack\</CosyVoicePackSrcDir>
   </PropertyGroup>
 
   <Target Name="CopyChaosDaemon" AfterTargets="Build">
@@ -74,6 +76,36 @@
     <Message Importance="high" Text="Copying chaos_ffi from $(ChaosFfiDll) to $(OutDir)" Condition="Exists('$(ChaosFfiDll)')" />
     <Copy SourceFiles="$(ChaosFfiDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('$(ChaosFfiDll)')" />
     <Message Importance="high" Text="chaos_ffi.dll not found at $(ChaosFfiDll). Build it first with: cargo build -p chaos-ffi (or cargo xtask build-winui3 --release)" Condition="!Exists('$(ChaosFfiDll)')" />
+  </Target>
+
+  <Target Name="CopyOnnxRuntime" AfterTargets="Build">
+    <!--
+      silero-vad-rs 依赖 ONNX Runtime（ort/ort-sys）。其 build 脚本会在 cargo target 下放置 onnxruntime*.dll（可能是 symlink）。
+      这里把它们一并复制到 WinUI3 输出目录，确保 zip 分发时依赖齐全。
+    -->
+    <ItemGroup>
+      <OnnxRuntimeDlls Include="$(RustTargetDir)\$(RustProfile)\onnxruntime*.dll" Condition="Exists('$(RustTargetDir)\$(RustProfile)\onnxruntime.dll')" />
+    </ItemGroup>
+    <Message Importance="high" Text="Copying ONNX Runtime DLLs from $(RustTargetDir)\$(RustProfile) to $(OutDir)" Condition="@(OnnxRuntimeDlls) != ''" />
+    <Copy SourceFiles="@(OnnxRuntimeDlls)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="@(OnnxRuntimeDlls) != ''" />
+  </Target>
+
+  <Target Name="CopyCosyVoicePacks" AfterTargets="Build">
+    <!--
+      将本地 CosyVoice pack（大文件，不参与 git）复制到 WinUI3 输出目录：
+      $(OutDir)\models\cosyvoice\pack\...
+
+      说明：为避免 CI / 新环境报错，这里仅在源目录存在时执行。
+    -->
+    <ItemGroup>
+      <CosyVoicePackFiles Include="$(CosyVoicePackSrcDir)**\*" Condition="Exists('$(CosyVoicePackSrcDir)')" />
+    </ItemGroup>
+    <Message Importance="high" Text="Copying CosyVoice packs from $(CosyVoicePackSrcDir) to $(OutDir)models\\cosyvoice\\pack" Condition="@(CosyVoicePackFiles) != ''" />
+    <Copy
+      SourceFiles="@(CosyVoicePackFiles)"
+      DestinationFiles="@(CosyVoicePackFiles->'$(OutDir)models\\cosyvoice\\pack\\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      Condition="@(CosyVoicePackFiles) != ''" />
   </Target>
 
   <Target Name="WriteChaosVersion" AfterTargets="Build">

@@ -97,6 +97,20 @@ public sealed class SettingsService
             changed = true;
         }
 
+        // TTS: 默认从程序目录下读取模型 pack（便于 zip 分发）。
+        if (string.IsNullOrWhiteSpace(Current.TtsCosyVoicePackDir))
+        {
+            try
+            {
+                Current.TtsCosyVoicePackDir = Path.Combine(AppContext.BaseDirectory, "models", "cosyvoice", "pack");
+                changed = true;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         return changed;
     }
 

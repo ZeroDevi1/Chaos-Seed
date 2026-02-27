@@ -102,6 +102,98 @@ pub fn resolve_tts_text_basic(
     })
 }
 
+/// 计算 `guide_prefix` 模式下「需要从生成音频前面裁掉的比例」。
+///
+/// 背景：`guide_prefix` 会把 prompt 文本拼到 spoken_text 前面（用于“情绪/语气”引导），
+/// 但最终我们通常不希望把这段 guide 也读出来，因此需要在后处理阶段把它裁掉。
+///
+/// 这里用 tokenizer 的 token 序列做一个“后缀匹配”：
+/// - full：guide + sep + text
+/// - tail：text（同样经过 basic normalize）
+/// 然后估算 guide 前缀 token 占比，供上层把音频前缀按比例裁剪。
+pub fn compute_guide_prefix_ratio_tokens(
+    tokenizer: &tokenizers::Tokenizer,
+    add_special_tokens: bool,
+    text: &str,
+    prompt_text: &str,
+    guide_sep: &str,
+    text_frontend: bool,
+) -> Result<Option<f32>, TtsError> {
+    let full = resolve_tts_text_basic(
+        text,
+        prompt_text,
+        PromptStrategy::GuidePrefix,
+        guide_sep,
+        text_frontend,
+    )?;
+    let tail = resolve_tts_text_basic(
+        text,
+        END_OF_PROMPT,
+        PromptStrategy::Inject,
+        guide_sep,
+        text_frontend,
+    )?;
+
+    // 没有 guide（或 guide 为空）时无需裁剪。
+    if full.spoken_text == tail.spoken_text {
+        return Ok(None);
+    }
+
+    let full_ids = tokenizer
+        .encode(full.spoken_text, add_special_tokens)
+        .map_err(|e| TtsError::Tokenizer(format!("encode full spoken_text failed: {e}")))?
+        .get_ids()
+        .to_vec();
+    let tail_ids = tokenizer
+        .encode(tail.spoken_text, add_special_tokens)
+        .map_err(|e| TtsError::Tokenizer(format!("encode tail spoken_text failed: {e}")))?
+        .get_ids()
+        .to_vec();
+
+    if full_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let full_len = full_ids.len();
+    let tail_len = tail_ids.len();
+
+    // 优先走 “tail 完全匹配 full 的后缀” 的快路径。
+    let suffix_match = if tail_len > 0
+        && tail_len <= full_len
+        && full_ids[full_len - tail_len..] == tail_ids[..]
+    {
+        tail_len
+    } else {
+        // 否则做一个最长“后缀匹配”（允许 tokenizer 在拼接边界处有少量差异）。
+        let max = full_len.min(tail_len);
+        let mut best = 0usize;
+        for k in (1..=max).rev() {
+            if full_ids[full_len - k..] == tail_ids[tail_len - k..] {
+                best = k;
+                break;
+            }
+        }
+        best
+    };
+
+    let prefix_len = if suffix_match > 0 {
+        full_len.saturating_sub(suffix_match)
+    } else {
+        // 兜底：用长度差估算（不保证严格正确，但比 0 好）。
+        full_len.saturating_sub(tail_len)
+    };
+
+    if prefix_len == 0 {
+        return Ok(None);
+    }
+
+    let r = (prefix_len as f32) / (full_len as f32);
+    if !r.is_finite() || r <= 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(r.clamp(0.0, 1.0)))
+}
+
 fn strip_endofprompt(s: &str) -> String {
     s.replace(END_OF_PROMPT, "").trim().to_string()
 }
@@ -167,7 +259,8 @@ mod tests {
 
     #[test]
     fn inject_appends_endofprompt_when_missing() {
-        let r = resolve_tts_text_basic("你好", "我是提示", PromptStrategy::Inject, "。 ", false).unwrap();
+        let r = resolve_tts_text_basic("你好", "我是提示", PromptStrategy::Inject, "。 ", false)
+            .unwrap();
         assert_eq!(r.spoken_text, "你好");
         assert!(r.prompt_inject_text.ends_with(END_OF_PROMPT));
         assert!(r.prompt_inject_text.contains("我是提示"));
@@ -175,7 +268,8 @@ mod tests {
 
     #[test]
     fn empty_prompt_requires_marker_in_spoken_text() {
-        let err = resolve_tts_text_basic("你好", "", PromptStrategy::Inject, " ", false).unwrap_err();
+        let err =
+            resolve_tts_text_basic("你好", "", PromptStrategy::Inject, " ", false).unwrap_err();
         assert!(matches!(err, TtsError::InvalidArg(_)));
     }
 
@@ -196,9 +290,10 @@ mod tests {
 
     #[test]
     fn basic_normalize_keeps_marker_and_adds_chinese_period() {
-        let r = resolve_tts_text_basic("你好", "<|endofprompt|>", PromptStrategy::Inject, " ", true).unwrap();
+        let r =
+            resolve_tts_text_basic("你好", "<|endofprompt|>", PromptStrategy::Inject, " ", true)
+                .unwrap();
         assert_eq!(r.spoken_text, "你好。");
         assert_eq!(r.prompt_inject_text, END_OF_PROMPT);
     }
 }
-
