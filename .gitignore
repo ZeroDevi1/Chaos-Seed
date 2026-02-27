@@ -26,3 +26,4 @@ sync_to_win.sh
 # WinUI3 player runtime deps (fetched by scripts/fetch_ffmpeg_win.ps1)
 /chaos-winui3/ChaosSeed.WinUI3/FFmpeg/**
 !/chaos-winui3/ChaosSeed.WinUI3/FFmpeg/.gitkeep
+.ace-tool/

@@ -1,10 +1,10 @@
-# CosyVoice3 SFT TTS (Pure Rust Runtime)
+# CosyVoice3 SFT TTS（纯 Rust 运行时）
 
-ChaosSeed runtime uses `chaos-core::tts` (tract-onnx + tokenizers + hound) to synthesize **WAV(base64)** from a **CosyVoice ONNX Pack (V1)**.
+ChaosSeed 运行时使用 `chaos-core::tts`（tract-onnx + tokenizers + hound）从 **CosyVoice ONNX Pack（V1）** 合成 **WAV（base64）**。
 
-## 1) Offline Export (Python, VoiceLab workflow)
+## 1）离线导出（Python，VoiceLab 工作流）
 
-Export the ONNX pack in your CosyVoice workflow environment (this is **offline tooling**, not part of runtime):
+在你的 CosyVoice 工作流环境中导出 ONNX pack（这是**离线工具链**，不属于运行时）：
 
 ```bash
 cd /home/nul1fi3nd/AntiGravityProjects/VoiceLab/workflows/cosyvoice
@@ -18,7 +18,7 @@ uv run python tools/export_onnx_pack.py \
   --device cpu
 ```
 
-Expected output directory structure:
+导出后的目录结构应为：
 
 ```
 <pack_dir>/
@@ -32,29 +32,29 @@ Expected output directory structure:
   sha256.json
 ```
 
-## 2) Daemon JSON-RPC
+## 2）Daemon JSON-RPC
 
-Methods (see `chaos-proto`):
+方法（见 `chaos-proto`）：
 - `tts.sft.start`
 - `tts.sft.status`
 - `tts.sft.cancel`
 
-Result contains:
-- `result.wavBase64` (WAV/PCM16 mono)
+返回结果包含：
+- `result.wavBase64`（WAV/PCM16 单声道）
 - `result.sampleRate`, `result.durationMs`, ...
 
-Note: daemon LSP frame limit was bumped to **64 MiB** to allow large base64 WAV payloads.
+备注：为支持更大的 base64 WAV 负载，已将 daemon 的 LSP 帧大小上限提升到 **64 MiB**。
 
-## 3) FFI (C ABI)
+## 3）FFI（C ABI）
 
-Exports (JSON in/out, UTF-8):
+导出函数（JSON 入/出，UTF-8 编码）：
 - `chaos_tts_sft_start_json(const char* params_json_utf8) -> char*`
 - `chaos_tts_sft_status_json(const char* session_id_utf8) -> char*`
 - `chaos_tts_sft_cancel_json(const char* session_id_utf8) -> char*`
 
-See `chaos-ffi/docs/API.md` (api=9).
+参见 `chaos-ffi/docs/API.md`（api=9）。
 
-## 4) Live Test (optional)
+## 4）本地测试（可选）
 
 ```bash
 cd /home/nul1fi3nd/AntiGravityProjects/Chaos-Seed
