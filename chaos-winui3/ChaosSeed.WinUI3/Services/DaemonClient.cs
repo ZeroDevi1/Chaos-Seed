@@ -3,8 +3,10 @@ using System.Text;
 using System.IO.Pipes;
 using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Models.Bili;
+using ChaosSeed.WinUI3.Models.Llm;
 using ChaosSeed.WinUI3.Models.Music;
 using ChaosSeed.WinUI3.Models.Tts;
+using ChaosSeed.WinUI3.Models.Voice;
 using StreamJsonRpc;
 using StreamJsonRpc.Protocol;
 using StreamJsonRpc.Reflection;
@@ -30,6 +32,7 @@ public sealed class DaemonClient : IDisposable
     private string? _pipeName;
 
     public event EventHandler<DanmakuMessage>? DanmakuMessageReceived;
+    public event EventHandler<VoiceChatChunkNotif>? VoiceChatChunkReceived;
 
     private DaemonClient()
     {
@@ -808,6 +811,141 @@ public sealed class DaemonClient : IDisposable
         }
     }
 
+    // ----- llm -----
+
+    public async Task LlmConfigSetAsync(LlmConfigSetParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            var payload = new
+            {
+                baseUrl = (p.BaseUrl ?? "").Trim(),
+                apiKey = (p.ApiKey ?? "").Trim(),
+                model = (p.Model ?? "").Trim(),
+                reasoningModel = p.ReasoningModel,
+                timeoutMs = p.TimeoutMs,
+                defaultTemperature = p.DefaultTemperature,
+            };
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>("llm.config.set", payload, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("llm.config.set", ex);
+        }
+    }
+
+    public async Task<LlmChatResult> LlmChatAsync(LlmChatParams p, CancellationToken ct = default)
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            var payload = new
+            {
+                system = p.System,
+                messages = p.Messages,
+                reasoningMode = p.ReasoningMode,
+                temperature = p.Temperature,
+                maxTokens = p.MaxTokens,
+            };
+            return await _rpc.InvokeWithParameterObjectAsync<LlmChatResult>("llm.chat", payload, ct);
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("llm.chat", ex);
+        }
+    }
+
+    // ----- voice chat (stream) -----
+
+    public async Task<VoiceChatStreamStartResult> VoiceChatStreamStartAsync(
+        VoiceChatStreamStartParams p,
+        CancellationToken ct = default
+    )
+    {
+        if (p is null) throw new ArgumentNullException(nameof(p));
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            var payload = new
+            {
+                modelDir = (p.ModelDir ?? "").Trim(),
+                spkId = (p.SpkId ?? "").Trim(),
+                messages = p.Messages,
+                reasoningMode = p.ReasoningMode,
+                promptText = p.PromptText,
+                promptStrategy = p.PromptStrategy,
+                guideSep = p.GuideSep,
+                speed = p.Speed,
+                seed = p.Seed,
+                temperature = p.Temperature,
+                topP = p.TopP,
+                topK = p.TopK,
+                winSize = p.WinSize,
+                tauR = p.TauR,
+                textFrontend = p.TextFrontend,
+                chunkMs = p.ChunkMs,
+            };
+            return await _rpc.InvokeWithParameterObjectAsync<VoiceChatStreamStartResult>(
+                "voice.chat.stream.start",
+                payload,
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("voice.chat.stream.start", ex);
+        }
+    }
+
+    public async Task VoiceChatStreamCancelAsync(string sessionId, CancellationToken ct = default)
+    {
+        var sid = (sessionId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            throw new ArgumentException("empty sessionId", nameof(sessionId));
+        }
+
+        await EnsureConnectedAsync(ct);
+        if (_rpc is null)
+        {
+            throw new InvalidOperationException("rpc not connected");
+        }
+
+        try
+        {
+            _ = await _rpc.InvokeWithParameterObjectAsync<OkReply>(
+                "voice.chat.stream.cancel",
+                new { sessionId = sid },
+                ct
+            );
+        }
+        catch (RemoteInvocationException ex)
+        {
+            throw WrapRpcFailure("voice.chat.stream.cancel", ex);
+        }
+    }
+
     // ----- bilibili (video download) -----
 
     public async Task<BiliLoginQr> BiliLoginQrCreateAsync(CancellationToken ct = default)
@@ -1310,6 +1448,11 @@ public sealed class DaemonClient : IDisposable
         DanmakuMessageReceived?.Invoke(this, msg);
     }
 
+    private void OnVoiceChatChunk(VoiceChatChunkNotif msg)
+    {
+        VoiceChatChunkReceived?.Invoke(this, msg);
+    }
+
     public void Dispose()
     {
         ResetConnection();
@@ -1474,6 +1617,12 @@ public sealed class DaemonClient : IDisposable
         public void DanmakuMessage(DanmakuMessage msg)
         {
             _client.OnDanmakuMessage(msg);
+        }
+
+        [JsonRpcMethod("voice.chat.chunk")]
+        public void VoiceChatChunk(VoiceChatChunkNotif msg)
+        {
+            _client.OnVoiceChatChunk(msg);
         }
     }
 }

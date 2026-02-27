@@ -42,6 +42,12 @@ use chaos_proto::{
     BiliTaskGetParams, BiliTasksGetParams, BiliTasksGetResult, BiliTasksRemoveFinishedParams,
     // tts types
     TtsSftStartParams, TtsSftStartResult, TtsSftStatusParams, TtsSftCancelParams, TtsSftStatus,
+    // llm + voice chat
+    LlmConfigSetParams, LlmChatParams, LlmChatResult,
+    VoiceChatStreamStartParams, VoiceChatStreamStartResult, VoiceChatStreamCancelParams,
+    VoiceChatChunkNotif,
+    METHOD_LLM_CONFIG_SET, METHOD_LLM_CHAT,
+    METHOD_VOICE_CHAT_STREAM_START, METHOD_VOICE_CHAT_STREAM_CANCEL, NOTIF_VOICE_CHAT_CHUNK,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -49,6 +55,12 @@ use std::collections::HashMap;
 use std::future::Future;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::mpsc;
+
+#[derive(Debug, Clone)]
+pub enum DaemonNotif {
+    Danmaku(chaos_proto::DanmakuMessage),
+    VoiceChatChunk(VoiceChatChunkNotif),
+}
 
 pub trait ChaosService: Send + Sync + 'static {
     fn version(&self) -> String;
@@ -102,6 +114,29 @@ pub trait ChaosService: Send + Sync + 'static {
     fn tts_sft_cancel(
         &self,
         params: TtsSftCancelParams,
+    ) -> impl Future<Output = Result<OkReply, String>> + Send;
+
+    // ----- llm -----
+    fn llm_config_set(
+        &self,
+        params: LlmConfigSetParams,
+    ) -> impl Future<Output = Result<OkReply, String>> + Send;
+
+    fn llm_chat(
+        &self,
+        params: LlmChatParams,
+    ) -> impl Future<Output = Result<LlmChatResult, String>> + Send;
+
+    // ----- voice chat stream -----
+    fn voice_chat_stream_start(
+        &self,
+        params: VoiceChatStreamStartParams,
+        notif_tx: mpsc::UnboundedSender<DaemonNotif>,
+    ) -> impl Future<Output = Result<VoiceChatStreamStartResult, String>> + Send;
+
+    fn voice_chat_stream_cancel(
+        &self,
+        params: VoiceChatStreamCancelParams,
     ) -> impl Future<Output = Result<OkReply, String>> + Send;
 
     fn live_open(
@@ -320,8 +355,9 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
     let mut authed = false;
     let mut active_live_session_id: Option<String> = None;
     let mut active_danmaku_session_id: Option<String> = None;
+    let mut active_voice_chat_session_id: Option<String> = None;
 
-    let (notif_tx, mut notif_rx) = mpsc::unbounded_channel::<chaos_proto::DanmakuMessage>();
+    let (notif_tx, mut notif_rx) = mpsc::unbounded_channel::<DaemonNotif>();
     let mut forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
 
     fn abort_forwarder(
@@ -338,10 +374,14 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
             biased;
 
             Some(msg) = notif_rx.recv() => {
+                let (method, params) = match msg {
+                    DaemonNotif::Danmaku(m) => (NOTIF_DANMAKU_MESSAGE, serde_json::to_value(m).unwrap_or(Value::Null)),
+                    DaemonNotif::VoiceChatChunk(m) => (NOTIF_VOICE_CHAT_CHUNK, serde_json::to_value(m).unwrap_or(Value::Null)),
+                };
                 let payload = json!({
                     "jsonrpc": "2.0",
-                    "method": NOTIF_DANMAKU_MESSAGE,
-                    "params": msg,
+                    "method": method,
+                    "params": params,
                 });
                 let bytes = serde_json::to_vec(&payload).unwrap_or_else(|_| b"{}".to_vec());
                 let _ = write_lsp_frame(&mut w, &bytes).await;
@@ -513,6 +553,108 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                         };
                         match svc.tts_sft_cancel(params).await {
                             Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_LLM_CONFIG_SET => {
+                        let params: LlmConfigSetParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.llm_config_set(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_LLM_CHAT => {
+                        let params: LlmChatParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.llm_chat(params).await {
+                            Ok(res) => {
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_VOICE_CHAT_STREAM_START => {
+                        if let Some(prev) = active_voice_chat_session_id.take() {
+                            let _ = svc
+                                .voice_chat_stream_cancel(VoiceChatStreamCancelParams { session_id: prev.clone() })
+                                .await;
+                        }
+                        let params: VoiceChatStreamStartParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        match svc.voice_chat_stream_start(params, notif_tx.clone()).await {
+                            Ok(res) => {
+                                active_voice_chat_session_id = Some(res.session_id.clone());
+                                let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                            Err(msg) => {
+                                let resp = JsonRpcResponse::err(id, JsonRpcError::new(RpcErrorCode::InternalError, msg));
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                            }
+                        }
+                    }
+                    METHOD_VOICE_CHAT_STREAM_CANCEL => {
+                        let params: VoiceChatStreamCancelParams = match decode_params(req.params) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let resp = JsonRpcResponse::err(id, e);
+                                let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
+                                let _ = write_lsp_frame(&mut w, &bytes).await;
+                                continue;
+                            }
+                        };
+                        let sid = params.session_id.clone();
+                        match svc.voice_chat_stream_cancel(params).await {
+                            Ok(res) => {
+                                if active_voice_chat_session_id.as_deref() == Some(&sid) {
+                                    active_voice_chat_session_id = None;
+                                }
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());
                                 let _ = write_lsp_frame(&mut w, &bytes).await;
@@ -1356,7 +1498,7 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                                 let h = tokio::spawn(async move {
                                     let mut rx = rx;
                                     while let Some(msg) = rx.recv().await {
-                                        let _ = tx.send(msg);
+                                        let _ = tx.send(DaemonNotif::Danmaku(msg));
                                     }
                                 });
                                 forwarders.insert(session_id, h);
@@ -1425,7 +1567,7 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                                 let h = tokio::spawn(async move {
                                     let mut rx = rx;
                                     while let Some(msg) = rx.recv().await {
-                                        let _ = tx.send(msg);
+                                        let _ = tx.send(DaemonNotif::Danmaku(msg));
                                     }
                                 });
                                 forwarders.insert(session_id, h);

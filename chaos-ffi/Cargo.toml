@@ -13,7 +13,6 @@ crate-type = ["cdylib", "rlib"]
 base64 = "0.22"
 chaos-core = { path = "../chaos-core" }
 chaos-proto = { path = "../chaos-proto" }
-chaos-tts = { path = "../chaos-tts" }
 fastrand = "2"
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
@@ -21,6 +20,8 @@ rustls = "0.23"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+tokio-util = "0.7"
+futures-util = "0.3"
 
 [dev-dependencies]
 serde_json = "1"

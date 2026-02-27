@@ -1,6 +1,6 @@
 # CosyVoice3 SFT TTS (Pure Rust Runtime)
 
-ChaosSeed runtime uses the `chaos-tts` crate (tract-onnx + tokenizers + hound) to synthesize **WAV(base64)** from a **CosyVoice ONNX Pack (V1)**.
+ChaosSeed runtime uses `chaos-core::tts` (tract-onnx + tokenizers + hound) to synthesize **WAV(base64)** from a **CosyVoice ONNX Pack (V1)**.
 
 ## 1) Offline Export (Python, VoiceLab workflow)
 
@@ -60,6 +60,5 @@ See `chaos-ffi/docs/API.md` (api=9).
 cd /home/nul1fi3nd/AntiGravityProjects/Chaos-Seed
 
 CHAOS_COSYVOICE_PACK_DIR=/abs/path/to/export_packs/dream_sft_pack_v1 \
-  cargo test -p chaos-tts --features live-tests
+  cargo test -p chaos-core --features live-tests
 ```
-

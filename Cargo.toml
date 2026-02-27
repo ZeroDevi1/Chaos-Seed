@@ -8,7 +8,7 @@ members = [
     "chaos-proto",
     "chaos-app",
     "chaos-daemon",
-    "xtask", "chaos-tts",
+    "xtask",
 ]
 
 # Keep `cargo build` friction low on dev machines that don't have Tauri system deps.

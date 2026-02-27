@@ -34,6 +34,31 @@ hex = "0.4"
 qrcode = "0.14"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# ----- voice chat / tts -----
+futures = "0.3"
+tokio-stream = "0.1"
+tracing = "0.1"
+dirs = "6"
+
+hound = "3"
+rand = "0.8"
+rand_chacha = "0.3"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+rubato = "0.16"
+
+# ONNX runtime (pure Rust).
+# Note: CosyVoice packs can be complex; we keep tract as a fallback backend.
+candle-core = { version = "0.8", optional = true }
+candle-onnx = { version = "0.8", optional = true }
+tract-onnx = { version = "0.23.0-dev.2", optional = true }
+tract-core = { version = "0.23.0-dev.2", optional = true }
+
+[features]
+default = ["onnx-tract"]
+onnx-candle = ["dep:candle-core", "dep:candle-onnx"]
+onnx-tract = ["dep:tract-onnx", "dep:tract-core"]
+live-tests = []
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Foundation", "Media_Control", "Storage_Streams"] }
 

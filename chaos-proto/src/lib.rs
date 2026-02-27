@@ -37,6 +37,15 @@ pub const METHOD_TTS_SFT_START: &str = "tts.sft.start";
 pub const METHOD_TTS_SFT_STATUS: &str = "tts.sft.status";
 pub const METHOD_TTS_SFT_CANCEL: &str = "tts.sft.cancel";
 
+// LLM (OpenAI-compatible)
+pub const METHOD_LLM_CONFIG_SET: &str = "llm.config.set";
+pub const METHOD_LLM_CHAT: &str = "llm.chat";
+
+// Voice chat (LLM -> TTS -> PCM stream)
+pub const METHOD_VOICE_CHAT_STREAM_START: &str = "voice.chat.stream.start";
+pub const METHOD_VOICE_CHAT_STREAM_CANCEL: &str = "voice.chat.stream.cancel";
+pub const NOTIF_VOICE_CHAT_CHUNK: &str = "voice.chat.chunk";
+
 // Bilibili video download (BV/AV) - MVP
 pub const METHOD_BILI_LOGIN_QR_CREATE: &str = "bili.loginQrCreate";
 pub const METHOD_BILI_LOGIN_QR_POLL: &str = "bili.loginQrPoll";
@@ -66,6 +75,120 @@ pub const NOTIF_DANMAKU_MESSAGE: &str = "danmaku.message";
 // -----------------------------
 // TTS DTOs
 // -----------------------------
+
+// -----------------------------
+// LLM + Voice chat DTOs
+// -----------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningMode {
+    Normal,
+    Reasoning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmConfigSetParams {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_temperature: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmChatParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    pub messages: Vec<ChatMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_mode: Option<ReasoningMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmChatResult {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceChatStreamStartParams {
+    pub model_dir: String,
+    pub spk_id: String,
+    pub messages: Vec<ChatMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_mode: Option<ReasoningMode>,
+
+    // TTS options (subset of tts.sft.start)
+    #[serde(default)]
+    pub prompt_text: String,
+    #[serde(default)]
+    pub prompt_strategy: Option<TtsPromptStrategy>,
+    #[serde(default)]
+    pub guide_sep: Option<String>,
+    #[serde(default)]
+    pub speed: Option<f64>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub top_k: Option<u32>,
+    #[serde(default)]
+    pub win_size: Option<u32>,
+    #[serde(default)]
+    pub tau_r: Option<f64>,
+    #[serde(default)]
+    pub text_frontend: Option<bool>,
+
+    // Streaming options
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceChatStreamStartResult {
+    pub session_id: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub format: String, // "pcm16le"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceChatStreamCancelParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceChatChunkNotif {
+    pub session_id: String,
+    pub seq: u64,
+    pub pcm_base64: String,
+    pub is_last: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -293,6 +293,102 @@ char* chaos_subtitle_search_json(
 { "ok": true }
 ```
 
+## LLM（OpenAI-compatible）
+
+### `char* chaos_llm_config_set_json(const char* params_json_utf8)`
+
+输入：`LlmConfigSetParams` JSON（camelCase），示例：
+
+```json
+{
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "sk-...",
+  "model": "THUDM/GLM-4-9B-0414",
+  "timeoutMs": 30000,
+  "defaultTemperature": 0.7
+}
+```
+
+返回：`OkReply` JSON：
+
+```json
+{ "ok": true }
+```
+
+### `char* chaos_llm_chat_json(const char* params_json_utf8)`
+
+输入：`LlmChatParams` JSON（camelCase），示例：
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "Hello" }
+  ],
+  "reasoningMode": "normal"
+}
+```
+
+返回：`LlmChatResult` JSON：
+
+```json
+{ "text": "..." }
+```
+
+## 语音对话（Voice Chat Stream, poll-based）
+
+说明：该接口是 **伪流式**：后台一次性完成 LLM + TTS，然后将 PCM16LE 分片写入队列；调用方通过 `poll` 拉取 chunk。
+
+### `char* chaos_voice_chat_stream_start_json(const char* params_json_utf8)`
+
+输入：`VoiceChatStreamStartParams` JSON（camelCase），示例：
+
+```json
+{
+  "modelDir": "D:/models/Fun-CosyVoice3-0.5B-dream-sft-pack",
+  "spkId": "dream",
+  "messages": [
+    { "role": "user", "content": "你好" }
+  ],
+  "chunkMs": 100
+}
+```
+
+返回：`VoiceChatStreamStartResult` JSON：
+
+```json
+{ "sessionId": "voice_chat_...", "sampleRate": 24000, "channels": 1, "format": "pcm16le" }
+```
+
+### `char* chaos_voice_chat_stream_poll_json(const char* session_id_utf8)`
+
+返回：poll 结果 JSON（FFI 专用包裹），当无 chunk 时：
+
+```json
+{ "hasChunk": false }
+```
+
+当有 chunk 时：
+
+```json
+{
+  "hasChunk": true,
+  "chunk": {
+    "sessionId": "voice_chat_...",
+    "seq": 0,
+    "pcmBase64": "...",
+    "isLast": false
+  }
+}
+```
+
+### `char* chaos_voice_chat_stream_cancel_json(const char* session_id_utf8)`
+
+返回：`OkReply` JSON：
+
+```json
+{ "ok": true }
+```
+
 ```json
 {"name":"...","ext":"srt","url":"...","score":9.8,"languages":["zh","en"]}
 ```

@@ -34,6 +34,10 @@ mod win {
         // tts
         TtsAudioResult, TtsJobState, TtsPromptStrategy, TtsSftCancelParams, TtsSftStartParams,
         TtsSftStartResult, TtsSftStatus, TtsSftStatusParams,
+        // llm + voice chat
+        ChatMessage, LlmChatParams, LlmChatResult, LlmConfigSetParams, ReasoningMode,
+        VoiceChatChunkNotif, VoiceChatStreamCancelParams, VoiceChatStreamStartParams,
+        VoiceChatStreamStartResult,
     };
     use std::env;
     use std::str::FromStr;
@@ -464,7 +468,7 @@ mod win {
 
     #[derive(Debug)]
     struct TtsManager {
-        engines: Mutex<HashMap<String, Arc<chaos_tts::CosyVoiceEngine>>>,
+        engines: Mutex<HashMap<String, Arc<chaos_core::tts::CosyVoiceEngine>>>,
         sessions: Mutex<HashMap<String, TtsSession>>,
         sem: Arc<Semaphore>,
     }
@@ -478,7 +482,7 @@ mod win {
             }
         }
 
-        async fn get_engine(&self, model_dir: &str) -> Result<Arc<chaos_tts::CosyVoiceEngine>, String> {
+        async fn get_engine(&self, model_dir: &str) -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
             let key = model_dir.trim().to_string();
             if key.is_empty() {
                 return Err("modelDir is empty".into());
@@ -492,9 +496,9 @@ mod win {
 
             // Loading/optimizing tract plans can be expensive; do it off the async scheduler.
             let key2 = key.clone();
-            let engine = tokio::task::spawn_blocking(move || -> Result<Arc<chaos_tts::CosyVoiceEngine>, String> {
-                let pack = chaos_tts::CosyVoicePack::load(&key2).map_err(|e| e.to_string())?;
-                let engine = chaos_tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
+            let engine = tokio::task::spawn_blocking(move || -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
+                let pack = chaos_core::tts::CosyVoicePack::load(&key2).map_err(|e| e.to_string())?;
+                let engine = chaos_core::tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
                 Ok(Arc::new(engine))
             })
             .await
@@ -572,11 +576,11 @@ mod win {
                 }
 
                 let prompt_strategy2 = match prompt_strategy {
-                    TtsPromptStrategy::Inject => chaos_tts::PromptStrategy::Inject,
-                    TtsPromptStrategy::GuidePrefix => chaos_tts::PromptStrategy::GuidePrefix,
+                    TtsPromptStrategy::Inject => chaos_core::tts::PromptStrategy::Inject,
+                    TtsPromptStrategy::GuidePrefix => chaos_core::tts::PromptStrategy::GuidePrefix,
                 };
 
-                let params2 = chaos_tts::TtsSftParams {
+                let params2 = chaos_core::tts::TtsSftParams {
                     model_dir: model_dir.clone(),
                     spk_id: spk_id.clone(),
                     text,
@@ -585,7 +589,7 @@ mod win {
                     guide_sep,
                     speed: speed as f32,
                     seed,
-                    sampling: chaos_tts::SamplingConfig {
+                    sampling: chaos_core::tts::SamplingConfig {
                         temperature: temperature as f32,
                         top_p: top_p as f32,
                         top_k: top_k as usize,
@@ -595,20 +599,19 @@ mod win {
                     text_frontend,
                 };
 
-                let res = tokio::task::spawn_blocking(move || {
-                    engine.synthesize_sft_with_cancel(&params2, Some(cancel2.as_ref()))
-                })
+                let res = tokio::task::spawn_blocking(move || engine.synthesize_wav_bytes_with_cancel(&params2, Some(cancel2.as_ref())))
                 .await;
 
                 match res {
                     Ok(Ok(r)) => {
+                        let wav_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &r.wav_bytes);
                         let mut st = status2.lock().await;
                         st.done = true;
                         st.state = TtsJobState::Done;
                         st.stage = Some("done".to_string());
                         st.result = Some(TtsAudioResult {
-                            mime: r.mime,
-                            wav_base64: r.wav_base64,
+                            mime: "audio/wav".to_string(),
+                            wav_base64: wav_b64,
                             sample_rate: r.sample_rate,
                             channels: r.channels,
                             duration_ms: r.duration_ms,
@@ -681,11 +684,304 @@ mod win {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct LlmManager {
+        cfg: Mutex<Option<chaos_core::llm::LlmConfig>>,
+    }
+
+    impl LlmManager {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        async fn set_config(&self, params: LlmConfigSetParams) -> Result<OkReply, String> {
+            let base_url = params.base_url.trim().to_string();
+            let api_key = params.api_key.trim().to_string();
+            let model = params.model.trim().to_string();
+            if base_url.is_empty() {
+                return Err("baseUrl is empty".into());
+            }
+            if api_key.is_empty() {
+                return Err("apiKey is empty".into());
+            }
+            if model.is_empty() {
+                return Err("model is empty".into());
+            }
+
+            let timeout_ms = params.timeout_ms.unwrap_or(30_000).max(1);
+            let default_temperature = params.default_temperature.unwrap_or(0.7).clamp(0.0, 5.0) as f32;
+
+            let cfg = chaos_core::llm::LlmConfig {
+                base_url,
+                api_key,
+                model,
+                reasoning_model: params.reasoning_model.filter(|s| !s.trim().is_empty()),
+                timeout_ms,
+                default_temperature,
+            };
+
+            *self.cfg.lock().await = Some(cfg);
+            Ok(OkReply { ok: true })
+        }
+
+        async fn get_client(&self) -> Result<chaos_core::llm::LlmClient, String> {
+            let locked = self.cfg.lock().await;
+            let Some(cfg) = locked.clone() else {
+                return Err("LLM is not configured (call llm.config.set first)".into());
+            };
+            chaos_core::llm::LlmClient::new(cfg).map_err(|e| e.to_string())
+        }
+
+        async fn chat(&self, params: LlmChatParams) -> Result<LlmChatResult, String> {
+            let client = self.get_client().await?;
+            let reasoning_mode = match params.reasoning_mode.unwrap_or(ReasoningMode::Normal) {
+                ReasoningMode::Normal => chaos_core::llm::ReasoningMode::Normal,
+                ReasoningMode::Reasoning => chaos_core::llm::ReasoningMode::Reasoning,
+            };
+            let messages = params
+                .messages
+                .into_iter()
+                .map(|m| chaos_core::llm::ChatMessage {
+                    role: m.role,
+                    content: m.content,
+                })
+                .collect();
+            let req = chaos_core::llm::ChatRequest {
+                system: params.system,
+                messages,
+                reasoning_mode,
+                temperature: params.temperature.map(|v| v as f32),
+                max_tokens: params.max_tokens,
+            };
+            let res = client.chat(req).await.map_err(|e| e.to_string())?;
+            Ok(LlmChatResult { text: res.text })
+        }
+    }
+
+    #[derive(Debug)]
+    struct VoiceChatSession {
+        cancel: tokio_util::sync::CancellationToken,
+        handle: tokio::task::JoinHandle<()>,
+    }
+
+    #[derive(Debug, Default)]
+    struct VoiceChatManager {
+        sessions: Mutex<HashMap<String, VoiceChatSession>>,
+    }
+
+    impl VoiceChatManager {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        async fn start(
+            self: Arc<Self>,
+            params: VoiceChatStreamStartParams,
+            llm: Arc<LlmManager>,
+            tts: Arc<TtsManager>,
+            notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
+        ) -> Result<VoiceChatStreamStartResult, String> {
+            let model_dir = params.model_dir.trim().to_string();
+            let spk_id = params.spk_id.trim().to_string();
+            if model_dir.is_empty() {
+                return Err("modelDir is empty".into());
+            }
+            if spk_id.is_empty() {
+                return Err("spkId is empty".into());
+            }
+            if params.messages.is_empty() {
+                return Err("messages is empty".into());
+            }
+
+            let engine = tts.get_engine(&model_dir).await?;
+            let sample_rate = engine.pack().cfg.sample_rate;
+
+            let session_id = gen_session_id("voice_chat");
+            let cancel = tokio_util::sync::CancellationToken::new();
+
+            let mgr2 = self.clone();
+            let sid2 = session_id.clone();
+
+            let chunk_ms = params.chunk_ms.unwrap_or(100).clamp(10, 2000);
+            let reasoning_mode = params.reasoning_mode.unwrap_or(ReasoningMode::Normal);
+
+            let handle = tokio::spawn(async move {
+                let _ = run_voice_chat_session(
+                    sid2.clone(),
+                    model_dir,
+                    spk_id,
+                    params,
+                    reasoning_mode,
+                    chunk_ms,
+                    llm,
+                    engine,
+                    notif_tx,
+                    cancel.clone(),
+                )
+                .await;
+
+                // Best-effort cleanup.
+                let mut locked = mgr2.sessions.lock().await;
+                locked.remove(&sid2);
+            });
+
+            {
+                let mut locked = self.sessions.lock().await;
+                locked.insert(
+                    session_id.clone(),
+                    VoiceChatSession { cancel, handle },
+                );
+            }
+
+            Ok(VoiceChatStreamStartResult {
+                session_id,
+                sample_rate,
+                channels: 1,
+                format: "pcm16le".to_string(),
+            })
+        }
+
+        async fn cancel(&self, params: VoiceChatStreamCancelParams) -> Result<OkReply, String> {
+            let sid = params.session_id.trim().to_string();
+            if sid.is_empty() {
+                return Err("sessionId is empty".into());
+            }
+            let mut locked = self.sessions.lock().await;
+            let Some(sess) = locked.remove(&sid) else {
+                return Err("session not found".into());
+            };
+            sess.cancel.cancel();
+            sess.handle.abort();
+            Ok(OkReply { ok: true })
+        }
+    }
+
+    async fn run_voice_chat_session(
+        session_id: String,
+        model_dir: String,
+        spk_id: String,
+        params: VoiceChatStreamStartParams,
+        reasoning_mode: ReasoningMode,
+        chunk_ms: u32,
+        llm: Arc<LlmManager>,
+        engine: Arc<chaos_core::tts::CosyVoiceEngine>,
+        notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<(), String> {
+        use futures_util::StreamExt;
+
+        let llm_client = llm.get_client().await?;
+        let core_reasoning = match reasoning_mode {
+            ReasoningMode::Normal => chaos_core::llm::ReasoningMode::Normal,
+            ReasoningMode::Reasoning => chaos_core::llm::ReasoningMode::Reasoning,
+        };
+
+        let messages = params
+            .messages
+            .into_iter()
+            .map(|m| chaos_core::llm::ChatMessage {
+                role: m.role,
+                content: m.content,
+            })
+            .collect::<Vec<_>>();
+
+        let prompt_strategy = params.prompt_strategy.unwrap_or(TtsPromptStrategy::Inject);
+        let prompt_strategy2 = match prompt_strategy {
+            TtsPromptStrategy::Inject => chaos_core::tts::PromptStrategy::Inject,
+            TtsPromptStrategy::GuidePrefix => chaos_core::tts::PromptStrategy::GuidePrefix,
+        };
+        let guide_sep = params.guide_sep.unwrap_or_else(|| " ".to_string());
+        let speed = params.speed.unwrap_or(1.0).max(0.01) as f32;
+        let seed = params.seed.unwrap_or(1986);
+
+        let temperature = params.temperature.unwrap_or(1.0).max(1e-6) as f32;
+        let top_p = params.top_p.unwrap_or(0.6).clamp(1e-6, 1.0) as f32;
+        let top_k = params.top_k.unwrap_or(10).max(1) as usize;
+        let win_size = params.win_size.unwrap_or(10).max(1) as usize;
+        let tau_r = params.tau_r.unwrap_or(1.0).max(0.0) as f32;
+        let text_frontend = params.text_frontend.unwrap_or(true);
+
+        let tts_params = chaos_core::tts::TtsSftParams {
+            model_dir: model_dir.clone(),
+            spk_id: spk_id.clone(),
+            text: String::new(),
+            prompt_text: params.prompt_text.clone(),
+            prompt_strategy: prompt_strategy2,
+            guide_sep,
+            speed,
+            seed,
+            sampling: chaos_core::tts::SamplingConfig {
+                temperature,
+                top_p,
+                top_k,
+                win_size,
+                tau_r,
+            },
+            text_frontend,
+        };
+
+        let vc_req = chaos_core::voice_chat::VoiceChatRequest {
+            messages,
+            reasoning_mode: core_reasoning,
+            spk_id: spk_id.clone(),
+            model_dir: model_dir.clone(),
+            tts: tts_params,
+            cfg: chaos_core::voice_chat::VoiceChatConfig {
+                chunk_ms,
+                ..Default::default()
+            },
+        };
+
+        let mut stream = chaos_core::voice_chat::realtime_chat_stream(
+            vc_req,
+            llm_client,
+            engine,
+            cancel.clone(),
+        );
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(chunk) => {
+                    let mut bytes = Vec::with_capacity(chunk.pcm16.len() * 2);
+                    for s in chunk.pcm16 {
+                        bytes.extend_from_slice(&s.to_le_bytes());
+                    }
+                    let pcm_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+                    let notif = VoiceChatChunkNotif {
+                        session_id: session_id.clone(),
+                        seq: chunk.seq,
+                        pcm_base64: pcm_b64,
+                        is_last: chunk.is_last,
+                    };
+                    let _ = notif_tx.send(chaos_daemon::DaemonNotif::VoiceChatChunk(notif));
+                    if chunk.is_last {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[voice_chat] session={session_id} error={e}");
+                    let notif = VoiceChatChunkNotif {
+                        session_id: session_id.clone(),
+                        seq: 0,
+                        pcm_base64: String::new(),
+                        is_last: true,
+                    };
+                    let _ = notif_tx.send(chaos_daemon::DaemonNotif::VoiceChatChunk(notif));
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     struct Svc {
         app: std::sync::Arc<ChaosApp>,
         music: Arc<MusicManager>,
         bili: Arc<BiliManager>,
         tts: Arc<TtsManager>,
+        llm: Arc<LlmManager>,
+        voice_chat: Arc<VoiceChatManager>,
     }
 
     impl chaos_daemon::ChaosService for Svc {
@@ -888,6 +1184,32 @@ mod win {
 
         async fn tts_sft_cancel(&self, params: TtsSftCancelParams) -> Result<OkReply, String> {
             self.tts.cancel(params).await
+        }
+
+        async fn llm_config_set(&self, params: LlmConfigSetParams) -> Result<OkReply, String> {
+            self.llm.set_config(params).await
+        }
+
+        async fn llm_chat(&self, params: LlmChatParams) -> Result<LlmChatResult, String> {
+            self.llm.chat(params).await
+        }
+
+        async fn voice_chat_stream_start(
+            &self,
+            params: VoiceChatStreamStartParams,
+            notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
+        ) -> Result<VoiceChatStreamStartResult, String> {
+            self.voice_chat
+                .clone()
+                .start(params, self.llm.clone(), self.tts.clone(), notif_tx)
+                .await
+        }
+
+        async fn voice_chat_stream_cancel(
+            &self,
+            params: VoiceChatStreamCancelParams,
+        ) -> Result<OkReply, String> {
+            self.voice_chat.cancel(params).await
         }
 
         async fn live_open(
@@ -3707,7 +4029,16 @@ mod win {
             let music = Arc::new(MusicManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let bili = Arc::new(BiliManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let tts = Arc::new(TtsManager::new());
-            let svc = Svc { app, music, bili, tts };
+            let llm = Arc::new(LlmManager::new());
+            let voice_chat = Arc::new(VoiceChatManager::new());
+            let svc = Svc {
+                app,
+                music,
+                bili,
+                tts,
+                llm,
+                voice_chat,
+            };
 
             run_jsonrpc_over_lsp(&svc, rw, auth_token)
                 .await
@@ -3731,7 +4062,16 @@ mod win {
             let music = Arc::new(MusicManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let bili = Arc::new(BiliManager::new().map_err(|e| anyhow::anyhow!("{e}"))?);
             let tts = Arc::new(TtsManager::new());
-            let svc = Svc { app, music, bili, tts };
+            let llm = Arc::new(LlmManager::new());
+            let voice_chat = Arc::new(VoiceChatManager::new());
+            let svc = Svc {
+                app,
+                music,
+                bili,
+                tts,
+                llm,
+                voice_chat,
+            };
 
             run_jsonrpc_over_lsp(&svc, server, auth_token)
                 .await
