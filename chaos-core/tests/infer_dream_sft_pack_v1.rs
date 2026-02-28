@@ -75,6 +75,51 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
                 }
             };
 
+            if !model_dir.exists() {
+                eprintln!(
+                    "skip: CHAOS_COSYVOICE3_CANDLE_MODEL_DIR does not exist: {}",
+                    model_dir.display()
+                );
+                return;
+            }
+            if !prompt_wav.exists() {
+                eprintln!(
+                    "skip: CHAOS_TTS_PROMPT_WAV does not exist: {}",
+                    prompt_wav.display()
+                );
+                return;
+            }
+
+            // Candle 模型目录最小校验：避免直接 panic，先给出缺什么文件。
+            let required = [
+                "config.json",
+                "llm.safetensors",
+                "flow.safetensors",
+                "hift.safetensors",
+                "campplus.onnx",
+                "speech_tokenizer_v3.onnx",
+            ];
+            let mut missing: Vec<String> = Vec::new();
+            for f in required {
+                if !model_dir.join(f).exists() {
+                    missing.push(f.to_string());
+                }
+            }
+            let tok_json = model_dir.join("tokenizer").join("tokenizer.json");
+            let tok_vocab = model_dir.join("tokenizer").join("vocab.json");
+            let tok_merges = model_dir.join("tokenizer").join("merges.txt");
+            if !(tok_json.exists() || (tok_vocab.exists() && tok_merges.exists())) {
+                missing.push("tokenizer/tokenizer.json (or vocab.json+merges.txt)".to_string());
+            }
+            if !missing.is_empty() {
+                eprintln!(
+                    "skip: candle model dir is incomplete (missing: {}). model_dir={}",
+                    missing.join(", "),
+                    model_dir.display()
+                );
+                return;
+            }
+
             let out_dir = match std::env::var("CHAOS_TTS_OUT_DIR") {
                 Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
                 _ => default_out_dir().expect("repo root"),
