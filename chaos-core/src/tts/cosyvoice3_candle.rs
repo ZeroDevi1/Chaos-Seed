@@ -526,36 +526,66 @@ impl CosyVoice3CandleEngine {
             .map_err(|e| TtsError::Candle(format!("mel to device failed: {e}")))?
             .to_dtype(DType::F32)
             .map_err(|e| TtsError::Candle(format!("mel to f32 failed: {e}")))?;
-        let mel_shape = mel_f32.dims();
-        // 期望 [1, T, 80] 或 [T,80]
-        let (_t_dim, mel_dim) = if mel_shape.len() == 3 {
-            (mel_shape[1], mel_shape[2])
-        } else {
-            (mel_shape[0], mel_shape[1])
-        };
-        if mel_dim != 80 {
-            return Err(TtsError::InvalidArg(format!("mel dim must be 80, got {mel_dim}")));
-        }
-        let mel_flat: Vec<f32> = mel_f32
-            .flatten_all()
-            .map_err(|e| TtsError::Candle(format!("flatten mel failed: {e}")))?
-            .to_vec1()
-            .map_err(|e| TtsError::Candle(format!("mel to vec failed: {e}")))?;
-        let mel_scaled_flat = if (params.speed - 1.0).abs() > f32::EPSILON {
-            time_scale_mel_linear(&mel_flat, 80, params.speed)?
-        } else {
-            mel_flat
-        };
-        let new_t = mel_scaled_flat.len() / 80;
-        let mel_scaled = Tensor::from_vec(mel_scaled_flat, (1, new_t, 80), &self.device)
-            .map_err(|e| TtsError::Candle(format!("create scaled mel tensor failed: {e}")))?
-            .to_dtype(self.dtype)
-            .map_err(|e| TtsError::Candle(format!("scaled mel cast failed: {e}")))?;
 
-        // Vocoder
+        // Flow 输出的 mel 按 Candle 实现约定是 [B, 80, T]（与 CausalHiFTGenerator::inference 的输入对齐）。
+        // 但为了稳健起见，这里也兼容 [B, T, 80] / 2D 情况，并统一到 [1, 80, T]。
+        let mel_shape0 = mel_f32.dims();
+        let mel_b80t = if mel_shape0.len() == 3 && mel_shape0[1] == 80 {
+            mel_f32
+        } else if mel_shape0.len() == 3 && mel_shape0[2] == 80 {
+            mel_f32
+                .transpose(1, 2)
+                .map_err(|e| TtsError::Candle(format!("transpose mel [B,T,80] -> [B,80,T] failed: {e}")))?
+        } else if mel_shape0.len() == 2 && mel_shape0[0] == 80 {
+            mel_f32
+                .reshape((1, mel_shape0[0], mel_shape0[1]))
+                .map_err(|e| TtsError::Candle(format!("reshape mel [80,T] -> [1,80,T] failed: {e}")))?
+        } else if mel_shape0.len() == 2 && mel_shape0[1] == 80 {
+            mel_f32
+                .transpose(0, 1)
+                .map_err(|e| TtsError::Candle(format!("transpose mel [T,80] -> [80,T] failed: {e}")))?
+                .reshape((1, mel_shape0[1], mel_shape0[0]))
+                .map_err(|e| TtsError::Candle(format!("reshape mel [80,T] -> [1,80,T] failed: {e}")))?
+        } else {
+            return Err(TtsError::InvalidArg(format!(
+                "unexpected mel shape from flow: rank={} shape={:?}",
+                mel_shape0.len(),
+                mel_shape0
+            )));
+        };
+
+        // 可选：根据 speed 做时间轴缩放。缩放在 [T,80]（或 [1,T,80]）布局下更好处理，
+        // 但 vocoder 需要 [B,80,T]，因此缩放后再转回去。
+        let mel_for_vocoder = if (params.speed - 1.0).abs() > f32::EPSILON {
+            // [1,80,T] -> [1,T,80]
+            let mel_bt80 = mel_b80t
+                .transpose(1, 2)
+                .map_err(|e| TtsError::Candle(format!("transpose mel [1,80,T] -> [1,T,80] failed: {e}")))?;
+            let mel_flat: Vec<f32> = mel_bt80
+                .flatten_all()
+                .map_err(|e| TtsError::Candle(format!("flatten mel failed: {e}")))?
+                .to_vec1()
+                .map_err(|e| TtsError::Candle(format!("mel to vec failed: {e}")))?;
+            let mel_scaled_flat = time_scale_mel_linear(&mel_flat, 80, params.speed)?;
+            let new_t = mel_scaled_flat.len() / 80;
+            let mel_scaled_bt80 = Tensor::from_vec(mel_scaled_flat, (1, new_t, 80), &self.device)
+                .map_err(|e| TtsError::Candle(format!("create scaled mel tensor failed: {e}")))?
+                .to_dtype(self.dtype)
+                .map_err(|e| TtsError::Candle(format!("scaled mel cast failed: {e}")))?;
+            // [1,T,80] -> [1,80,T]
+            mel_scaled_bt80
+                .transpose(1, 2)
+                .map_err(|e| TtsError::Candle(format!("transpose scaled mel [1,T,80] -> [1,80,T] failed: {e}")))?
+        } else {
+            mel_b80t
+                .to_dtype(self.dtype)
+                .map_err(|e| TtsError::Candle(format!("mel cast failed: {e}")))?
+        };
+
+        // Vocoder（输入要求 [B,80,T]）
         let waveform = inner
             .vocoder
-            .inference(&mel_scaled, true)
+            .inference(&mel_for_vocoder, true)
             .map_err(|e| TtsError::Candle(format!("vocoder inference failed: {e}")))?;
         let pcm = if waveform.dims().len() == 3 {
             waveform

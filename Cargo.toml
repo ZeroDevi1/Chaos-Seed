@@ -13,6 +13,8 @@ members = [
 exclude = [
     # 第三方子项目（其自身也有 Cargo.toml/pyproject.toml），避免被本仓库 workspace 误识别。
     "third_party/cosyvoice3.rs",
+    # 本地补丁版 candle（用于修复 Windows CUDA 编译问题），不作为本仓库 workspace member。
+    "third_party/candle-patched",
 ]
 
 # Keep `cargo build` friction low on dev machines that don't have Tauri system deps.
@@ -23,3 +25,13 @@ version = "0.4.6"
 edition = "2024"
 rust-version = "1.93.0"
 license = "MIT"
+
+[patch."https://github.com/SpenserCai/candle"]
+# 说明：candle 仓库当前 rev 在 Windows + CUDA 下存在依赖版本与宏污染问题，
+# 这里用本地 patch 版替换 git 源，保证可复现并避免 ~/.cargo/git/checkouts 的临时改动被覆盖。
+candle-core = { path = "third_party/candle-patched/candle-core" }
+candle-nn = { path = "third_party/candle-patched/candle-nn" }
+candle-onnx = { path = "third_party/candle-patched/candle-onnx" }
+candle-transformers = { path = "third_party/candle-patched/candle-transformers" }
+candle-kernels = { path = "third_party/candle-patched/candle-kernels" }
+candle-ug = { path = "third_party/candle-patched/candle-ug" }

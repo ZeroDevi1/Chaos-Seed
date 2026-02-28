@@ -37,6 +37,10 @@ sync_to_win.sh
 /third_party/_tools/
 /third_party/_tools/**
 
+# Local patched candle workspace (large, do not commit)
+/third_party/candle-patched/
+/third_party/candle-patched/**
+
 # Local MSIX signing certs (never commit private keys)
 *.msix.pfx
 *.msix.cer

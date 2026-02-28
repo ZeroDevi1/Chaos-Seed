@@ -79,6 +79,10 @@ tract-onnx = { version = "0.23.0-dev.2", optional = true }
 url = "2"
 urlencoding = "2"
 
+# 可选加速依赖（主要用于 Candle / CPU 加速；CUDA 属于系统依赖，不在这里下载）
+accelerate-src = { version = "0.3.2", optional = true }
+intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"], optional = true }
+
 # CosyVoice3 路线2：纯 Rust + Candle 推理（参考 cosyvoice3.rs）
 # 说明：为了不影响现有 `onnx-candle`（candle 0.8）依赖，这里使用 crate alias 引入另一套 candle 版本（git rev）。
 cv3-candle-core = { package = "candle-core", git = "https://github.com/SpenserCai/candle", rev = "6058747", optional = true }
@@ -125,4 +129,30 @@ cosyvoice3-candle-cuda = [
   "cv3-candle-core/cuda",
   "cv3-candle-nn/cuda",
   "cv3-candle-transformers/cuda",
+]
+
+# Route2：启用 Candle cudnn/nccl（在 cuda 基础上进一步开启；是否可用取决于本机环境）
+cosyvoice3-candle-cudnn = ["cosyvoice3-candle-cuda", "cv3-candle-core/cudnn"]
+cosyvoice3-candle-nccl = ["cosyvoice3-candle-cuda", "cv3-candle-core/nccl"]
+
+# Route2：其它加速后端（主要用于 macOS / CPU 加速）
+cosyvoice3-candle-metal = [
+  "cosyvoice3-candle",
+  "cv3-candle-core/metal",
+  "cv3-candle-nn/metal",
+  "cv3-candle-transformers/metal",
+]
+cosyvoice3-candle-accelerate = [
+  "cosyvoice3-candle",
+  "dep:accelerate-src",
+  "cv3-candle-core/accelerate",
+  "cv3-candle-nn/accelerate",
+  "cv3-candle-transformers/accelerate",
+]
+cosyvoice3-candle-mkl = [
+  "cosyvoice3-candle",
+  "dep:intel-mkl-src",
+  "cv3-candle-core/mkl",
+  "cv3-candle-nn/mkl",
+  "cv3-candle-transformers/mkl",
 ]
