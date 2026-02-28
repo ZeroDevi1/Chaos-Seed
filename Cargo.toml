@@ -10,6 +10,10 @@ members = [
     "chaos-daemon",
     "xtask",
 ]
+exclude = [
+    # 第三方子项目（其自身也有 Cargo.toml/pyproject.toml），避免被本仓库 workspace 误识别。
+    "third_party/cosyvoice3.rs",
+]
 
 # Keep `cargo build` friction low on dev machines that don't have Tauri system deps.
 default-members = ["chaos-core", "chaos-slint", "chaos-ffi"]

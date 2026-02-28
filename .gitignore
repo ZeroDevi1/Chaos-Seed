@@ -23,9 +23,19 @@ sync_to_win.sh
 /models/cosyvoice/pack/**
 !/models/cosyvoice/pack/.gitkeep
 
+# Route2: CosyVoice3 Candle weights (converted locally, large files)
+/models/cosyvoice3_candle/
+/models/cosyvoice3_candle/**
+
 # Local inference outputs
 /out_wav/**
 /chaos-core/out_wav/**
+
+# Route2: local third-party clone + tools (do not commit)
+/third_party/cosyvoice3.rs/
+/third_party/cosyvoice3.rs/**
+/third_party/_tools/
+/third_party/_tools/**
 
 # Local MSIX signing certs (never commit private keys)
 *.msix.pfx
