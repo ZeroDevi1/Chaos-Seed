@@ -2381,16 +2381,37 @@ fn time_scale_mel_linear(mel: &[f32], channels: usize, speed: f32) -> Result<Vec
         return Ok(mel.to_vec());
     }
 
+    // 默认使用 align_corners=false 的线性插值（与 PyTorch/F.interpolate 的默认行为更一致）。
+    // 经验上这比“强行对齐两端点”的插值更不容易在语音上引入高频尖啸/金属感。
     let mut out = vec![0.0f32; channels * new_t];
+    if new_t == 1 {
+        // 退化情况：取中间帧（比强行取第 0 帧更稳）。
+        let mid = t / 2;
+        for ch in 0..channels {
+            out[ch] = mel[ch * t + mid];
+        }
+        return Ok(out);
+    }
+
+    let t_f = t as f32;
+    let new_t_f = new_t as f32;
     for ch in 0..channels {
         for i in 0..new_t {
-            let src_pos =
-                (i as f32) * (t.saturating_sub(1) as f32) / (new_t.saturating_sub(1).max(1) as f32);
+            // align_corners=false: (i+0.5)/new_t * t - 0.5
+            let mut src_pos = ((i as f32) + 0.5) * (t_f / new_t_f) - 0.5;
+            if src_pos < 0.0 {
+                src_pos = 0.0;
+            }
+            let max_pos = (t - 1) as f32;
+            if src_pos > max_pos {
+                src_pos = max_pos;
+            }
+
             let lo = src_pos.floor() as usize;
-            let hi = src_pos.ceil() as usize;
+            let hi = (lo + 1).min(t - 1);
             let a = src_pos - (lo as f32);
             let lo_v = mel[ch * t + lo];
-            let hi_v = mel[ch * t + hi.min(t - 1)];
+            let hi_v = mel[ch * t + hi];
             out[ch * new_t + i] = lo_v * (1.0 - a) + hi_v * a;
         }
     }

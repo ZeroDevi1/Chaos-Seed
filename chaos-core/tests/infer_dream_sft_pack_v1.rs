@@ -118,6 +118,19 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
         text_frontend: true,
     };
 
+    // 便于快速定位“speed 相关杂音/时长差异”：允许用 env 覆盖 speed。
+    if let Ok(v) = std::env::var("CHAOS_TTS_SPEED") {
+        let v = v.trim();
+        if !v.is_empty() {
+            if let Ok(s) = v.parse::<f32>() {
+                params.speed = s;
+                eprintln!("CHAOS_TTS_SPEED override => speed={}", params.speed);
+            } else {
+                eprintln!("WARN: invalid CHAOS_TTS_SPEED={v}, expected float");
+            }
+        }
+    }
+
     // Greedy 对齐：用于和 Python 侧做 token 对比（规避 RNG 差异）。
     // 约定：设置 `CHAOS_TTS_GREEDY=1` 时强制 `top_k=1, top_p=1.0`。
     let greedy = std::env::var("CHAOS_TTS_GREEDY")
