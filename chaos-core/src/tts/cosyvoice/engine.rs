@@ -1667,8 +1667,11 @@ fn load_onnx_ort_backend(pack: &CosyVoicePack) -> Result<OrtBackend, TtsError> {
     )?;
 
     // 一些 pack 的 llm_decode 图在常规 past_len 下会直接 shape mismatch（例如注意力 mask 维度错误）。
-    // 为了“能跑起来”，我们会裁剪 KV cache 强行让图满足固定长度假设；这会损失质量（上下文变短，可能出现电音/短句）。
-    // 如需更接近 Python 的质量，可强制使用 PrefillOnly（更慢）。
+    //
+    // 旧策略：为了“能跑起来”，自动裁剪 KV cache 强行让图满足固定长度假设；但这会显著损失质量（上下文变短，容易出现电音/短句）。
+    // 新策略（默认）：auto smoke 失败时，优先切到 PrefillOnly（更慢但更接近 Python 质量）。如需强制走 decode 图，可设置：
+    // - `CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=decode`
+    // - 或 `CHAOS_COSYVOICE_ORT_KV_CACHE_KEEP=...`（仍可能影响质量）
     let forced_mode = std::env::var("CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE")
         .ok()
         .unwrap_or_default()
@@ -1773,15 +1776,27 @@ fn load_onnx_ort_backend(pack: &CosyVoicePack) -> Result<OrtBackend, TtsError> {
             if let Err(e) = llm_decode.session.run(inputs) {
                 kv_cache_keep = infer_keep_from_decode_err(&e.to_string());
                 if let Some(keep) = kv_cache_keep {
-                    tracing::warn!(
-                        keep,
-                        "ort: llm_decode graph seems fixed-length; enabling KV cache trimming (may reduce quality). Set CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=prefill for better quality."
-                    );
+                    // 经验阈值：keep 很小（例如 3）意味着上下文会被裁到几乎没有，质量往往“电音/短句”。
+                    // 此时宁可回退到 PrefillOnly（慢但更稳）。keep 较大时，仍允许用户先用 KV trim 跑通做 sanity check。
+                    if keep < 64 {
+                        tracing::warn!(
+                            keep,
+                            "ort: llm_decode graph seems fixed-length / incompatible; inferred kv_keep is too small, falling back to PrefillOnly for quality. Consider re-exporting ONNX pack."
+                        );
+                        llm_decode_mode = OrtLlmDecodeMode::PrefillOnly;
+                        kv_cache_keep = None;
+                    } else {
+                        tracing::warn!(
+                            keep,
+                            "ort: llm_decode graph seems fixed-length; enabling KV cache trimming (may reduce quality). Consider re-exporting ONNX pack or set CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=prefill."
+                        );
+                    }
                 } else {
                     tracing::warn!(
                         err = %e,
-                        "ort: llm_decode smoke run failed, but could not infer a safe kv_cache_keep; consider re-exporting ONNX pack or set CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=prefill"
+                        "ort: llm_decode smoke run failed, but could not infer a safe kv_cache_keep; falling back to PrefillOnly. Consider re-exporting ONNX pack."
                     );
+                    llm_decode_mode = OrtLlmDecodeMode::PrefillOnly;
                 }
             }
         }
