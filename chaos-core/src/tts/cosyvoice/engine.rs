@@ -1,7 +1,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "onnx-ort")]
+use std::fs::OpenOptions;
+#[cfg(feature = "onnx-ort")]
+use std::io::Write;
+#[cfg(feature = "onnx-ort")]
+use std::path::PathBuf;
+#[cfg(feature = "onnx-ort")]
 use std::sync::OnceLock;
+#[cfg(feature = "onnx-ort")]
+use std::sync::Mutex;
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -39,6 +47,21 @@ pub struct TtsSftParams {
     pub seed: u64,
     pub sampling: SamplingConfig,
     pub text_frontend: bool,
+}
+
+/// 仅用于调试/对齐：返回生成的 speech_tokens 以及关键张量信息（避免重复跑 LLM）。
+#[derive(Debug, Clone)]
+pub struct TtsWavDebugResult {
+    pub wav: TtsWavResult,
+    pub speech_tokens: Vec<i64>,
+    /// `llm_prefill/llm_decode` 的 logits 最后一帧 vocab 大小（等价于 `last_logits.len()`）。
+    pub llm_logits_vocab_size: usize,
+}
+
+#[derive(Debug, Clone)]
+struct LlmGenerateResult {
+    speech_tokens: Vec<i64>,
+    logits_vocab_size: usize,
 }
 
 #[cfg(feature = "onnx-ort")]
@@ -185,6 +208,166 @@ impl CosyVoiceEngine {
         &self.pack
     }
 
+    /// 仅运行 LLM，生成 speech_tokens（不经过 flow/vocoder）。
+    ///
+    /// 用途：Rust/Python 侧对齐 tokens、排查推理慢/电音等问题。
+    pub fn synthesize_speech_tokens(&self, params: &TtsSftParams) -> Result<Vec<i64>, TtsError> {
+        self.synthesize_speech_tokens_with_cancel(params, None)
+    }
+
+    pub fn synthesize_speech_tokens_with_cancel(
+        &self,
+        params: &TtsSftParams,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<i64>, TtsError> {
+        // 保持与完整推理一致的参数校验，避免“只跑到 LLM 但 spk_id 无效”导致排查混乱。
+        if params.speed <= 0.0 {
+            return Err(TtsError::InvalidArg("speed must be > 0".into()));
+        }
+        if !self.pack.spk2info.contains_key(params.spk_id.trim()) {
+            return Err(TtsError::InvalidArg(format!(
+                "spk_id not found in spk2info.json: {}",
+                params.spk_id
+            )));
+        }
+
+        let (input_ids, spoken_text_len) = self.encode_input_ids(params)?;
+        if let Some(c) = cancel {
+            if c.load(Ordering::Relaxed) {
+                return Err(TtsError::Canceled);
+            }
+        }
+        let mut rng = ChaCha20Rng::seed_from_u64(params.seed);
+        let r = self.llm_generate(
+            &input_ids,
+            spoken_text_len,
+            &params.sampling,
+            &mut rng,
+            cancel,
+        )?;
+        Ok(r.speech_tokens)
+    }
+
+    /// 调试版：一次性返回 wav + speech_tokens + logits vocab（避免重复跑 LLM）。
+    pub fn synthesize_wav_bytes_debug(
+        &self,
+        params: &TtsSftParams,
+    ) -> Result<TtsWavDebugResult, TtsError> {
+        self.synthesize_wav_bytes_debug_with_cancel(params, None)
+    }
+
+    pub fn synthesize_wav_bytes_debug_with_cancel(
+        &self,
+        params: &TtsSftParams,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<TtsWavDebugResult, TtsError> {
+        let cfg = &self.pack.cfg;
+        if params.speed <= 0.0 {
+            return Err(TtsError::InvalidArg("speed must be > 0".into()));
+        }
+        if !self.pack.spk2info.contains_key(params.spk_id.trim()) {
+            return Err(TtsError::InvalidArg(format!(
+                "spk_id not found in spk2info.json: {}",
+                params.spk_id
+            )));
+        }
+
+        let (input_ids, spoken_text_len) = self.encode_input_ids(params)?;
+        if let Some(c) = cancel {
+            if c.load(Ordering::Relaxed) {
+                return Err(TtsError::Canceled);
+            }
+        }
+
+        let mut rng = ChaCha20Rng::seed_from_u64(params.seed);
+        let llm = self.llm_generate(
+            &input_ids,
+            spoken_text_len,
+            &params.sampling,
+            &mut rng,
+            cancel,
+        )?;
+        let speech_tokens = llm.speech_tokens;
+
+        if speech_tokens.is_empty() {
+            return Err(TtsError::Onnx("LLM produced no speech tokens".into()));
+        }
+
+        // Flow: tokens -> mel
+        let spk = self
+            .pack
+            .spk2info
+            .get(params.spk_id.trim())
+            .expect("checked");
+        let mel = self.flow_tokens_to_mel(&speech_tokens, &spk.embedding, cancel)?;
+
+        // Speed change: only for non-stream mode. We apply linear interpolation on mel time axis.
+        let mel = if (params.speed - 1.0).abs() > f32::EPSILON {
+            time_scale_mel_linear(&mel, 80, params.speed)?
+        } else {
+            mel
+        };
+
+        // HiFT: mel -> waveform f32
+        let wav_f32 = self.hift_mel_to_wav(&mel, cancel)?;
+        let pcm16 = f32_to_pcm16_mono(&wav_f32);
+
+        let wav_bytes = encode_wav_pcm16_mono(cfg.sample_rate, &pcm16)?;
+        let wav = TtsWavResult {
+            sample_rate: cfg.sample_rate,
+            channels: 1,
+            duration_ms: duration_ms(cfg.sample_rate, pcm16.len()),
+            wav_bytes,
+        };
+
+        Ok(TtsWavDebugResult {
+            wav,
+            speech_tokens,
+            llm_logits_vocab_size: llm.logits_vocab_size,
+        })
+    }
+
+    fn encode_input_ids(&self, params: &TtsSftParams) -> Result<(Vec<i64>, usize), TtsError> {
+        let cfg = &self.pack.cfg;
+        let resolved = resolve_tts_text_basic(
+            &params.text,
+            &params.prompt_text,
+            params.prompt_strategy,
+            &params.guide_sep,
+            params.text_frontend,
+        )?;
+
+        let add_special = cfg.tokenizer_add_special_tokens;
+        let enc_prompt = self
+            .pack
+            .tokenizer
+            .encode(resolved.prompt_inject_text.clone(), add_special)
+            .map_err(|e| TtsError::Tokenizer(format!("encode prompt_text failed: {e}")))?;
+        let enc_text = self
+            .pack
+            .tokenizer
+            .encode(resolved.spoken_text.clone(), add_special)
+            .map_err(|e| TtsError::Tokenizer(format!("encode text failed: {e}")))?;
+
+        let spoken_text_len = enc_text.get_ids().len();
+        let mut input_ids: Vec<i64> =
+            Vec::with_capacity(enc_prompt.get_ids().len() + enc_text.get_ids().len());
+        input_ids.extend(enc_prompt.get_ids().iter().map(|&x| x as i64));
+        input_ids.extend(enc_text.get_ids().iter().map(|&x| x as i64));
+
+        if !input_ids
+            .iter()
+            .any(|&x| x as u32 == cfg.end_of_prompt_token_id)
+        {
+            return Err(TtsError::InvalidArg(format!(
+                "endOfPromptTokenId={} not found in encoded prompt/text; pack.json and tokenizer.json likely mismatch",
+                cfg.end_of_prompt_token_id
+            )));
+        }
+
+        Ok((input_ids, spoken_text_len))
+    }
+
     pub fn synthesize_pcm16(&self, params: &TtsSftParams) -> Result<TtsPcm16Result, TtsError> {
         self.synthesize_pcm16_with_cancel(params, None)
     }
@@ -205,39 +388,7 @@ impl CosyVoiceEngine {
             )));
         }
 
-        let resolved = resolve_tts_text_basic(
-            &params.text,
-            &params.prompt_text,
-            params.prompt_strategy,
-            &params.guide_sep,
-            params.text_frontend,
-        )?;
-
-        let mut input_ids: Vec<i64> = Vec::new();
-        let add_special = cfg.tokenizer_add_special_tokens;
-        let enc_prompt = self
-            .pack
-            .tokenizer
-            .encode(resolved.prompt_inject_text.clone(), add_special)
-            .map_err(|e| TtsError::Tokenizer(format!("encode prompt_text failed: {e}")))?;
-        let enc_text = self
-            .pack
-            .tokenizer
-            .encode(resolved.spoken_text.clone(), add_special)
-            .map_err(|e| TtsError::Tokenizer(format!("encode text failed: {e}")))?;
-        let spoken_text_len = enc_text.get_ids().len();
-        input_ids.extend(enc_prompt.get_ids().iter().map(|&x| x as i64));
-        input_ids.extend(enc_text.get_ids().iter().map(|&x| x as i64));
-
-        if !input_ids
-            .iter()
-            .any(|&x| x as u32 == cfg.end_of_prompt_token_id)
-        {
-            return Err(TtsError::InvalidArg(format!(
-                "endOfPromptTokenId={} not found in encoded prompt/text; pack.json and tokenizer.json likely mismatch",
-                cfg.end_of_prompt_token_id
-            )));
-        }
+        let (input_ids, spoken_text_len) = self.encode_input_ids(params)?;
 
         if let Some(c) = cancel {
             if c.load(Ordering::Relaxed) {
@@ -247,13 +398,14 @@ impl CosyVoiceEngine {
 
         // LLM: autoregressively sample speech tokens until stop token.
         let mut rng = ChaCha20Rng::seed_from_u64(params.seed);
-        let speech_tokens = self.llm_generate(
+        let llm = self.llm_generate(
             &input_ids,
             spoken_text_len,
             &params.sampling,
             &mut rng,
             cancel,
         )?;
+        let speech_tokens = llm.speech_tokens;
 
         if speech_tokens.is_empty() {
             return Err(TtsError::Onnx("LLM produced no speech tokens".into()));
@@ -312,7 +464,7 @@ impl CosyVoiceEngine {
         sampling: &SamplingConfig,
         rng: &mut ChaCha20Rng,
         cancel: Option<&AtomicBool>,
-    ) -> Result<Vec<i64>, TtsError> {
+    ) -> Result<LlmGenerateResult, TtsError> {
         let stop_start = self.pack.cfg.stop_token_start as i64;
         // Mirror CosyVoice's max_token_text_ratio/min_token_text_ratio guardrails (approx).
         let llm_cfg = &self.pack.cfg.llm;
@@ -352,41 +504,18 @@ impl CosyVoiceEngine {
         if let Some(ort) = &self.ort {
             use ort::value::{DynValue, Tensor};
 
-            fn kv_output_candidates_from_past_input(past_in: &str) -> Vec<String> {
-                // 说明：不同导出工具/版本对 KV cache 的命名不一致（past/present、past_key_values/present 等）。
-                // 这里做一个“名字推导候选列表”，按顺序尝试 remove()，以便在不依赖严格顺序的情况下对齐 past inputs。
-                let mut out: Vec<String> = Vec::new();
-                let mut push = |s: String| {
-                    if !out.iter().any(|x| x == &s) {
-                        out.push(s);
-                    }
-                };
-
-                push(past_in.to_string());
-                push(past_in.replace("past_key_values", "present"));
-                push(past_in.replace("past_key_values", "present_key_values"));
-                push(past_in.replace("past_", "present_"));
-                push(past_in.replace("past.", "present."));
-                push(past_in.replace("past", "present"));
-
-                out
-            }
-
-            fn take_kv_for_past_input(
-                out: &mut ort::session::SessionOutputs<'_, '_>,
-                stage: &'static str,
-                past_in: &str,
-            ) -> Result<DynValue, TtsError> {
-                let cands = kv_output_candidates_from_past_input(past_in);
-                for c in &cands {
-                    if let Some(v) = out.remove(c.as_str()) {
-                        return Ok(v);
-                    }
-                }
-                Err(TtsError::Onnx(format!(
-                    "ort: {stage} missing KV cache output for past input {past_in:?} (tried: {cands:?})"
-                )))
-            }
+            cosyvoice_debug_log(format_args!(
+                "[cosyvoice][llm] begin: mode={:?} kv_keep={:?} input_len={} spoken_text_len={} stopTokenStart={} speechTokenSize={} min_len={} max_len={} sampling={:?}\n",
+                ort.llm_decode_mode,
+                ort.kv_cache_keep,
+                input_ids.len(),
+                spoken_text_len,
+                stop_start,
+                self.pack.cfg.speech_token_size,
+                min_len,
+                max_len,
+                sampling
+            ));
 
             let in_name = ort
                 .llm_prefill
@@ -415,6 +544,10 @@ impl CosyVoiceEngine {
                     .and_then(|s| s.trim().parse::<usize>().ok())
                     .filter(|&v| v > 0)
                     .unwrap_or(256);
+                let log_every = cosyvoice_debug_log_every();
+                cosyvoice_debug_log(format_args!(
+                    "[cosyvoice][llm] PrefillOnly: prefill_window={prefill_window} log_every={log_every}\n"
+                ));
 
                 while decoded.len() < max_len {
                     if let Some(c) = cancel {
@@ -444,7 +577,11 @@ impl CosyVoiceEngine {
                     let logits_v = out.remove(out_logits_name).ok_or_else(|| {
                         TtsError::Onnx("ort: llm_prefill missing logits output".into())
                     })?;
-                    let mut step_scores = ort_extract_last_logits(&logits_v)?;
+                    let mut step_scores = ort_extract_last_logits(
+                        &logits_v,
+                        "llm_prefill(prefill_only)",
+                        decoded.len() == 0,
+                    )?;
 
                     if vocab_size_seen.is_none() {
                         ensure_stop_token_reachable(
@@ -475,6 +612,18 @@ impl CosyVoiceEngine {
                     decoded.push(token);
                     decoded_u32.push(token_u32);
                     ctx.push(token);
+
+                    if cosyvoice_debug_log_enabled()
+                        && (decoded.len() <= 3 || decoded.len() % log_every == 0)
+                    {
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][llm][prefill_only] step={} ctx_len={} token={} (stop_start={})\n",
+                            decoded.len(),
+                            ctx.len(),
+                            token,
+                            stop_start
+                        ));
+                    }
                 }
                 if decoded.len() >= max_len {
                     return Err(TtsError::Onnx(format!(
@@ -482,7 +631,43 @@ impl CosyVoiceEngine {
                         vocab_size_seen.unwrap_or(0)
                     )));
                 }
-                return Ok(decoded);
+                cosyvoice_debug_log(format_args!(
+                    "[cosyvoice][llm] end(PrefillOnly): speech_tokens_len={}\n",
+                    decoded.len()
+                ));
+                if cosyvoice_debug_log_enabled() {
+                    let speech_size = self.pack.cfg.speech_token_size as i64;
+                    if decoded.is_empty() {
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][llm] speech_tokens stats: <empty>\n"
+                        ));
+                    } else {
+                        let mut min_tok = i64::MAX;
+                        let mut max_tok = i64::MIN;
+                        let mut out_of_range = 0usize;
+                        for &t in &decoded {
+                            min_tok = min_tok.min(t);
+                            max_tok = max_tok.max(t);
+                            if t < 0 || (speech_size > 0 && t >= speech_size) {
+                                out_of_range += 1;
+                            }
+                        }
+                        let head_len = decoded.len().min(16);
+                        let tail_len = decoded.len().min(16);
+                        let head = &decoded[..head_len];
+                        let tail = &decoded[decoded.len().saturating_sub(tail_len)..];
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][llm] speech_tokens stats: min={min_tok} max={max_tok} speechTokenSize={speech_size} out_of_range={out_of_range}\n"
+                        ));
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][llm] speech_tokens head={head:?} tail={tail:?}\n"
+                        ));
+                    }
+                }
+                return Ok(LlmGenerateResult {
+                    speech_tokens: decoded,
+                    logits_vocab_size: vocab_size_seen.unwrap_or(0),
+                });
             }
 
             let kv_keep = ort.kv_cache_keep;
@@ -502,7 +687,7 @@ impl CosyVoiceEngine {
             let logits_v = prefill_out
                 .remove(out_logits_name)
                 .ok_or_else(|| TtsError::Onnx("ort: llm_prefill missing logits output".into()))?;
-            let mut last_logits = ort_extract_last_logits(&logits_v)?;
+            let mut last_logits = ort_extract_last_logits(&logits_v, "llm_prefill", true)?;
 
             ensure_stop_token_reachable(stop_start, last_logits.len(), "llm_prefill")?;
             // 将 prefill 的 KV cache 输出按 decode 的 past_* 输入顺序对齐，避免“输出顺序 != 输入顺序”导致形状错配。
@@ -510,16 +695,36 @@ impl CosyVoiceEngine {
                 Vec::with_capacity(ort.llm_decode.io.inputs.len().saturating_sub(1));
             for past_in in ort.llm_decode.io.inputs.iter().skip(1) {
                 let mut v =
-                    take_kv_for_past_input(&mut prefill_out, "llm_prefill", past_in.as_str())?;
+                    ort_take_kv_for_past_input(&mut prefill_out, "llm_prefill", past_in.as_str())?;
                 if let Some(keep) = kv_keep {
                     v = ort_kv_cache_keep_last_f32(v, keep)?;
                 }
                 past.push(v);
             }
 
+            if cosyvoice_debug_log_enabled() {
+                cosyvoice_debug_log(format_args!(
+                    "[cosyvoice][llm] DecodeGraph: past_count={} kv_keep={:?}\n",
+                    past.len(),
+                    kv_keep
+                ));
+                if let Some(first) = past.first() {
+                    if let Some(shape) = ort_try_extract_tensor_shape_f32(first) {
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][llm] past[0] shape={shape:?}\n"
+                        ));
+                    } else {
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][llm] past[0] shape=<unavailable>\n"
+                        ));
+                    }
+                }
+            }
+
             let mut decoded: Vec<i64> = Vec::new();
             let mut decoded_u32: Vec<u32> = Vec::new();
-            ensure_stop_token_reachable(stop_start, last_logits.len(), "llm_prefill(tract)")?;
+            ensure_stop_token_reachable(stop_start, last_logits.len(), "llm_prefill(ort)")?;
+            let log_every = cosyvoice_debug_log_every();
             while decoded.len() < max_len {
                 if let Some(c) = cancel {
                     if c.load(Ordering::Relaxed) {
@@ -595,13 +800,15 @@ impl CosyVoiceEngine {
                 let logits_v = out.remove(logits_name).ok_or_else(|| {
                     TtsError::Onnx("ort: llm_decode missing logits output".into())
                 })?;
-                last_logits = ort_extract_last_logits(&logits_v)?;
+                let log_this_step = cosyvoice_debug_log_enabled()
+                    && (decoded.len() <= 3 || decoded.len() % log_every == 0);
+                last_logits = ort_extract_last_logits(&logits_v, "llm_decode", log_this_step)?;
 
                 // decode 的 present_* 输出也按 “下一步的 past_* 输入” 顺序对齐。
                 let mut new_past: Vec<DynValue> =
                     Vec::with_capacity(ort.llm_decode.io.inputs.len().saturating_sub(1));
                 for past_in in ort.llm_decode.io.inputs.iter().skip(1) {
-                    let mut v = take_kv_for_past_input(
+                    let mut v = ort_take_kv_for_past_input(
                         &mut out,
                         "llm_decode",
                         past_in.as_str(),
@@ -612,6 +819,23 @@ impl CosyVoiceEngine {
                     new_past.push(v);
                 }
                 past = new_past;
+
+                if log_this_step {
+                    cosyvoice_debug_log(format_args!(
+                        "[cosyvoice][llm][decode] step={} token={} stop_start={} logits_vocab={}\n",
+                        decoded.len(),
+                        token,
+                        stop_start,
+                        last_logits.len()
+                    ));
+                    if let Some(first) = past.first() {
+                        if let Some(shape) = ort_try_extract_tensor_shape_f32(first) {
+                            cosyvoice_debug_log(format_args!(
+                                "[cosyvoice][llm][decode] past[0] shape={shape:?}\n"
+                            ));
+                        }
+                    }
+                }
             }
 
             if decoded.len() >= max_len {
@@ -620,7 +844,43 @@ impl CosyVoiceEngine {
                     last_logits.len()
                 )));
             }
-            return Ok(decoded);
+            cosyvoice_debug_log(format_args!(
+                "[cosyvoice][llm] end(DecodeGraph): speech_tokens_len={}\n",
+                decoded.len()
+            ));
+            if cosyvoice_debug_log_enabled() {
+                let speech_size = self.pack.cfg.speech_token_size as i64;
+                if decoded.is_empty() {
+                    cosyvoice_debug_log(format_args!(
+                        "[cosyvoice][llm] speech_tokens stats: <empty>\n"
+                    ));
+                } else {
+                    let mut min_tok = i64::MAX;
+                    let mut max_tok = i64::MIN;
+                    let mut out_of_range = 0usize;
+                    for &t in &decoded {
+                        min_tok = min_tok.min(t);
+                        max_tok = max_tok.max(t);
+                        if t < 0 || (speech_size > 0 && t >= speech_size) {
+                            out_of_range += 1;
+                        }
+                    }
+                    let head_len = decoded.len().min(16);
+                    let tail_len = decoded.len().min(16);
+                    let head = &decoded[..head_len];
+                    let tail = &decoded[decoded.len().saturating_sub(tail_len)..];
+                    cosyvoice_debug_log(format_args!(
+                        "[cosyvoice][llm] speech_tokens stats: min={min_tok} max={max_tok} speechTokenSize={speech_size} out_of_range={out_of_range}\n"
+                    ));
+                    cosyvoice_debug_log(format_args!(
+                        "[cosyvoice][llm] speech_tokens head={head:?} tail={tail:?}\n"
+                    ));
+                }
+            }
+            return Ok(LlmGenerateResult {
+                speech_tokens: decoded,
+                logits_vocab_size: last_logits.len(),
+            });
         }
 
         #[cfg(feature = "onnx-tract")]
@@ -695,7 +955,10 @@ impl CosyVoiceEngine {
                     last_logits.len()
                 )));
             }
-            return Ok(decoded);
+            return Ok(LlmGenerateResult {
+                speech_tokens: decoded,
+                logits_vocab_size: last_logits.len(),
+            });
         }
 
         Err(TtsError::NotImplemented("onnx backend is not enabled"))
@@ -739,19 +1002,33 @@ impl CosyVoiceEngine {
                 .map(|s| s.as_str())
                 .unwrap_or("mel");
 
-            let tok_t = Tensor::<i64>::from_array((
-                vec![1usize, speech_tokens.len()],
-                speech_tokens.to_vec().into_boxed_slice(),
-            ))
-            .map_err(|e| TtsError::Onnx(format!("ort: create speech_tokens failed: {e}")))?;
-            let emb_t = Tensor::<f32>::from_array((
-                vec![1usize, spk_embedding.len()],
-                spk_embedding.to_vec().into_boxed_slice(),
-            ))
-            .map_err(|e| TtsError::Onnx(format!("ort: create spk_embedding failed: {e}")))?;
+            if cosyvoice_debug_log_enabled() {
+                let speech_size = self.pack.cfg.speech_token_size as i64;
+                if speech_tokens.is_empty() {
+                    cosyvoice_debug_log(format_args!(
+                        "[cosyvoice][flow] begin: speech_tokens_len=0\n"
+                    ));
+                } else {
+                    let mut min_tok = i64::MAX;
+                    let mut max_tok = i64::MIN;
+                    let mut out_of_range = 0usize;
+                    for &t in speech_tokens {
+                        min_tok = min_tok.min(t);
+                        max_tok = max_tok.max(t);
+                        if t < 0 || (speech_size > 0 && t >= speech_size) {
+                            out_of_range += 1;
+                        }
+                    }
+                    cosyvoice_debug_log(format_args!(
+                        "[cosyvoice][flow] begin: speech_tokens_len={} min={min_tok} max={max_tok} speechTokenSize={speech_size} out_of_range={out_of_range}\n",
+                        speech_tokens.len()
+                    ));
+                }
+            }
 
-            // 有些 flow 图只能吃固定长度的 token（例如 token_len=10 => mel_len=20），此时需要分块拼接 mel。
-            if let Some(chunk_len) = ort.flow_token_chunk_len {
+            // 有些 flow 图只能吃固定长度的 token（例如 token_len=256 => mel_len=512），此时需要分块拼接 mel。
+            // 说明：有些导出会把 input shape 标成动态，但图内部仍用常量 256 做广播/逐点乘，导致“看起来支持变长但实际会炸”。
+            let run_chunked = |chunk_len: usize| -> Result<Vec<f32>, TtsError> {
                 if chunk_len == 0 {
                     return Err(TtsError::Onnx("ort: invalid flow_token_chunk_len=0".into()));
                 }
@@ -888,17 +1165,96 @@ impl CosyVoiceEngine {
                         let src = &out[ch * total_t..ch * total_t + expected_t];
                         trimmed[ch * expected_t..ch * expected_t + expected_t].copy_from_slice(src);
                     }
+                    if cosyvoice_debug_log_enabled() {
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][flow] chunked mel: channels=80 total_t={total_t} expected_t={expected_t} (trimmed)\n"
+                        ));
+                        cosyvoice_debug_log_f32_stats("flow.mel", &trimmed);
+                    }
                     return Ok(trimmed);
                 }
 
-                return Ok(out);
+                if cosyvoice_debug_log_enabled() {
+                    cosyvoice_debug_log(format_args!(
+                        "[cosyvoice][flow] chunked mel: channels=80 total_t={total_t}\n"
+                    ));
+                    cosyvoice_debug_log_f32_stats("flow.mel", &out);
+                }
+                Ok(out)
+            };
+
+            if let Some(chunk_len) = ort.flow_token_chunk_len {
+                return run_chunked(chunk_len);
             }
 
-            let mut out = ort
-                .flow_infer
-                .session
-                .run(vec![(tok_name, tok_t.into_dyn()), (emb_name, emb_t.into_dyn())])
-                .map_err(|e| TtsError::Onnx(format!("ort: flow_infer run failed: {e}")))?;
+            fn infer_chunk_len_from_broadcast_err(msg: &str, input_len: usize) -> Option<usize> {
+                // 典型错误："... Attempting to broadcast ... 135 by 256"
+                let Some(idx) = msg.rfind("Attempting to broadcast") else {
+                    return None;
+                };
+                let tail = &msg[idx..];
+                let mut nums: Vec<usize> = Vec::new();
+                for part in tail.split(|c: char| !c.is_ascii_digit()) {
+                    if part.is_empty() {
+                        continue;
+                    }
+                    if let Ok(v) = part.parse::<usize>() {
+                        nums.push(v);
+                    }
+                }
+                if nums.len() < 2 {
+                    return None;
+                }
+                let a = nums[nums.len() - 2];
+                let b = nums[nums.len() - 1];
+                if a == input_len {
+                    Some(b).filter(|&v| v > 0)
+                } else if b == input_len {
+                    Some(a).filter(|&v| v > 0)
+                } else {
+                    Some(a.max(b)).filter(|&v| v > 0)
+                }
+            }
+
+            // 未能在 load 阶段推断 chunk_len：先尝试直接跑；若遇到广播报错，则从报错推断固定长度并回退到 chunk 模式。
+            let tok_t = Tensor::<i64>::from_array((
+                vec![1usize, speech_tokens.len()],
+                speech_tokens.to_vec().into_boxed_slice(),
+            ))
+            .map_err(|e| TtsError::Onnx(format!("ort: create speech_tokens failed: {e}")))?;
+            let emb_t = Tensor::<f32>::from_array((
+                vec![1usize, spk_embedding.len()],
+                spk_embedding.to_vec().into_boxed_slice(),
+            ))
+            .map_err(|e| TtsError::Onnx(format!("ort: create spk_embedding failed: {e}")))?;
+
+            let mut out = match ort.flow_infer.session.run(vec![
+                (tok_name, tok_t.into_dyn()),
+                (emb_name, emb_t.into_dyn()),
+            ]) {
+                Ok(v) => v,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if let Some(chunk_len) =
+                        infer_chunk_len_from_broadcast_err(&msg, speech_tokens.len())
+                    {
+                        tracing::warn!(
+                            chunk_len,
+                            "ort: flow_infer seems fixed-length; retrying with chunking (set CHAOS_COSYVOICE_ORT_FLOW_TOKEN_CHUNK_LEN to skip auto-detect)"
+                        );
+                        if cosyvoice_debug_log_enabled() {
+                            cosyvoice_debug_log(format_args!(
+                                "[cosyvoice][flow] direct run failed: {msg}\n"
+                            ));
+                            cosyvoice_debug_log(format_args!(
+                                "[cosyvoice][flow] inferred chunk_len={chunk_len}; retrying chunked\n"
+                            ));
+                        }
+                        return run_chunked(chunk_len);
+                    }
+                    return Err(TtsError::Onnx(format!("ort: flow_infer run failed: {msg}")));
+                }
+            };
 
             let mel_v = out
                 .remove(mel_name)
@@ -912,7 +1268,14 @@ impl CosyVoiceEngine {
                 let d1 = shape[1] as usize;
                 let d2 = shape[2] as usize;
                 if d1 == 80 {
-                    return Ok(data.to_vec());
+                    let mel = data.to_vec();
+                    if cosyvoice_debug_log_enabled() {
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][flow] mel shape={shape:?}\n"
+                        ));
+                        cosyvoice_debug_log_f32_stats("flow.mel", &mel);
+                    }
+                    return Ok(mel);
                 }
                 if d2 == 80 {
                     let t = d1;
@@ -931,10 +1294,23 @@ impl CosyVoiceEngine {
                             out[dst] = data[src];
                         }
                     }
+                    if cosyvoice_debug_log_enabled() {
+                        cosyvoice_debug_log(format_args!(
+                            "[cosyvoice][flow] mel shape={shape:?} (transposed)\n"
+                        ));
+                        cosyvoice_debug_log_f32_stats("flow.mel", &out);
+                    }
                     return Ok(out);
                 }
             }
-            return Ok(data.to_vec());
+            let mel = data.to_vec();
+            if cosyvoice_debug_log_enabled() {
+                cosyvoice_debug_log(format_args!(
+                    "[cosyvoice][flow] mel shape={shape:?}\n"
+                ));
+                cosyvoice_debug_log_f32_stats("flow.mel", &mel);
+            }
+            return Ok(mel);
         }
 
         #[cfg(feature = "onnx-tract")]
@@ -1000,6 +1376,14 @@ impl CosyVoiceEngine {
                 .map(|s| s.as_str())
                 .unwrap_or("wav");
 
+            if cosyvoice_debug_log_enabled() {
+                cosyvoice_debug_log(format_args!(
+                    "[cosyvoice][hift] begin: mel_frames={t} mel_len={}\n",
+                    mel.len()
+                ));
+                cosyvoice_debug_log_f32_stats("hift.mel", mel);
+            }
+
             let mel_t = Tensor::<f32>::from_array((
                 vec![1usize, 80usize, t],
                 mel.to_vec().into_boxed_slice(),
@@ -1019,7 +1403,15 @@ impl CosyVoiceEngine {
                 .downcast()
                 .map_err(|e| TtsError::Onnx(format!("ort: wav is not f32 tensor: {e}")))?;
             let (_shape, data) = wav_t.extract_raw_tensor();
-            return Ok(data.to_vec());
+            let wav = data.to_vec();
+            if cosyvoice_debug_log_enabled() {
+                cosyvoice_debug_log(format_args!(
+                    "[cosyvoice][hift] wav_len={}\n",
+                    wav.len()
+                ));
+                cosyvoice_debug_log_f32_stats("hift.wav", &wav);
+            }
+            return Ok(wav);
         }
 
         #[cfg(feature = "onnx-tract")]
@@ -1360,28 +1752,37 @@ fn load_onnx_ort_backend(pack: &CosyVoicePack) -> Result<OrtBackend, TtsError> {
         let mut inputs: Vec<(&str, ort::value::DynValue)> =
             Vec::with_capacity(llm_decode.io.inputs.len());
         inputs.push((token_name, token_t.into_dyn()));
+        let mut smoke_ok = true;
         for past_in in llm_decode.io.inputs.iter().skip(1) {
-            let v = match prefill_out.remove(past_in.as_str()) {
-                Some(v) => v,
-                None => {
+            match ort_take_kv_for_past_input(&mut prefill_out, "llm_prefill(smoke)", past_in) {
+                Ok(v) => inputs.push((past_in.as_str(), v)),
+                Err(e) => {
+                    // 说明：smoke test 只是“可选的启发式探测”。如果这里对不齐 KV cache 的名字，
+                    // 不应该因此强行启用 kv_cache_keep（容易误判，导致速度/质量双杀）。
+                    tracing::debug!(
+                        err = %e,
+                        "ort: llm_decode smoke test skipped (cannot align prefill KV outputs to decode past inputs)"
+                    );
+                    smoke_ok = false;
                     break;
                 }
-            };
-            inputs.push((past_in.as_str(), v));
+            }
         }
 
-        if let Err(e) = llm_decode.session.run(inputs) {
-            kv_cache_keep = infer_keep_from_decode_err(&e.to_string());
-            if let Some(keep) = kv_cache_keep {
-                tracing::warn!(
-                    keep,
-                    "ort: llm_decode graph seems fixed-length; enabling KV cache trimming (may reduce quality). Set CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=prefill for better quality."
-                );
-            } else {
-                tracing::warn!(
-                    err = %e,
-                    "ort: llm_decode smoke run failed, but could not infer a safe kv_cache_keep; consider re-exporting ONNX pack or set CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=prefill"
-                );
+        if smoke_ok && inputs.len() == llm_decode.io.inputs.len() {
+            if let Err(e) = llm_decode.session.run(inputs) {
+                kv_cache_keep = infer_keep_from_decode_err(&e.to_string());
+                if let Some(keep) = kv_cache_keep {
+                    tracing::warn!(
+                        keep,
+                        "ort: llm_decode graph seems fixed-length; enabling KV cache trimming (may reduce quality). Set CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=prefill for better quality."
+                    );
+                } else {
+                    tracing::warn!(
+                        err = %e,
+                        "ort: llm_decode smoke run failed, but could not infer a safe kv_cache_keep; consider re-exporting ONNX pack or set CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=prefill"
+                    );
+                }
             }
         }
     }
@@ -1390,12 +1791,22 @@ fn load_onnx_ort_backend(pack: &CosyVoicePack) -> Result<OrtBackend, TtsError> {
     // - `CHAOS_COSYVOICE_ORT_KV_CACHE_KEEP=3`
     // - 也可以配合 `CHAOS_COSYVOICE_ORT_LLM_DECODE_MODE=decode` 强制走 decode 图
     if llm_decode_mode == OrtLlmDecodeMode::DecodeGraph {
-        if let Some(v) = std::env::var("CHAOS_COSYVOICE_ORT_KV_CACHE_KEEP")
-            .ok()
-            .and_then(|s| s.trim().parse::<usize>().ok())
-            .filter(|&v| v > 0)
-        {
-            kv_cache_keep = Some(v);
+        if let Ok(raw) = std::env::var("CHAOS_COSYVOICE_ORT_KV_CACHE_KEEP") {
+            let raw = raw.trim();
+            if !raw.is_empty() {
+                match raw.parse::<usize>() {
+                    Ok(v) => {
+                        // 允许显式设置 0：禁用 KV trim（用于排查 smoke 误判 / 性能问题）。
+                        kv_cache_keep = Some(v);
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            value = raw,
+                            "ort: invalid CHAOS_COSYVOICE_ORT_KV_CACHE_KEEP; expected an integer"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -1508,13 +1919,24 @@ fn load_onnx_ort_backend(pack: &CosyVoicePack) -> Result<OrtBackend, TtsError> {
 }
 
 #[cfg(feature = "onnx-ort")]
-fn ort_extract_last_logits(v: &ort::value::DynValue) -> Result<Vec<f32>, TtsError> {
+fn ort_extract_last_logits(
+    v: &ort::value::DynValue,
+    stage: &'static str,
+    log_shape: bool,
+) -> Result<Vec<f32>, TtsError> {
     let (shape, data) = v
         .try_extract_raw_tensor::<f32>()
-        .map_err(|e| TtsError::Onnx(format!("ort: logits output is not a CPU f32 tensor: {e}")))?;
+        .map_err(|e| TtsError::Onnx(format!("ort: {stage} logits output is not a CPU f32 tensor: {e}")))?;
+
+    if log_shape && cosyvoice_debug_log_enabled() {
+        cosyvoice_debug_log(format_args!(
+            "[cosyvoice][tensor] {stage} logits shape={shape:?} data_len={}\n",
+            data.len()
+        ));
+    }
 
     // Accept [1, vocab] or [1, seq, vocab] or [seq, vocab] etc.
-    match shape.len() {
+    let last: Vec<f32> = match shape.len() {
         1 => Ok(data.to_vec()),
         2 => {
             let rows = shape[0].max(0) as usize;
@@ -1562,7 +1984,48 @@ fn ort_extract_last_logits(v: &ort::value::DynValue) -> Result<Vec<f32>, TtsErro
             "ort: unsupported logits ndim={} shape={shape:?}",
             shape.len()
         ))),
+    }?;
+
+    if log_shape && cosyvoice_debug_log_enabled() {
+        let mut finite = 0usize;
+        let mut nan = 0usize;
+        let mut inf = 0usize;
+        let mut min_v = f32::INFINITY;
+        let mut max_v = f32::NEG_INFINITY;
+        let mut argmax: Option<usize> = None;
+        let mut sum: f64 = 0.0;
+        for (i, &x) in last.iter().enumerate() {
+            if x.is_nan() {
+                nan += 1;
+                continue;
+            }
+            if x.is_infinite() {
+                inf += 1;
+                continue;
+            }
+            finite += 1;
+            if x < min_v {
+                min_v = x;
+            }
+            if x > max_v {
+                max_v = x;
+                argmax = Some(i);
+            }
+            sum += x as f64;
+        }
+        let mean = if finite > 0 {
+            (sum / (finite as f64)) as f32
+        } else {
+            f32::NAN
+        };
+        cosyvoice_debug_log(format_args!(
+            "[cosyvoice][tensor] {stage} logits_last: vocab={} finite={finite} nan={nan} inf={inf} min={min_v:.6} max={max_v:.6} mean={mean:.6} argmax={}\n",
+            last.len(),
+            argmax.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+        ));
     }
+
+    Ok(last)
 }
 
 #[cfg(feature = "onnx-ort")]
@@ -1617,6 +2080,168 @@ fn ort_kv_cache_keep_last_f32(
     ))
     .map_err(|e| TtsError::Onnx(format!("ort: build kv cache tensor failed: {e}")))?;
     Ok(t.into_dyn())
+}
+
+#[cfg(feature = "onnx-ort")]
+fn ort_kv_output_candidates_from_past_input(past_in: &str) -> Vec<String> {
+    // 说明：不同导出工具/版本对 KV cache 的命名不一致（past/present、past_key_values/present 等）。
+    // 这里做一个“名字推导候选列表”，按顺序尝试 remove()，以便在不依赖严格顺序的情况下对齐 past inputs。
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |s: String| {
+        if !out.iter().any(|x| x == &s) {
+            out.push(s);
+        }
+    };
+
+    push(past_in.to_string());
+    push(past_in.replace("past_key_values", "present"));
+    push(past_in.replace("past_key_values", "present_key_values"));
+    push(past_in.replace("past_", "present_"));
+    push(past_in.replace("past.", "present."));
+    push(past_in.replace("past", "present"));
+
+    out
+}
+
+#[cfg(feature = "onnx-ort")]
+fn ort_take_kv_for_past_input(
+    out: &mut ort::session::SessionOutputs<'_, '_>,
+    stage: &'static str,
+    past_in: &str,
+) -> Result<ort::value::DynValue, TtsError> {
+    let cands = ort_kv_output_candidates_from_past_input(past_in);
+    for c in &cands {
+        if let Some(v) = out.remove(c.as_str()) {
+            return Ok(v);
+        }
+    }
+    Err(TtsError::Onnx(format!(
+        "ort: {stage} missing KV cache output for past input {past_in:?} (tried: {cands:?})"
+    )))
+}
+
+#[cfg(feature = "onnx-ort")]
+fn ort_try_extract_tensor_shape_f32(v: &ort::value::DynValue) -> Option<Vec<i64>> {
+    v.try_extract_raw_tensor::<f32>()
+        .ok()
+        .map(|(s, _)| s.to_vec())
+}
+
+#[cfg(feature = "onnx-ort")]
+fn cosyvoice_debug_log_enabled() -> bool {
+    cosyvoice_debug_log_file().is_some()
+}
+
+#[cfg(feature = "onnx-ort")]
+fn cosyvoice_debug_log_every() -> usize {
+    std::env::var("CHAOS_COSYVOICE_DEBUG_LOG_EVERY")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(20)
+}
+
+#[cfg(feature = "onnx-ort")]
+fn cosyvoice_debug_log_file() -> Option<&'static Mutex<std::fs::File>> {
+    static LOG_FILE: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+    let opt = LOG_FILE.get_or_init(|| {
+        let raw = std::env::var("CHAOS_COSYVOICE_DEBUG_LOG").ok()?;
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+
+        // 支持 `CHAOS_COSYVOICE_DEBUG_LOG=1`：在当前工作目录写 cosyvoice_debug.log，方便临时排查。
+        let path: PathBuf = if raw == "1" || raw.eq_ignore_ascii_case("true") {
+            PathBuf::from("cosyvoice_debug.log")
+        } else {
+            PathBuf::from(raw)
+        };
+
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let truncate = std::env::var("CHAOS_COSYVOICE_DEBUG_LOG_TRUNCATE")
+            .ok()
+            .as_deref()
+            == Some("1");
+
+        let mut opts = OpenOptions::new();
+        opts.create(true);
+        if truncate {
+            opts.write(true).truncate(true);
+        } else {
+            opts.append(true);
+        }
+
+        match opts.open(&path) {
+            Ok(f) => Some(Mutex::new(f)),
+            Err(e) => {
+                eprintln!(
+                    "[cosyvoice] failed to open debug log file {}: {}",
+                    path.display(),
+                    e
+                );
+                None
+            }
+        }
+    });
+    opt.as_ref()
+}
+
+#[cfg(feature = "onnx-ort")]
+fn cosyvoice_debug_log(args: std::fmt::Arguments<'_>) {
+    let Some(m) = cosyvoice_debug_log_file() else {
+        return;
+    };
+    let mut g = match m.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    let _ = g.write_fmt(args);
+}
+
+#[cfg(feature = "onnx-ort")]
+fn cosyvoice_debug_log_f32_stats(stage: &'static str, data: &[f32]) {
+    if !cosyvoice_debug_log_enabled() {
+        return;
+    }
+
+    let mut finite = 0usize;
+    let mut nan = 0usize;
+    let mut inf = 0usize;
+    let mut min_v = f32::INFINITY;
+    let mut max_v = f32::NEG_INFINITY;
+    let mut sum: f64 = 0.0;
+    for &x in data {
+        if x.is_nan() {
+            nan += 1;
+            continue;
+        }
+        if x.is_infinite() {
+            inf += 1;
+            continue;
+        }
+        finite += 1;
+        if x < min_v {
+            min_v = x;
+        }
+        if x > max_v {
+            max_v = x;
+        }
+        sum += x as f64;
+    }
+    let mean = if finite > 0 {
+        (sum / (finite as f64)) as f32
+    } else {
+        f32::NAN
+    };
+
+    cosyvoice_debug_log(format_args!(
+        "[cosyvoice][stats] {stage}: len={} finite={finite} nan={nan} inf={inf} min={min_v:.6} max={max_v:.6} mean={mean:.6}\n",
+        data.len()
+    ));
 }
 
 #[cfg(feature = "onnx-tract")]

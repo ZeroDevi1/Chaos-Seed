@@ -32,6 +32,11 @@ fn default_out_dir() -> Option<PathBuf> {
 /// - 该测试用于本地手工验证，默认不在 CI 跑（需要模型文件且推理耗时）
 /// - 如需自定义 pack 目录，设置环境变量 `CHAOS_COSYVOICE_PACK_DIR`
 /// - 如需自定义输出目录，设置环境变量 `CHAOS_TTS_OUT_DIR`
+/// - 如需输出更详尽的张量/生成日志到文件，设置环境变量：
+///   - `CHAOS_COSYVOICE_DEBUG_LOG=out_wav/dream/cosyvoice_debug.log`
+///   - `CHAOS_COSYVOICE_DEBUG_LOG_TRUNCATE=1`（可选，覆盖写）
+///   - `CHAOS_COSYVOICE_DEBUG_LOG_EVERY=20`（可选，控制解码过程日志频率）
+/// - 如推理极慢，建议先确认 ORT 是否真的启用 CUDA：`CHAOS_ORT_EP_DEBUG=1`
 #[test]
 fn infer_dream_sft_pack_v1_writes_wav_file() {
     let dir = match std::env::var("CHAOS_COSYVOICE_PACK_DIR") {
@@ -92,7 +97,7 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
             .to_string()
     };
 
-    let params = TtsSftParams {
+    let mut params = TtsSftParams {
         model_dir: dir.to_string_lossy().to_string(),
         spk_id,
         text: "看到码头就发马头，看到鸡就发欸由机，看到一男一女就发凿，看到一点那啥的就发爆了"
@@ -113,13 +118,40 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
         text_frontend: true,
     };
 
-    let r = engine.synthesize_wav_bytes(&params).expect("synthesize");
-    assert!(r.wav_bytes.len() > 44, "wav bytes too small");
-    assert_eq!(&r.wav_bytes[0..4], b"RIFF");
-    assert_eq!(&r.wav_bytes[8..12], b"WAVE");
+    // Greedy 对齐：用于和 Python 侧做 token 对比（规避 RNG 差异）。
+    // 约定：设置 `CHAOS_TTS_GREEDY=1` 时强制 `top_k=1, top_p=1.0`。
+    let greedy = std::env::var("CHAOS_TTS_GREEDY")
+        .ok()
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            !(v.is_empty() || v == "0" || v == "false" || v == "no" || v == "off")
+        })
+        .unwrap_or(false);
+    if greedy {
+        params.sampling.top_k = 1;
+        params.sampling.top_p = 1.0;
+        eprintln!("CHAOS_TTS_GREEDY=1 => force sampling: {:?}", params.sampling);
+    } else {
+        eprintln!("sampling: {:?}", params.sampling);
+    }
+
+    // 调试版：一次性拿到 wav + speech_tokens + logits vocab（避免重复跑 LLM）。
+    let r = engine
+        .synthesize_wav_bytes_debug(&params)
+        .expect("synthesize");
+
+    eprintln!(
+        "Rust speech_tokens[0..20] = {:?}",
+        &r.speech_tokens[0..20.min(r.speech_tokens.len())]
+    );
+    eprintln!("Rust logits shape = {:?}", r.llm_logits_vocab_size);
+
+    assert!(r.wav.wav_bytes.len() > 44, "wav bytes too small");
+    assert_eq!(&r.wav.wav_bytes[0..4], b"RIFF");
+    assert_eq!(&r.wav.wav_bytes[8..12], b"WAVE");
 
     std::fs::create_dir_all(&out_dir).expect("create out_dir");
     let out_path = out_dir.join("dream_sft_pack_v1_rust.wav");
-    std::fs::write(&out_path, &r.wav_bytes).expect("write wav");
+    std::fs::write(&out_path, &r.wav.wav_bytes).expect("write wav");
     eprintln!("wrote wav: {}", out_path.display());
 }
