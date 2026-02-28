@@ -119,3 +119,10 @@ cosyvoice3-candle-onnx = [
   "dep:cv3-candle-onnx",
   "cv3-candle-transformers/onnx",
 ]
+# Route2：启用 Candle CUDA（Windows 需要 VS cl.exe + nvcc 环境）
+cosyvoice3-candle-cuda = [
+  "cosyvoice3-candle",
+  "cv3-candle-core/cuda",
+  "cv3-candle-nn/cuda",
+  "cv3-candle-transformers/cuda",
+]

@@ -220,11 +220,31 @@ impl CosyVoice3CandleEngine {
         let model_dir = model_dir.as_ref().to_path_buf();
         let cfg = CosyVoice3CandleConfig::from_model_dir(&model_dir)?;
 
-        // 当前先用 CPU 做最小验证；后续可以扩展为 env 选择 cuda/metal。
-        let device = Device::Cpu;
+        // 设备选择：
+        // - 默认 cpu
+        // - 若编译开启了 cosyvoice3-candle-cuda，则支持 `CHAOS_COSYVOICE3_DEVICE=cuda` 或 `auto` 自动尝试 cuda
+        let dev_req = std::env::var("CHAOS_COSYVOICE3_DEVICE")
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_else(|| "cpu".to_string());
 
-        // CPU 上默认 F32（f16 收益不大且兼容性差）。
-        let dtype = DType::F32;
+        let (device, on_gpu) = select_device(&dev_req)?;
+
+        // 精度选择：GPU 可选 f16（CPU 不建议）。
+        let use_f16 = std::env::var("CHAOS_COSYVOICE3_USE_F16")
+            .ok()
+            .map(|v| {
+                let v = v.trim().to_ascii_lowercase();
+                !(v.is_empty() || v == "0" || v == "false" || v == "no" || v == "off")
+            })
+            .unwrap_or(false);
+        let dtype = if on_gpu && use_f16 { DType::F16 } else { DType::F32 };
+
+        eprintln!(
+            "[cosyvoice3-candle] device={} dtype={:?}",
+            if on_gpu { "cuda" } else { "cpu" },
+            dtype
+        );
 
         // Load tokenizer：优先 tokenizer/tokenizer.json，否则用 vocab+merges 构建。
         let tokenizer = load_tokenizer(&model_dir)?;
@@ -613,6 +633,42 @@ fn tokenize(tokenizer: &tokenizers::Tokenizer, text: &str) -> Result<Vec<u32>, T
         .encode(text, false)
         .map_err(|e| TtsError::Tokenizer(format!("tokenize failed: {e}")))?;
     Ok(enc.get_ids().to_vec())
+}
+
+fn select_device(dev_req: &str) -> Result<(Device, bool), TtsError> {
+    match dev_req {
+        "cpu" => Ok((Device::Cpu, false)),
+        "auto" => {
+            #[cfg(feature = "cosyvoice3-candle-cuda")]
+            {
+                match Device::new_cuda(0) {
+                    Ok(d) => return Ok((d, true)),
+                    Err(e) => {
+                        eprintln!("[cosyvoice3-candle] cuda not available, fallback to cpu: {e}");
+                    }
+                }
+            }
+            Ok((Device::Cpu, false))
+        }
+        "cuda" => {
+            #[cfg(feature = "cosyvoice3-candle-cuda")]
+            {
+                let d = Device::new_cuda(0).map_err(|e| {
+                    TtsError::Candle(format!("create cuda device failed: {e} (hint: ensure VS cl.exe + nvcc are available during build)"))
+                })?;
+                return Ok((d, true));
+            }
+            #[cfg(not(feature = "cosyvoice3-candle-cuda"))]
+            {
+                Err(TtsError::NotImplemented(
+                    "cuda requested but feature `cosyvoice3-candle-cuda` is not enabled",
+                ))
+            }
+        }
+        other => Err(TtsError::InvalidArg(format!(
+            "invalid CHAOS_COSYVOICE3_DEVICE={other}, expected cpu/auto/cuda"
+        ))),
+    }
 }
 
 /// WAV 解码：支持 PCM16/PCM32/Float32；输出 [-1, 1] 的 mono f32。
