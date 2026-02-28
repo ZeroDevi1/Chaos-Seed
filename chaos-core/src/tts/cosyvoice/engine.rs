@@ -21,6 +21,7 @@ use crate::tts::sampling::{SamplingConfig, sample_ras_next};
 use crate::tts::text::{PromptStrategy, resolve_tts_text_basic};
 use crate::tts::wav::{
     TtsPcm16Result, TtsWavResult, duration_ms, encode_wav_pcm16_mono, f32_to_pcm16_mono,
+    notch_filter_f32_mono_inplace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -309,7 +310,30 @@ impl CosyVoiceEngine {
         };
 
         // HiFT: mel -> waveform f32
-        let wav_f32 = self.hift_mel_to_wav(&mel, cancel)?;
+        let mut wav_f32 = self.hift_mel_to_wav(&mel, cancel)?;
+
+        // 兜底后处理：去除窄带高频啸叫（例如导出/推理不稳定导致的 6kHz tone）。
+        // 默认关闭；需要时设置：
+        // - `CHAOS_TTS_POST_NOTCH_HZ=6000`
+        // - `CHAOS_TTS_POST_NOTCH_Q=30`
+        if let Ok(hz) = std::env::var("CHAOS_TTS_POST_NOTCH_HZ") {
+            let hz = hz.trim();
+            if !hz.is_empty() {
+                let q = std::env::var("CHAOS_TTS_POST_NOTCH_Q")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<f32>().ok())
+                    .unwrap_or(30.0);
+                if let Ok(freq_hz) = hz.parse::<f32>() {
+                    let _ = notch_filter_f32_mono_inplace(
+                        &mut wav_f32,
+                        cfg.sample_rate,
+                        freq_hz,
+                        q,
+                    );
+                }
+            }
+        }
+
         let pcm16 = f32_to_pcm16_mono(&wav_f32);
 
         let wav_bytes = encode_wav_pcm16_mono(cfg.sample_rate, &pcm16)?;
@@ -427,7 +451,24 @@ impl CosyVoiceEngine {
         };
 
         // HiFT: mel -> waveform f32
-        let wav_f32 = self.hift_mel_to_wav(&mel, cancel)?;
+        let mut wav_f32 = self.hift_mel_to_wav(&mel, cancel)?;
+        if let Ok(hz) = std::env::var("CHAOS_TTS_POST_NOTCH_HZ") {
+            let hz = hz.trim();
+            if !hz.is_empty() {
+                let q = std::env::var("CHAOS_TTS_POST_NOTCH_Q")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<f32>().ok())
+                    .unwrap_or(30.0);
+                if let Ok(freq_hz) = hz.parse::<f32>() {
+                    let _ = notch_filter_f32_mono_inplace(
+                        &mut wav_f32,
+                        cfg.sample_rate,
+                        freq_hz,
+                        q,
+                    );
+                }
+            }
+        }
 
         let pcm16 = f32_to_pcm16_mono(&wav_f32);
         Ok(TtsPcm16Result {
