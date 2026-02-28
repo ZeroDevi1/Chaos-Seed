@@ -25,6 +25,7 @@ sync_to_win.sh
 
 # Local inference outputs
 /out_wav/**
+/chaos-core/out_wav/**
 
 # Local MSIX signing certs (never commit private keys)
 *.msix.pfx
