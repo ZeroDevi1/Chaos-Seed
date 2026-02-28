@@ -98,7 +98,6 @@
   <div class="chat-body">
     <DanmakuList
       bind:store={listStore}
-      emptyText="等待弹幕..."
       maxItems={300}
       stickToBottom={true}
       onOpenUrl={openUrl}

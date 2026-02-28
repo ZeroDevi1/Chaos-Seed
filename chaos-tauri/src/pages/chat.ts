@@ -18,11 +18,9 @@ export async function buildChatWindow(): Promise<void> {
   root.appendChild(perfStatus)
 
   const panel = el('div', { className: 'panel dm-panel' })
-  const empty = el('div', { className: 'empty', text: '等待弹幕...' })
   const scroll = el('div', { className: 'dm-scroll' })
   const list = el('div', { className: 'dm-list' })
   scroll.appendChild(list)
-  panel.appendChild(empty)
   panel.appendChild(scroll)
   root.appendChild(panel)
 
@@ -39,9 +37,6 @@ export async function buildChatWindow(): Promise<void> {
       } catch {
         // ignore
       }
-    },
-    afterFlush: (count) => {
-      empty.style.display = count > 0 ? 'none' : ''
     }
   })
 

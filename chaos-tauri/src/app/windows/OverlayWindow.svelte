@@ -399,13 +399,6 @@
         context.shadowBlur = 0
         context.fillStyle = fg
         const y = 24
-        if (!opaque) context.strokeText('等待弹幕...（ESC 关闭）', 12, y)
-        context.fillText('等待弹幕...（ESC 关闭）', 12, y)
-        if (clickThrough) {
-          const hint = '鼠标穿透已开启：Alt+Tab 聚焦后按 F2 切换交互'
-          if (!opaque) context.strokeText(hint, 12, y + 20)
-          context.fillText(hint, 12, y + 20)
-        }
         context.restore()
       }
 
@@ -417,19 +410,6 @@
         context.fillText(`弹幕过快，已丢弃 ${dropped} 条`, 12, 20)
         context.restore()
         dropped = 0
-      }
-
-      // Interaction hint: when click-through is enabled, the overlay can't be clicked.
-      if (clickThrough) {
-        context.save()
-        context.shadowBlur = 0
-        context.globalAlpha = 0.7
-        context.fillStyle = fg
-        const y = Math.max(18, h - 14)
-        const hint = '鼠标穿透已开启：Alt+Tab 聚焦后按 F2 切换交互，ESC 关闭'
-        if (!opaque) context.strokeText(hint, 12, y)
-        context.fillText(hint, 12, y)
-        context.restore()
       }
 
       raf = requestAnimationFrame(frame)

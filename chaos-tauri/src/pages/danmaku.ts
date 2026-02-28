@@ -102,7 +102,6 @@ export async function buildDanmakuPage(root: HTMLElement): Promise<Cleanup | und
     try {
       await invoke('danmaku_connect', { input: input.value })
       connected = true
-      empty.textContent = '已连接：等待弹幕...'
       applyConnectedUi()
     } catch (e) {
       connected = false
@@ -143,7 +142,6 @@ export async function buildDanmakuPage(root: HTMLElement): Promise<Cleanup | und
     const s = (e.payload || '').toString()
     if (s.includes('已连接')) {
       connected = true
-      empty.textContent = list.childElementCount > 0 ? '' : '已连接：等待弹幕...'
       applyConnectedUi()
     }
     if (s.includes('已断开')) {

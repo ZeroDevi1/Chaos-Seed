@@ -4,7 +4,6 @@
   import { createDanmakuListStore, type DanmakuListStore } from '@/danmaku/store'
 
   export let maxItems: number = 400
-  export let emptyText: string = '等待弹幕...'
   export let stickToBottom: boolean = false
   export let onOpenUrl: ((url: string) => void) | undefined = undefined
 
@@ -38,9 +37,6 @@
 </script>
 
 <div class="panel dm-panel">
-  {#if count === 0}
-    <div class="empty">{emptyText}</div>
-  {/if}
   <div bind:this={statusEl} class="text-muted"></div>
   <div bind:this={scrollEl} class="dm-scroll">
     <div bind:this={listEl} class="dm-list"></div>

@@ -18,8 +18,6 @@
 
   let listStore: DanmakuListStore | null = null
 
-  $: emptyText = connected ? '已连接：等待弹幕...' : '请先输入直播间地址并点击“解析/连接”。'
-
   function applyConnectedFromStatus(s: string) {
     const t = (s || '').toString()
     if (t.includes('已连接')) connected = true
@@ -196,5 +194,5 @@
     </div>
   </fluent-card>
 
-  <DanmakuList bind:store={listStore} emptyText={emptyText} maxItems={400} onOpenUrl={openUrl} />
+  <DanmakuList bind:store={listStore} maxItems={400} onOpenUrl={openUrl} />
 </div>
