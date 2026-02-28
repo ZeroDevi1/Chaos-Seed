@@ -1038,23 +1038,49 @@ impl CosyVoiceEngine {
                 if tokens.is_empty() {
                     return Err(TtsError::Onnx("speech_tokens is empty".into()));
                 }
-                // 不足一块/最后一块不足：用最后一个 token 补齐，保证可运行。
-                let rem = tokens.len() % chunk_len;
-                if rem != 0 {
-                    let pad = chunk_len - rem;
+
+                // 经验：flow 固定长度 chunk 推理若“硬切块”会更容易出现高频嗡嗡声、边界不连贯、局部拉长音。
+                // 这里用滑动窗口 + overlap（token 级）并在 mel 级做 cross-fade 来平滑拼接。
+                //
+                // - 默认 overlap=32 tokens（可用 env 覆盖）。
+                // - hop = chunk_len - overlap（确保 >0）。
+                let overlap_tokens = std::env::var("CHAOS_COSYVOICE_ORT_FLOW_CHUNK_OVERLAP_TOKENS")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+                    .unwrap_or(32)
+                    .min(chunk_len.saturating_sub(1));
+                let hop = chunk_len.saturating_sub(overlap_tokens).max(1);
+
+                // 让最后一窗至少覆盖到最后一个 token；不足的用最后一个 token padding。
+                let last_start = if orig_tokens_len <= chunk_len {
+                    0usize
+                } else {
+                    ((orig_tokens_len - chunk_len) + hop - 1) / hop * hop
+                };
+                let need_len = last_start + chunk_len;
+                if tokens.len() < need_len {
+                    let pad = need_len - tokens.len();
                     let last = *tokens.last().unwrap_or(&0);
                     tokens.extend(std::iter::repeat(last).take(pad));
                 }
 
-                let chunks: Vec<&[i64]> = tokens.chunks(chunk_len).collect();
-                let mut mel_chunks: Vec<Vec<f32>> = Vec::with_capacity(chunks.len());
+                let channels = 80usize;
+                let ratio = self.pack.cfg.token_mel_ratio.max(1) as usize;
+                let overlap_frames = overlap_tokens.saturating_mul(ratio);
 
-                for chunk in chunks {
+                let mut mel_ch: Vec<Vec<f32>> =
+                    (0..channels).map(|_| Vec::<f32>::new()).collect();
+                let mut windows = 0usize;
+
+                let mut start = 0usize;
+                while start <= last_start {
                     if let Some(c) = cancel {
                         if c.load(Ordering::Relaxed) {
                             return Err(TtsError::Canceled);
                         }
                     }
+                    windows += 1;
+                    let chunk = &tokens[start..start + chunk_len];
 
                     let tok_t = Tensor::<i64>::from_array((
                         vec![1usize, chunk.len()],
@@ -1120,44 +1146,62 @@ impl CosyVoiceEngine {
                     } else {
                         data.to_vec()
                     };
-                    mel_chunks.push(mel_vec);
-                }
 
-                // 拼接 mel（layout: [1, 80, T]，flatten 为按通道连续）。
-                let channels = 80usize;
-                let mut t_each: Option<usize> = None;
-                for c in &mel_chunks {
-                    if c.len() % channels != 0 {
+                    if mel_vec.len() % channels != 0 {
                         return Err(TtsError::Onnx(format!(
                             "ort: flow mel chunk len {} is not divisible by 80",
-                            c.len()
+                            mel_vec.len()
                         )));
                     }
-                    let t = c.len() / channels;
-                    if let Some(prev) = t_each {
-                        if prev != t {
-                            return Err(TtsError::Onnx(format!(
-                                "ort: flow mel chunk time mismatch: {prev} vs {t}"
-                            )));
+                    let t_each = mel_vec.len() / channels;
+                    let ov = overlap_frames.min(t_each.saturating_sub(1));
+
+                    for ch in 0..channels {
+                        let src = &mel_vec[ch * t_each..ch * t_each + t_each];
+                        let dst = &mut mel_ch[ch];
+                        if dst.is_empty() {
+                            dst.extend_from_slice(src);
+                            continue;
                         }
-                    } else {
-                        t_each = Some(t);
+                        if ov > 0 && dst.len() >= ov {
+                            let base = dst.len() - ov;
+                            // 线性 cross-fade：让边界更平滑，降低“电流/嗡嗡”感。
+                            for j in 0..ov {
+                                let w = if ov <= 1 {
+                                    1.0
+                                } else {
+                                    (j as f32) / ((ov - 1) as f32)
+                                };
+                                dst[base + j] = dst[base + j] * (1.0 - w) + src[j] * w;
+                            }
+                            dst.extend_from_slice(&src[ov..]);
+                        } else {
+                            // overlap 不可用则直接拼接（兜底）。
+                            dst.extend_from_slice(src);
+                        }
+                    }
+
+                    start = start.saturating_add(hop);
+                }
+
+                let total_t = mel_ch.get(0).map(|v| v.len()).unwrap_or(0);
+                if total_t == 0 {
+                    return Err(TtsError::Onnx("ort: flow produced empty mel".into()));
+                }
+                for ch in 1..channels {
+                    if mel_ch[ch].len() != total_t {
+                        return Err(TtsError::Onnx(format!(
+                            "ort: flow mel channel time mismatch: ch0={total_t} ch{ch}={}",
+                            mel_ch[ch].len()
+                        )));
                     }
                 }
-                let t_each = t_each.unwrap_or(0);
-                let total_t = t_each * mel_chunks.len();
                 let mut out = vec![0.0f32; channels * total_t];
-
                 for ch in 0..channels {
-                    for (i, c) in mel_chunks.iter().enumerate() {
-                        let src = &c[ch * t_each..ch * t_each + t_each];
-                        let dst_base = ch * total_t + i * t_each;
-                        out[dst_base..dst_base + t_each].copy_from_slice(src);
-                    }
+                    out[ch * total_t..ch * total_t + total_t].copy_from_slice(&mel_ch[ch]);
                 }
 
                 // 若因补齐 token 做了 padding，则把末尾多出来的 mel 帧裁掉，避免尾音出现明显“电流/重复”感。
-                let ratio = self.pack.cfg.token_mel_ratio.max(1) as usize;
                 let expected_t = orig_tokens_len.saturating_mul(ratio).min(total_t);
                 if expected_t < total_t {
                     let mut trimmed = vec![0.0f32; channels * expected_t];
@@ -1167,7 +1211,7 @@ impl CosyVoiceEngine {
                     }
                     if cosyvoice_debug_log_enabled() {
                         cosyvoice_debug_log(format_args!(
-                            "[cosyvoice][flow] chunked mel: channels=80 total_t={total_t} expected_t={expected_t} (trimmed)\n"
+                            "[cosyvoice][flow] chunked mel: chunk_len={chunk_len} overlap_tokens={overlap_tokens} hop={hop} windows={windows} channels=80 total_t={total_t} expected_t={expected_t} (trimmed)\n"
                         ));
                         cosyvoice_debug_log_f32_stats("flow.mel", &trimmed);
                     }
@@ -1176,7 +1220,7 @@ impl CosyVoiceEngine {
 
                 if cosyvoice_debug_log_enabled() {
                     cosyvoice_debug_log(format_args!(
-                        "[cosyvoice][flow] chunked mel: channels=80 total_t={total_t}\n"
+                        "[cosyvoice][flow] chunked mel: chunk_len={chunk_len} overlap_tokens={overlap_tokens} hop={hop} windows={windows} channels=80 total_t={total_t}\n"
                     ));
                     cosyvoice_debug_log_f32_stats("flow.mel", &out);
                 }
