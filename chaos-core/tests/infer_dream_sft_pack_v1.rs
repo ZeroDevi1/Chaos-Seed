@@ -145,12 +145,63 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
         &r.speech_tokens[0..20.min(r.speech_tokens.len())]
     );
     eprintln!("Rust logits shape = {:?}", r.llm_logits_vocab_size);
+    eprintln!(
+        "Rust speech_tokens_len = {}",
+        r.speech_tokens.len()
+    );
+    eprintln!(
+        "Rust wav duration_ms = {} sample_rate={}",
+        r.wav.duration_ms,
+        r.wav.sample_rate
+    );
+
+    // 额外落盘：便于与 Python 侧逐步对齐（每行一个 token）。
+    std::fs::create_dir_all(&out_dir).expect("create out_dir");
+    let tok_path = out_dir.join("dream_sft_pack_v1_rust.speech_tokens.txt");
+    let mut tok_txt = String::new();
+    for (i, t) in r.speech_tokens.iter().enumerate() {
+        use std::fmt::Write;
+        let _ = writeln!(&mut tok_txt, "{i}\t{t}");
+    }
+    std::fs::write(&tok_path, tok_txt).expect("write speech_tokens txt");
+    eprintln!("wrote speech_tokens: {}", tok_path.display());
+
+    // 快速检查音频是否“全程打满/全是静音/NaN”：计算 PCM16 的 min/max 与 RMS。
+    if r.wav.wav_bytes.len() >= 44 {
+        let pcm = &r.wav.wav_bytes[44..];
+        if pcm.len() >= 2 {
+            let mut min_s: i16 = i16::MAX;
+            let mut max_s: i16 = i16::MIN;
+            let mut sum_sq: f64 = 0.0;
+            let mut n: usize = 0;
+            let mut clip: usize = 0;
+            for chunk in pcm.chunks_exact(2) {
+                let s = i16::from_le_bytes([chunk[0], chunk[1]]);
+                min_s = min_s.min(s);
+                max_s = max_s.max(s);
+                let sf = s as f64 / 32768.0;
+                sum_sq += sf * sf;
+                n += 1;
+                if s == i16::MIN || s == i16::MAX {
+                    clip += 1;
+                }
+            }
+            let rms = (sum_sq / (n.max(1) as f64)).sqrt();
+            eprintln!(
+                "Rust wav pcm16 stats: samples={} min={} max={} rms={:.6} clip_samples={}",
+                n,
+                min_s,
+                max_s,
+                rms,
+                clip
+            );
+        }
+    }
 
     assert!(r.wav.wav_bytes.len() > 44, "wav bytes too small");
     assert_eq!(&r.wav.wav_bytes[0..4], b"RIFF");
     assert_eq!(&r.wav.wav_bytes[8..12], b"WAVE");
 
-    std::fs::create_dir_all(&out_dir).expect("create out_dir");
     let out_path = out_dir.join("dream_sft_pack_v1_rust.wav");
     std::fs::write(&out_path, &r.wav.wav_bytes).expect("write wav");
     eprintln!("wrote wav: {}", out_path.display());
