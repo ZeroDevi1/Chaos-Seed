@@ -6,6 +6,8 @@
 //!   not supported, the caller can decide whether to enable a fallback backend.
 
 pub mod cosyvoice;
+#[cfg(feature = "cosyvoice3-candle")]
+pub mod cosyvoice3_candle;
 pub mod post_process;
 pub mod sampling;
 pub mod text;
@@ -13,6 +15,8 @@ pub mod vad;
 pub mod wav;
 
 pub use cosyvoice::{CosyVoiceEngine, CosyVoicePack, CosyVoicePackConfig, Spk2Info, TtsSftParams};
+#[cfg(feature = "cosyvoice3-candle")]
+pub use cosyvoice3_candle::{CosyVoice3CandleEngine, CosyVoice3CandleParams, CosyVoice3Mode, CosyVoice3PromptFeatures, CosyVoice3WavDebugResult};
 pub use post_process::{TrimConfig, trim_output_pcm16, trim_output_pcm16_with_engine};
 pub use sampling::{SamplingConfig, sample_ras_next};
 pub use text::{
@@ -38,6 +42,8 @@ pub enum TtsError {
     Tokenizer(String),
     #[error("onnx error: {0}")]
     Onnx(String),
+    #[error("candle error: {0}")]
+    Candle(String),
     #[error("vad error: {0}")]
     Vad(String),
     #[error("not implemented: {0}")]

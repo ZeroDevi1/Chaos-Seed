@@ -79,6 +79,13 @@ tract-onnx = { version = "0.23.0-dev.2", optional = true }
 url = "2"
 urlencoding = "2"
 
+# CosyVoice3 路线2：纯 Rust + Candle 推理（参考 cosyvoice3.rs）
+# 说明：为了不影响现有 `onnx-candle`（candle 0.8）依赖，这里使用 crate alias 引入另一套 candle 版本（git rev）。
+cv3-candle-core = { package = "candle-core", git = "https://github.com/SpenserCai/candle", rev = "6058747", optional = true }
+cv3-candle-nn = { package = "candle-nn", git = "https://github.com/SpenserCai/candle", rev = "6058747", optional = true }
+cv3-candle-transformers = { package = "candle-transformers", git = "https://github.com/SpenserCai/candle", rev = "6058747", optional = true }
+cv3-candle-onnx = { package = "candle-onnx", git = "https://github.com/SpenserCai/candle", rev = "6058747", optional = true }
+
 [dev-dependencies]
 chaos-proto = { path = "../chaos-proto" }
 httpmock = "0.7"
@@ -99,3 +106,16 @@ onnx-ort = ["dep:ort"]
 onnx-ort-cuda = ["onnx-ort", "ort/cuda"]
 onnx-tract = ["dep:tract-core", "dep:tract-hir", "dep:tract-onnx"]
 silero-vad = ["dep:ndarray", "dep:ort-sys", "dep:silero-vad-rs"]
+
+# Route2：CosyVoice3 Candle 推理（LLM + Flow + HiFT）
+cosyvoice3-candle = [
+  "dep:cv3-candle-core",
+  "dep:cv3-candle-nn",
+  "dep:cv3-candle-transformers",
+]
+# Route2：使用 ONNX frontend 提取 prompt features（campplus + speech_tokenizer_v3）
+cosyvoice3-candle-onnx = [
+  "cosyvoice3-candle",
+  "dep:cv3-candle-onnx",
+  "cv3-candle-transformers/onnx",
+]

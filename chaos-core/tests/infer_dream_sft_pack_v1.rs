@@ -6,6 +6,9 @@ use chaos_core::tts::{
     CosyVoiceEngine, CosyVoicePack, PromptStrategy, SamplingConfig, TtsSftParams,
 };
 
+#[cfg(feature = "cosyvoice3-candle")]
+use chaos_core::tts::{CosyVoice3CandleEngine, CosyVoice3CandleParams, CosyVoice3Mode};
+
 fn default_pack_dir() -> Option<PathBuf> {
     // 默认约定：模型 pack 放在 repo 根目录 models/cosyvoice/pack/dream_sft_pack_v1（不进 git）
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -39,6 +42,132 @@ fn default_out_dir() -> Option<PathBuf> {
 /// - 如推理极慢，建议先确认 ORT 是否真的启用 CUDA：`CHAOS_ORT_EP_DEBUG=1`
 #[test]
 fn infer_dream_sft_pack_v1_writes_wav_file() {
+    // 可选：路线2（Candle）最小验证。
+    // - 通过 env `CHAOS_TTS_BACKEND=candle` 开启
+    // - 使用 `CHAOS_COSYVOICE3_CANDLE_MODEL_DIR` 指向 convert_weights.py 输出目录（包含 llm/flow/hift.safetensors + config.json + tokenizer/ + onnx frontend）
+    // - 使用 `CHAOS_TTS_PROMPT_WAV` 提供 prompt 音频（建议用 VoiceLab baseline 的 chunk_0000.wav）
+    let backend = std::env::var("CHAOS_TTS_BACKEND")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "onnx".to_string());
+
+    if backend == "candle" {
+        #[cfg(not(feature = "cosyvoice3-candle"))]
+        {
+            eprintln!("skip: CHAOS_TTS_BACKEND=candle requires cargo feature `cosyvoice3-candle` (+ `cosyvoice3-candle-onnx`).");
+            return;
+        }
+
+        #[cfg(feature = "cosyvoice3-candle")]
+        {
+            let model_dir = match std::env::var("CHAOS_COSYVOICE3_CANDLE_MODEL_DIR") {
+                Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
+                _ => {
+                    eprintln!("skip: CHAOS_COSYVOICE3_CANDLE_MODEL_DIR is not set");
+                    return;
+                }
+            };
+            let prompt_wav = match std::env::var("CHAOS_TTS_PROMPT_WAV") {
+                Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
+                _ => {
+                    eprintln!("skip: CHAOS_TTS_PROMPT_WAV is not set (need a prompt wav for candle route)");
+                    return;
+                }
+            };
+
+            let out_dir = match std::env::var("CHAOS_TTS_OUT_DIR") {
+                Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
+                _ => default_out_dir().expect("repo root"),
+            };
+            std::fs::create_dir_all(&out_dir).expect("create out_dir");
+
+            let mut sampling = SamplingConfig {
+                temperature: 1.0,
+                top_p: 0.75,
+                top_k: 20,
+                win_size: 10,
+                tau_r: 1.0,
+            };
+
+            // Greedy 对齐：用于和 Python/Candle 侧做 token 对比（规避 RNG 差异）。
+            let greedy = std::env::var("CHAOS_TTS_GREEDY")
+                .ok()
+                .map(|v| {
+                    let v = v.trim().to_ascii_lowercase();
+                    !(v.is_empty() || v == "0" || v == "false" || v == "no" || v == "off")
+                })
+                .unwrap_or(false);
+            if greedy {
+                sampling.top_k = 1;
+                sampling.top_p = 1.0;
+                eprintln!("CHAOS_TTS_GREEDY=1 => force sampling: {:?}", sampling);
+            } else {
+                eprintln!("sampling: {:?}", sampling);
+            }
+
+            let mut speed = 1.1f32;
+            if let Ok(v) = std::env::var("CHAOS_TTS_SPEED") {
+                let v = v.trim();
+                if !v.is_empty() {
+                    if let Ok(s) = v.parse::<f32>() {
+                        speed = s;
+                        eprintln!("CHAOS_TTS_SPEED override => speed={}", speed);
+                    } else {
+                        eprintln!("WARN: invalid CHAOS_TTS_SPEED={v}, expected float");
+                    }
+                }
+            }
+
+            let mode = std::env::var("CHAOS_COSYVOICE3_MODE")
+                .ok()
+                .map(|v| v.trim().to_ascii_lowercase())
+                .unwrap_or_else(|| "instruct".to_string());
+            let mode = match mode.as_str() {
+                "zero_shot" | "zeroshot" => CosyVoice3Mode::ZeroShot,
+                "cross_lingual" | "crosslingual" => CosyVoice3Mode::CrossLingual,
+                _ => CosyVoice3Mode::Instruct,
+            };
+
+            let engine = CosyVoice3CandleEngine::load(&model_dir).expect("load cosyvoice3 candle engine");
+            eprintln!(
+                "cosyvoice3-candle: sample_rate={}",
+                engine.config().sample_rate
+            );
+
+            let params = CosyVoice3CandleParams {
+                model_dir: model_dir.to_string_lossy().to_string(),
+                mode,
+                text: "看到码头就发马头，看到鸡就发欸由机，看到一男一女就发凿，看到一点那啥的就发爆了".to_string(),
+                prompt_text: "我在抖音上老刷那种，就是讲一个明星他的成长史...<|endofprompt|>".to_string(),
+                prompt_wav,
+                sampling,
+                n_timesteps: 10,
+                speed,
+            };
+
+            let r = engine.synthesize_wav_bytes_debug(&params).expect("synthesize candle");
+            eprintln!(
+                "Candle speech_tokens[0..20] = {:?}",
+                &r.speech_tokens[0..20.min(r.speech_tokens.len())]
+            );
+            eprintln!("Candle speech_tokens_len = {}", r.speech_tokens.len());
+            eprintln!(
+                "Candle wav duration_ms = {} sample_rate={}",
+                r.wav.duration_ms,
+                r.wav.sample_rate
+            );
+
+            assert!(r.wav.wav_bytes.len() > 44, "wav bytes too small");
+            assert_eq!(&r.wav.wav_bytes[0..4], b"RIFF");
+            assert_eq!(&r.wav.wav_bytes[8..12], b"WAVE");
+
+            let out_path = out_dir.join("dream_sft_pack_v1_candle.wav");
+            std::fs::write(&out_path, &r.wav.wav_bytes).expect("write wav");
+            eprintln!("wrote wav: {}", out_path.display());
+            return;
+        }
+    }
+
     let dir = match std::env::var("CHAOS_COSYVOICE_PACK_DIR") {
         Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
         _ => match default_pack_dir() {
