@@ -18,8 +18,7 @@ use crate::tts::wav::{
     notch_filter_f32_mono_inplace,
 };
 use crate::tts::{
-    PromptStrategy, SamplingConfig, TtsError, compute_guide_prefix_ratio_tokens,
-    resolve_tts_text_basic,
+    PromptStrategy, SamplingConfig, TtsError, resolve_tts_text_basic,
 };
 
 use cv3_candle_core::{DType, Device, Tensor};
@@ -755,33 +754,8 @@ impl CosyVoice3CandleEngine {
             .to_vec1()
             .map_err(|e| TtsError::Candle(format!("pcm to vec failed: {e}")))?;
 
-        // guide_prefix：把“情绪 prompt”读出来的那一段按 token 占比裁掉，避免最终音频不对齐。
-        if params.prompt_strategy == PromptStrategy::GuidePrefix {
-            // 与 tokenize() 的行为一致：这里也不加 special tokens。
-            let r = compute_guide_prefix_ratio_tokens(
-                &inner.tokenizer,
-                false,
-                &params.text,
-                &params.prompt_text,
-                &params.guide_sep,
-                params.text_frontend,
-            )?;
-            if let Some(r) = r {
-                let r = r.clamp(0.0, 0.95);
-                let cut = ((pcm_f32.len() as f32) * r).round() as usize;
-                if cut > 0 && cut < pcm_f32.len() {
-                    if debug {
-                        eprintln!(
-                            "[cosyvoice3-candle][debug] guide_prefix trim: ratio={} cut_samples={} before_samples={}",
-                            r,
-                            cut,
-                            pcm_f32.len()
-                        );
-                    }
-                    pcm_f32.drain(0..cut);
-                }
-            }
-        }
+        // 注：早期实现会把 guide_prefix 的 guide 拼到 spoken_text 前面，因此需要裁掉音频前缀。
+        // 现在 guide_prefix 会把 guide 放进 prompt_text（不应“读出来”），因此这里不再做裁剪。
 
         // 可选后处理：陷波去窄带啸叫（与 ONNX 路线保持一致的 env 行为）。
         if let Ok(hz) = std::env::var("CHAOS_TTS_POST_NOTCH_HZ") {

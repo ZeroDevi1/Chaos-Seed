@@ -75,14 +75,21 @@ pub fn resolve_tts_text_basic(
     let (spoken_text, mut prompt_inject_text) = match prompt_strategy {
         PromptStrategy::Inject => (text, prompt_text),
         PromptStrategy::GuidePrefix => {
-            // "guide_prefix" mode: prepend guide text to spoken text, but only inject END_OF_PROMPT.
+            // "guide_prefix" mode:
+            // - We keep `text` as the actual spoken text
+            // - We prepend the guide into the *prompt* side, and ensure `<|endofprompt|>` sits
+            //   right at the boundary between (guide prompt) and (spoken text).
+            //
+            // This matches CosyVoice3LM's behavior: it concatenates `prompt_text_tokens + text_tokens`.
+            // If we only inject `<|endofprompt|>` and move the guide into `spoken_text`, the marker
+            // would incorrectly appear *before* the guide, which can badly degrade generation.
             let guide = strip_endofprompt(&prompt_text);
-            let spoken = if guide.is_empty() {
-                text
+            let prompt = if guide.is_empty() {
+                END_OF_PROMPT.to_string()
             } else {
-                format!("{}{}{}", guide, guide_sep, text)
+                format!("{}{}{}", guide, guide_sep, END_OF_PROMPT)
             };
-            (spoken, END_OF_PROMPT.to_string())
+            (text, prompt)
         }
     };
 
@@ -102,10 +109,10 @@ pub fn resolve_tts_text_basic(
     })
 }
 
-/// 计算 `guide_prefix` 模式下「需要从生成音频前面裁掉的比例」。
+/// 计算 `guide_prefix` 模式下「需要从生成音频前面裁掉的比例」。（历史兼容）
 ///
-/// 背景：`guide_prefix` 会把 prompt 文本拼到 spoken_text 前面（用于“情绪/语气”引导），
-/// 但最终我们通常不希望把这段 guide 也读出来，因此需要在后处理阶段把它裁掉。
+/// 说明：旧实现曾把 guide 直接拼到 `spoken_text` 前面，因此需要按 token 占比裁掉音频前缀。
+/// 目前 `guide_prefix` 已改为把 guide 放到 `prompt_inject_text`（不应被“读出来”），因此通常返回 None。
 ///
 /// 这里用 tokenizer 的 token 序列做一个“后缀匹配”：
 /// - full：guide + sep + text
