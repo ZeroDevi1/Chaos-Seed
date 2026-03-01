@@ -13,8 +13,14 @@ use std::sync::Mutex;
 
 use serde::Deserialize;
 
-use crate::tts::{SamplingConfig, TtsError};
-use crate::tts::wav::{TtsWavResult, duration_ms, encode_wav_pcm16_mono, f32_to_pcm16_mono, notch_filter_f32_mono_inplace};
+use crate::tts::wav::{
+    TtsWavResult, duration_ms, encode_wav_pcm16_mono, f32_to_pcm16_mono,
+    notch_filter_f32_mono_inplace,
+};
+use crate::tts::{
+    PromptStrategy, SamplingConfig, TtsError, compute_guide_prefix_ratio_tokens,
+    resolve_tts_text_basic,
+};
 
 use cv3_candle_core::{DType, Device, Tensor};
 use cv3_candle_nn::VarBuilder;
@@ -86,8 +92,7 @@ pub struct CosyVoice3Qwen2Config {
 impl CosyVoice3CandleConfig {
     pub fn from_model_dir(model_dir: &Path) -> Result<Self, TtsError> {
         let p = model_dir.join("config.json");
-        let f = std::fs::File::open(&p)
-            .map_err(|e| TtsError::Io(e))?;
+        let f = std::fs::File::open(&p).map_err(|e| TtsError::Io(e))?;
         let cfg: Self = serde_json::from_reader(f)?;
         Ok(cfg)
     }
@@ -184,7 +189,26 @@ pub struct CosyVoice3CandleParams {
     pub text: String,
     /// ZeroShot：prompt_text；Instruct：instruct_text；CrossLingual：忽略（可为空）
     pub prompt_text: String,
-    pub prompt_wav: PathBuf,
+    /// 说话人 ID（SFT 路线）：从 `spk2info.json` 读取 embedding（flow 使用）。
+    ///
+    /// 说明：CosyVoice3 的 candle LLM 推理接口目前不支持注入 llm_embedding，因此此字段只影响 Flow/Vocoder 音色侧。
+    /// 在 Instruct 模式下，上游 python 也会移除 llm_embedding，因此更容易对齐。
+    pub spk_id: Option<String>,
+    /// 可选覆盖 `spk2info.json` 路径。
+    ///
+    /// - 若为空：优先读 env `CHAOS_COSYVOICE3_SPK2INFO_JSON`，否则读 `{model_dir}/spk2info.json`。
+    pub spk2info_json: Option<PathBuf>,
+    /// 参考音频（用于提取 prompt_speech_tokens/prompt_mel/speaker_embedding）。
+    ///
+    /// - ZeroShot/CrossLingual/Instruct：都建议提供一段“参考声音音频”（通常 3~10 秒更稳定）
+    /// - 若不提供：会走 text-only fallback（prompt features 全 0/空），仅用于快速验证链路，音色/质量通常不可控
+    pub prompt_wav: Option<PathBuf>,
+    /// prompt_text 的使用策略（对齐 `infer_sft.py` 的 `--prompt_strategy`）。
+    pub prompt_strategy: PromptStrategy,
+    /// guide_prefix 模式下连接 prompt_text 和 text 的分隔符（对齐 `--guide_sep`）。
+    pub guide_sep: String,
+    /// 是否启用基础文本前处理（换行/空白/标点归一化等）。
+    pub text_frontend: bool,
     pub sampling: SamplingConfig,
     pub n_timesteps: usize,
     pub speed: f32,
@@ -238,7 +262,11 @@ impl CosyVoice3CandleEngine {
                 !(v.is_empty() || v == "0" || v == "false" || v == "no" || v == "off")
             })
             .unwrap_or(false);
-        let dtype = if on_gpu && use_f16 { DType::F16 } else { DType::F32 };
+        let dtype = if on_gpu && use_f16 {
+            DType::F16
+        } else {
+            DType::F32
+        };
 
         eprintln!(
             "[cosyvoice3-candle] device={} dtype={:?}",
@@ -312,7 +340,12 @@ impl CosyVoice3CandleEngine {
 
     /// 从 prompt_wav 提取 prompt features（需要启用 feature `cosyvoice3-candle-onnx`）。
     #[cfg(feature = "cosyvoice3-candle-onnx")]
-    pub fn extract_prompt_features(&self, prompt_wav: &Path) -> Result<CosyVoice3PromptFeatures, TtsError> {
+    pub fn extract_prompt_features(
+        &self,
+        prompt_wav: &Path,
+    ) -> Result<CosyVoice3PromptFeatures, TtsError> {
+        let debug = std::env::var_os("CHAOS_COSYVOICE3_DEBUG").is_some();
+
         let (audio_f32, sr) = decode_wav_to_f32_mono(prompt_wav)?;
         let frontend = self.frontend.as_ref().ok_or_else(|| {
             TtsError::Candle(
@@ -340,8 +373,16 @@ impl CosyVoice3CandleEngine {
             .to_dtype(DType::F32)
             .map_err(|e| TtsError::Candle(format!("mel to f32 failed: {e}")))?;
         let mel_shape = mel.dims();
-        let t_dim = if mel_shape.len() == 3 { mel_shape[1] } else { mel_shape[0] };
-        let mel_dim = if mel_shape.len() == 3 { mel_shape[2] } else { mel_shape[1] };
+        let t_dim = if mel_shape.len() == 3 {
+            mel_shape[1]
+        } else {
+            mel_shape[0]
+        };
+        let mel_dim = if mel_shape.len() == 3 {
+            mel_shape[2]
+        } else {
+            mel_shape[1]
+        };
         let mel_flat: Vec<f32> = mel
             .flatten_all()
             .map_err(|e| TtsError::Candle(format!("flatten mel failed: {e}")))?
@@ -361,6 +402,17 @@ impl CosyVoice3CandleEngine {
             .to_vec1()
             .map_err(|e| TtsError::Candle(format!("embedding to vec failed: {e}")))?;
 
+        if debug {
+            eprintln!(
+                "[cosyvoice3-candle][debug] prompt_features: tokens_len={} mel_T={} mel_dim={} spk_embed_dim={} sr={}",
+                prompt_tokens.len(),
+                prompt_mel.len(),
+                mel_dim,
+                speaker_embedding.len(),
+                sr
+            );
+        }
+
         Ok(CosyVoice3PromptFeatures {
             prompt_speech_tokens: prompt_tokens,
             prompt_mel,
@@ -370,7 +422,10 @@ impl CosyVoice3CandleEngine {
     }
 
     /// 端到端推理：返回 wav + speech_tokens（便于对齐）。
-    pub fn synthesize_wav_bytes_debug(&self, params: &CosyVoice3CandleParams) -> Result<CosyVoice3WavDebugResult, TtsError> {
+    pub fn synthesize_wav_bytes_debug(
+        &self,
+        params: &CosyVoice3CandleParams,
+    ) -> Result<CosyVoice3WavDebugResult, TtsError> {
         if params.speed <= 0.0 {
             return Err(TtsError::InvalidArg("speed must be > 0".into()));
         }
@@ -378,22 +433,51 @@ impl CosyVoice3CandleEngine {
             return Err(TtsError::InvalidArg("n_timesteps must be > 0".into()));
         }
 
-        #[cfg(not(feature = "cosyvoice3-candle-onnx"))]
-        {
-            let _ = params;
-            return Err(TtsError::NotImplemented(
-                "CosyVoice3CandleEngine requires feature `cosyvoice3-candle-onnx` to extract prompt features",
-            ));
+        // 优先使用 prompt_wav（zero-shot / 指定参考音频的路线）
+        if let Some(prompt_wav) = params.prompt_wav.as_ref() {
+            #[cfg(feature = "cosyvoice3-candle-onnx")]
+            {
+                let prompt = self.extract_prompt_features(prompt_wav.as_path())?;
+                return self.synthesize_from_prompt_features(params, &prompt);
+            }
+
+            #[cfg(not(feature = "cosyvoice3-candle-onnx"))]
+            {
+                let _ = prompt_wav;
+                return Err(TtsError::NotImplemented(
+                    "extract prompt features requires feature `cosyvoice3-candle-onnx`",
+                ));
+            }
         }
 
-        #[cfg(feature = "cosyvoice3-candle-onnx")]
+        // route B：SFT spk_id（不依赖 prompt_wav / onnx frontend）
+        if let Some(spk_id) = params
+            .spk_id
+            .as_deref()
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
         {
-            let prompt = self.extract_prompt_features(&params.prompt_wav)?;
-            self.synthesize_from_prompt_features(params, &prompt)
+            let embedding =
+                self.load_speaker_embedding_from_spk2info(spk_id, params.spk2info_json.as_deref())?;
+            let prompt = CosyVoice3PromptFeatures {
+                prompt_speech_tokens: Vec::new(),
+                prompt_mel: Vec::new(),
+                speaker_embedding: embedding,
+                prompt_sample_rate: self.cfg.sample_rate as u32,
+            };
+            return self.synthesize_from_prompt_features(params, &prompt);
         }
+
+        // 若未提供 prompt_wav / spk_id，则走 text-only fallback（方便快速跑通 pipeline）。
+        let prompt = CosyVoice3PromptFeatures {
+            prompt_speech_tokens: Vec::new(),
+            prompt_mel: Vec::new(),
+            speaker_embedding: vec![0.0; self.cfg.spk_embed_dim],
+            prompt_sample_rate: self.cfg.sample_rate as u32,
+        };
+        self.synthesize_from_prompt_features(params, &prompt)
     }
 
-    #[cfg(feature = "cosyvoice3-candle-onnx")]
     fn synthesize_from_prompt_features(
         &self,
         params: &CosyVoice3CandleParams,
@@ -410,66 +494,115 @@ impl CosyVoice3CandleEngine {
 
         let mut inner = self.inner.lock().expect("lock cosyvoice3 inner");
 
-        // Tokenize
-        let text_tokens = tokenize(&inner.tokenizer, &params.text)?;
+        // 文本策略对齐：guide_prefix 时 spoken_text 前缀包含 prompt_text，但 prompt_inject_text 仅注入 endofprompt。
+        let resolved = resolve_tts_text_basic(
+            &params.text,
+            &params.prompt_text,
+            params.prompt_strategy,
+            &params.guide_sep,
+            params.text_frontend,
+        )?;
+
+        // Tokenize（spoken_text）
+        let text_tokens = tokenize(&inner.tokenizer, &resolved.spoken_text)?;
 
         // mode 对齐 cosyvoice3.rs 的行为
         let (actual_prompt_text, llm_prompt_speech_tokens) = match params.mode {
-            CosyVoice3Mode::ZeroShot => (params.prompt_text.as_str(), prompt.prompt_speech_tokens.clone()),
+            CosyVoice3Mode::ZeroShot => (
+                resolved.prompt_inject_text.as_str(),
+                prompt.prompt_speech_tokens.clone(),
+            ),
             CosyVoice3Mode::CrossLingual => ("", Vec::new()),
-            CosyVoice3Mode::Instruct => (params.prompt_text.as_str(), Vec::new()),
+            CosyVoice3Mode::Instruct => (resolved.prompt_inject_text.as_str(), Vec::new()),
         };
         let prompt_text_tokens = tokenize(&inner.tokenizer, actual_prompt_text)?;
 
         if debug {
             eprintln!(
-                "[cosyvoice3-candle][debug] tokenize: text_tokens={} prompt_text_tokens={} llm_prompt_speech_tokens={} flow_prompt_speech_tokens={} mode={:?}",
+                "[cosyvoice3-candle][debug] tokenize: text_tokens={} prompt_text_tokens={} llm_prompt_speech_tokens={} flow_prompt_speech_tokens={} mode={:?} prompt_strategy={} text_frontend={}",
                 text_tokens.len(),
                 prompt_text_tokens.len(),
                 llm_prompt_speech_tokens.len(),
                 prompt.prompt_speech_tokens.len(),
-                params.mode
+                params.mode,
+                params.prompt_strategy.as_str(),
+                params.text_frontend
+            );
+            eprintln!(
+                "[cosyvoice3-candle][debug] resolved_text: spoken_text_len={} prompt_inject_text_len={}",
+                resolved.spoken_text.len(),
+                resolved.prompt_inject_text.len()
             );
         }
 
         // tensors
-        let text_tokens_tensor = Tensor::from_slice(&text_tokens, (1, text_tokens.len()), &self.device)
-            .map_err(|e| TtsError::Candle(format!("create text_tokens tensor failed: {e}")))?
-            .to_dtype(DType::U32)
-            .map_err(|e| TtsError::Candle(format!("text_tokens to u32 failed: {e}")))?;
-        let prompt_text_tensor = if prompt_text_tokens.is_empty() {
-            Tensor::zeros((1, 0), DType::U32, &self.device)
-                .map_err(|e| TtsError::Candle(format!("create empty prompt_text tensor failed: {e}")))?
-        } else {
-            Tensor::from_slice(&prompt_text_tokens, (1, prompt_text_tokens.len()), &self.device)
-                .map_err(|e| TtsError::Candle(format!("create prompt_text tensor failed: {e}")))?
+        let text_tokens_tensor =
+            Tensor::from_slice(&text_tokens, (1, text_tokens.len()), &self.device)
+                .map_err(|e| TtsError::Candle(format!("create text_tokens tensor failed: {e}")))?
                 .to_dtype(DType::U32)
-                .map_err(|e| TtsError::Candle(format!("prompt_text to u32 failed: {e}")))?
+                .map_err(|e| TtsError::Candle(format!("text_tokens to u32 failed: {e}")))?;
+        let prompt_text_tensor = if prompt_text_tokens.is_empty() {
+            Tensor::zeros((1, 0), DType::U32, &self.device).map_err(|e| {
+                TtsError::Candle(format!("create empty prompt_text tensor failed: {e}"))
+            })?
+        } else {
+            Tensor::from_slice(
+                &prompt_text_tokens,
+                (1, prompt_text_tokens.len()),
+                &self.device,
+            )
+            .map_err(|e| TtsError::Candle(format!("create prompt_text tensor failed: {e}")))?
+            .to_dtype(DType::U32)
+            .map_err(|e| TtsError::Candle(format!("prompt_text to u32 failed: {e}")))?
         };
         let llm_prompt_speech_tensor = if llm_prompt_speech_tokens.is_empty() {
-            Tensor::zeros((1, 0), DType::U32, &self.device)
-                .map_err(|e| TtsError::Candle(format!("create empty llm prompt_speech tensor failed: {e}")))?
+            Tensor::zeros((1, 0), DType::U32, &self.device).map_err(|e| {
+                TtsError::Candle(format!("create empty llm prompt_speech tensor failed: {e}"))
+            })?
         } else {
-            Tensor::from_slice(&llm_prompt_speech_tokens, (1, llm_prompt_speech_tokens.len()), &self.device)
-                .map_err(|e| TtsError::Candle(format!("create llm prompt_speech tensor failed: {e}")))?
-                .to_dtype(DType::U32)
-                .map_err(|e| TtsError::Candle(format!("llm prompt_speech to u32 failed: {e}")))?
+            Tensor::from_slice(
+                &llm_prompt_speech_tokens,
+                (1, llm_prompt_speech_tokens.len()),
+                &self.device,
+            )
+            .map_err(|e| TtsError::Candle(format!("create llm prompt_speech tensor failed: {e}")))?
+            .to_dtype(DType::U32)
+            .map_err(|e| TtsError::Candle(format!("llm prompt_speech to u32 failed: {e}")))?
         };
 
-        let flow_prompt_speech_tensor = Tensor::from_slice(
-            &prompt.prompt_speech_tokens,
-            (1, prompt.prompt_speech_tokens.len()),
-            &self.device,
-        )
-        .map_err(|e| TtsError::Candle(format!("create flow prompt_speech tensor failed: {e}")))?
-        .to_dtype(DType::U32)
-        .map_err(|e| TtsError::Candle(format!("flow prompt_speech to u32 failed: {e}")))?;
+        let flow_prompt_speech_tensor = if prompt.prompt_speech_tokens.is_empty() {
+            Tensor::zeros((1, 0), DType::U32, &self.device).map_err(|e| {
+                TtsError::Candle(format!(
+                    "create empty flow prompt_speech tensor failed: {e}"
+                ))
+            })?
+        } else {
+            Tensor::from_slice(
+                &prompt.prompt_speech_tokens,
+                (1, prompt.prompt_speech_tokens.len()),
+                &self.device,
+            )
+            .map_err(|e| TtsError::Candle(format!("create flow prompt_speech tensor failed: {e}")))?
+            .to_dtype(DType::U32)
+            .map_err(|e| TtsError::Candle(format!("flow prompt_speech to u32 failed: {e}")))?
+        };
 
         // prompt_mel: Vec<Vec<f32>> -> Tensor [1, T, 80]
-        let (prompt_mel_t, prompt_mel_dim) = vec2d_to_tensor(&prompt.prompt_mel, &self.device)?;
+        let (prompt_mel_t, prompt_mel_dim) = if prompt.prompt_mel.is_empty() {
+            (
+                Tensor::zeros((1, 0, 80), self.dtype, &self.device).map_err(|e| {
+                    TtsError::Candle(format!("create empty prompt_mel tensor failed: {e}"))
+                })?,
+                80usize,
+            )
+        } else {
+            vec2d_to_tensor(&prompt.prompt_mel, &self.device)?
+        };
         if prompt_mel_dim != 80 {
             // 实际上 CosyVoice3 mel_dim=80；若不对齐通常是输入特征提取出了问题。
-            return Err(TtsError::InvalidArg(format!("prompt_mel dim must be 80, got {prompt_mel_dim}")));
+            return Err(TtsError::InvalidArg(format!(
+                "prompt_mel dim must be 80, got {prompt_mel_dim}"
+            )));
         }
 
         let speaker_embedding_tensor = Tensor::from_slice(
@@ -478,6 +611,13 @@ impl CosyVoice3CandleEngine {
             &self.device,
         )
         .map_err(|e| TtsError::Candle(format!("create speaker embedding tensor failed: {e}")))?;
+        if speaker_embedding_tensor.dims().get(1).copied().unwrap_or(0) != self.cfg.spk_embed_dim {
+            return Err(TtsError::InvalidArg(format!(
+                "speaker_embedding dim must be {}, got {}",
+                self.cfg.spk_embed_dim,
+                speaker_embedding_tensor.dims().get(1).copied().unwrap_or(0)
+            )));
+        }
 
         // LLM
         let speech_tokens = inner
@@ -502,10 +642,11 @@ impl CosyVoice3CandleEngine {
             );
         }
 
-        let speech_tokens_tensor = Tensor::from_slice(&speech_tokens, (1, speech_tokens.len()), &self.device)
-            .map_err(|e| TtsError::Candle(format!("create speech_tokens tensor failed: {e}")))?
-            .to_dtype(DType::U32)
-            .map_err(|e| TtsError::Candle(format!("speech_tokens to u32 failed: {e}")))?;
+        let speech_tokens_tensor =
+            Tensor::from_slice(&speech_tokens, (1, speech_tokens.len()), &self.device)
+                .map_err(|e| TtsError::Candle(format!("create speech_tokens tensor failed: {e}")))?
+                .to_dtype(DType::U32)
+                .map_err(|e| TtsError::Candle(format!("speech_tokens to u32 failed: {e}")))?;
 
         // Flow
         let mel = inner
@@ -533,19 +674,25 @@ impl CosyVoice3CandleEngine {
         let mel_b80t = if mel_shape0.len() == 3 && mel_shape0[1] == 80 {
             mel_f32
         } else if mel_shape0.len() == 3 && mel_shape0[2] == 80 {
-            mel_f32
-                .transpose(1, 2)
-                .map_err(|e| TtsError::Candle(format!("transpose mel [B,T,80] -> [B,80,T] failed: {e}")))?
+            mel_f32.transpose(1, 2).map_err(|e| {
+                TtsError::Candle(format!("transpose mel [B,T,80] -> [B,80,T] failed: {e}"))
+            })?
         } else if mel_shape0.len() == 2 && mel_shape0[0] == 80 {
             mel_f32
                 .reshape((1, mel_shape0[0], mel_shape0[1]))
-                .map_err(|e| TtsError::Candle(format!("reshape mel [80,T] -> [1,80,T] failed: {e}")))?
+                .map_err(|e| {
+                    TtsError::Candle(format!("reshape mel [80,T] -> [1,80,T] failed: {e}"))
+                })?
         } else if mel_shape0.len() == 2 && mel_shape0[1] == 80 {
             mel_f32
                 .transpose(0, 1)
-                .map_err(|e| TtsError::Candle(format!("transpose mel [T,80] -> [80,T] failed: {e}")))?
+                .map_err(|e| {
+                    TtsError::Candle(format!("transpose mel [T,80] -> [80,T] failed: {e}"))
+                })?
                 .reshape((1, mel_shape0[1], mel_shape0[0]))
-                .map_err(|e| TtsError::Candle(format!("reshape mel [80,T] -> [1,80,T] failed: {e}")))?
+                .map_err(|e| {
+                    TtsError::Candle(format!("reshape mel [80,T] -> [1,80,T] failed: {e}"))
+                })?
         } else {
             return Err(TtsError::InvalidArg(format!(
                 "unexpected mel shape from flow: rank={} shape={:?}",
@@ -558,9 +705,9 @@ impl CosyVoice3CandleEngine {
         // 但 vocoder 需要 [B,80,T]，因此缩放后再转回去。
         let mel_for_vocoder = if (params.speed - 1.0).abs() > f32::EPSILON {
             // [1,80,T] -> [1,T,80]
-            let mel_bt80 = mel_b80t
-                .transpose(1, 2)
-                .map_err(|e| TtsError::Candle(format!("transpose mel [1,80,T] -> [1,T,80] failed: {e}")))?;
+            let mel_bt80 = mel_b80t.transpose(1, 2).map_err(|e| {
+                TtsError::Candle(format!("transpose mel [1,80,T] -> [1,T,80] failed: {e}"))
+            })?;
             let mel_flat: Vec<f32> = mel_bt80
                 .flatten_all()
                 .map_err(|e| TtsError::Candle(format!("flatten mel failed: {e}")))?
@@ -573,9 +720,11 @@ impl CosyVoice3CandleEngine {
                 .to_dtype(self.dtype)
                 .map_err(|e| TtsError::Candle(format!("scaled mel cast failed: {e}")))?;
             // [1,T,80] -> [1,80,T]
-            mel_scaled_bt80
-                .transpose(1, 2)
-                .map_err(|e| TtsError::Candle(format!("transpose scaled mel [1,T,80] -> [1,80,T] failed: {e}")))?
+            mel_scaled_bt80.transpose(1, 2).map_err(|e| {
+                TtsError::Candle(format!(
+                    "transpose scaled mel [1,T,80] -> [1,80,T] failed: {e}"
+                ))
+            })?
         } else {
             mel_b80t
                 .to_dtype(self.dtype)
@@ -606,6 +755,34 @@ impl CosyVoice3CandleEngine {
             .to_vec1()
             .map_err(|e| TtsError::Candle(format!("pcm to vec failed: {e}")))?;
 
+        // guide_prefix：把“情绪 prompt”读出来的那一段按 token 占比裁掉，避免最终音频不对齐。
+        if params.prompt_strategy == PromptStrategy::GuidePrefix {
+            // 与 tokenize() 的行为一致：这里也不加 special tokens。
+            let r = compute_guide_prefix_ratio_tokens(
+                &inner.tokenizer,
+                false,
+                &params.text,
+                &params.prompt_text,
+                &params.guide_sep,
+                params.text_frontend,
+            )?;
+            if let Some(r) = r {
+                let r = r.clamp(0.0, 0.95);
+                let cut = ((pcm_f32.len() as f32) * r).round() as usize;
+                if cut > 0 && cut < pcm_f32.len() {
+                    if debug {
+                        eprintln!(
+                            "[cosyvoice3-candle][debug] guide_prefix trim: ratio={} cut_samples={} before_samples={}",
+                            r,
+                            cut,
+                            pcm_f32.len()
+                        );
+                    }
+                    pcm_f32.drain(0..cut);
+                }
+            }
+        }
+
         // 可选后处理：陷波去窄带啸叫（与 ONNX 路线保持一致的 env 行为）。
         if let Ok(hz) = std::env::var("CHAOS_TTS_POST_NOTCH_HZ") {
             let hz = hz.trim();
@@ -615,7 +792,12 @@ impl CosyVoice3CandleEngine {
                         .ok()
                         .and_then(|v| v.trim().parse::<f32>().ok())
                         .unwrap_or(20.0);
-                    let _ = notch_filter_f32_mono_inplace(&mut pcm_f32, self.cfg.sample_rate as u32, hz, q);
+                    let _ = notch_filter_f32_mono_inplace(
+                        &mut pcm_f32,
+                        self.cfg.sample_rate as u32,
+                        hz,
+                        q,
+                    );
                     eprintln!(
                         "[cosyvoice3-candle] applied notch filter: hz={} q={}",
                         hz, q
@@ -634,6 +816,36 @@ impl CosyVoice3CandleEngine {
         };
 
         Ok(CosyVoice3WavDebugResult { wav, speech_tokens })
+    }
+
+    fn load_speaker_embedding_from_spk2info(
+        &self,
+        spk_id: &str,
+        spk2info_override: Option<&Path>,
+    ) -> Result<Vec<f32>, TtsError> {
+        let p = if let Some(p) = spk2info_override {
+            p.to_path_buf()
+        } else if let Some(raw) = std::env::var_os("CHAOS_COSYVOICE3_SPK2INFO_JSON") {
+            PathBuf::from(raw)
+        } else {
+            self.model_dir.join("spk2info.json")
+        };
+
+        if !p.exists() {
+            return Err(TtsError::InvalidArg(format!(
+                "spk2info.json not found: {} (hint: set CHAOS_COSYVOICE3_SPK2INFO_JSON or put spk2info.json next to config.json)",
+                p.display()
+            )));
+        }
+
+        let map = crate::tts::CosyVoicePack::load_spk2info(&p, self.cfg.spk_embed_dim)?;
+        let info = map.get(spk_id).ok_or_else(|| {
+            TtsError::InvalidArg(format!(
+                "spk_id not found in spk2info.json: spk_id={spk_id} path={}",
+                p.display()
+            ))
+        })?;
+        Ok(info.embedding.clone())
     }
 }
 
@@ -703,8 +915,7 @@ fn select_device(dev_req: &str) -> Result<(Device, bool), TtsError> {
 
 /// WAV 解码：支持 PCM16/PCM32/Float32；输出 [-1, 1] 的 mono f32。
 fn decode_wav_to_f32_mono(path: &Path) -> Result<(Vec<f32>, u32), TtsError> {
-    let mut r = hound::WavReader::open(path)
-        .map_err(|e| TtsError::Io(std::io::Error::other(e)))?;
+    let mut r = hound::WavReader::open(path).map_err(|e| TtsError::Io(std::io::Error::other(e)))?;
     let spec = r.spec();
     let sr = spec.sample_rate;
     let channels = spec.channels.max(1) as usize;

@@ -54,7 +54,9 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
     if backend == "candle" {
         #[cfg(not(feature = "cosyvoice3-candle"))]
         {
-            eprintln!("skip: CHAOS_TTS_BACKEND=candle requires cargo feature `cosyvoice3-candle` (+ `cosyvoice3-candle-onnx`).");
+            eprintln!(
+                "skip: CHAOS_TTS_BACKEND=candle requires cargo feature `cosyvoice3-candle` (+ `cosyvoice3-candle-onnx`)."
+            );
             return;
         }
 
@@ -67,13 +69,11 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
                     return;
                 }
             };
-            let prompt_wav = match std::env::var("CHAOS_TTS_PROMPT_WAV") {
-                Ok(v) if !v.trim().is_empty() => PathBuf::from(v.trim()),
-                _ => {
-                    eprintln!("skip: CHAOS_TTS_PROMPT_WAV is not set (need a prompt wav for candle route)");
-                    return;
-                }
-            };
+            let prompt_wav = std::env::var("CHAOS_TTS_PROMPT_WAV")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from);
 
             if !model_dir.exists() {
                 eprintln!(
@@ -82,12 +82,15 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
                 );
                 return;
             }
-            if !prompt_wav.exists() {
+            if let Some(p) = prompt_wav.as_ref() {
+                if !p.exists() {
+                    eprintln!("skip: CHAOS_TTS_PROMPT_WAV does not exist: {}", p.display());
+                    return;
+                }
+            } else {
                 eprintln!(
-                    "skip: CHAOS_TTS_PROMPT_WAV does not exist: {}",
-                    prompt_wav.display()
+                    "WARN: CHAOS_TTS_PROMPT_WAV not set => text-only fallback (音色/质量通常不可控；建议提供参考声音音频)"
                 );
-                return;
             }
 
             // Candle 模型目录最小校验：避免直接 panic，先给出缺什么文件。
@@ -150,7 +153,8 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
                 eprintln!("sampling: {:?}", sampling);
             }
 
-            let mut speed = 1.1f32;
+            // 默认不做加速，避免“音频长度不对齐”的主观感受。
+            let mut speed = 1.0f32;
             if let Ok(v) = std::env::var("CHAOS_TTS_SPEED") {
                 let v = v.trim();
                 if !v.is_empty() {
@@ -173,24 +177,71 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
                 _ => CosyVoice3Mode::Instruct,
             };
 
-            let engine = CosyVoice3CandleEngine::load(&model_dir).expect("load cosyvoice3 candle engine");
+            let engine =
+                CosyVoice3CandleEngine::load(&model_dir).expect("load cosyvoice3 candle engine");
             eprintln!(
                 "cosyvoice3-candle: sample_rate={}",
                 engine.config().sample_rate
             );
 
+            // cosyvoice3.rs 的约定：
+            // - Instruct 模式下，prompt_text 实际是 instruct_text（风格/指令），不是 prompt_wav 的转写文本。
+            // - prompt_wav 仍用于提取 prompt features（音色/说话人特征）。
+            let prompt_text = match mode {
+                CosyVoice3Mode::Instruct => std::env::var("CHAOS_COSYVOICE3_INSTRUCT_TEXT")
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| "You are a helpful assistant.<|endofprompt|>".to_string()),
+                _ => std::env::var("CHAOS_COSYVOICE3_PROMPT_TEXT")
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| "You are a helpful assistant.<|endofprompt|>".to_string()),
+            };
+
+            // route B：如果没提供 prompt_wav，则尽量走 spk_id（spk2info.json）路线；否则退化到 text-only fallback。
+            let spk_id = std::env::var("CHAOS_COSYVOICE3_SPK_ID")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "dream".to_string());
+
+            let spk2info_json = std::env::var("CHAOS_COSYVOICE3_SPK2INFO_JSON")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from);
+
+            let can_use_spk2info = if prompt_wav.is_some() {
+                false
+            } else if let Some(p) = spk2info_json.as_ref() {
+                p.exists()
+            } else {
+                model_dir.join("spk2info.json").exists()
+            };
+
             let params = CosyVoice3CandleParams {
                 model_dir: model_dir.to_string_lossy().to_string(),
                 mode,
-                text: "看到码头就发马头，看到鸡就发欸由机，看到一男一女就发凿，看到一点那啥的就发爆了".to_string(),
-                prompt_text: "我在抖音上老刷那种，就是讲一个明星他的成长史...<|endofprompt|>".to_string(),
+                text:
+                    "看到码头就发马头，看到鸡就发欸由机，看到一男一女就发凿，看到一点那啥的就发爆了"
+                        .to_string(),
+                prompt_text,
+                spk_id: if can_use_spk2info { Some(spk_id) } else { None },
+                spk2info_json,
                 prompt_wav,
+                prompt_strategy: PromptStrategy::GuidePrefix,
+                guide_sep: "。 ".to_string(),
+                text_frontend: true,
                 sampling,
                 n_timesteps: 10,
                 speed,
             };
 
-            let r = engine.synthesize_wav_bytes_debug(&params).expect("synthesize candle");
+            let r = engine
+                .synthesize_wav_bytes_debug(&params)
+                .expect("synthesize candle");
             eprintln!(
                 "Candle speech_tokens[0..20] = {:?}",
                 &r.speech_tokens[0..20.min(r.speech_tokens.len())]
@@ -198,8 +249,7 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
             eprintln!("Candle speech_tokens_len = {}", r.speech_tokens.len());
             eprintln!(
                 "Candle wav duration_ms = {} sample_rate={}",
-                r.wav.duration_ms,
-                r.wav.sample_rate
+                r.wav.duration_ms, r.wav.sample_rate
             );
 
             assert!(r.wav.wav_bytes.len() > 44, "wav bytes too small");
@@ -256,6 +306,11 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
     }
 
     let pack = CosyVoicePack::load(&dir).expect("load pack");
+
+    if !cfg!(any(feature = "onnx-ort", feature = "onnx-tract")) {
+        eprintln!("skip: CosyVoiceEngine requires feature `onnx-ort` or `onnx-tract` (current build disabled both)");
+        return;
+    }
     let engine = CosyVoiceEngine::load(pack).expect("load engine");
 
     // Python 示例使用 dream；如果 pack 里没有，就退化到第一个 spkId，方便复用其他 pack 做 sanity check。
@@ -317,7 +372,10 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
     if greedy {
         params.sampling.top_k = 1;
         params.sampling.top_p = 1.0;
-        eprintln!("CHAOS_TTS_GREEDY=1 => force sampling: {:?}", params.sampling);
+        eprintln!(
+            "CHAOS_TTS_GREEDY=1 => force sampling: {:?}",
+            params.sampling
+        );
     } else {
         eprintln!("sampling: {:?}", params.sampling);
     }
@@ -332,14 +390,10 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
         &r.speech_tokens[0..20.min(r.speech_tokens.len())]
     );
     eprintln!("Rust logits shape = {:?}", r.llm_logits_vocab_size);
-    eprintln!(
-        "Rust speech_tokens_len = {}",
-        r.speech_tokens.len()
-    );
+    eprintln!("Rust speech_tokens_len = {}", r.speech_tokens.len());
     eprintln!(
         "Rust wav duration_ms = {} sample_rate={}",
-        r.wav.duration_ms,
-        r.wav.sample_rate
+        r.wav.duration_ms, r.wav.sample_rate
     );
 
     // 额外落盘：便于与 Python 侧逐步对齐（每行一个 token）。
@@ -376,11 +430,7 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
             let rms = (sum_sq / (n.max(1) as f64)).sqrt();
             eprintln!(
                 "Rust wav pcm16 stats: samples={} min={} max={} rms={:.6} clip_samples={}",
-                n,
-                min_s,
-                max_s,
-                rms,
-                clip
+                n, min_s, max_s, rms, clip
             );
         }
     }
