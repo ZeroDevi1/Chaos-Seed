@@ -75,21 +75,18 @@ pub fn resolve_tts_text_basic(
     let (spoken_text, mut prompt_inject_text) = match prompt_strategy {
         PromptStrategy::Inject => (text, prompt_text),
         PromptStrategy::GuidePrefix => {
-            // "guide_prefix" mode:
-            // - We keep `text` as the actual spoken text
-            // - We prepend the guide into the *prompt* side, and ensure `<|endofprompt|>` sits
-            //   right at the boundary between (guide prompt) and (spoken text).
+            // "guide_prefix" mode（对齐 VoiceLab 的 `tools/infer_sft.py`）：
+            // - 把 guide 文本（prompt_text 去掉 <|endofprompt|>）拼到 spoken_text 前面，让模型把它“读出来”；
+            // - prompt_inject_text 只注入最小 marker `<|endofprompt|>`（减少 prompt 泄露的不可控性）。
             //
-            // This matches CosyVoice3LM's behavior: it concatenates `prompt_text_tokens + text_tokens`.
-            // If we only inject `<|endofprompt|>` and move the guide into `spoken_text`, the marker
-            // would incorrectly appear *before* the guide, which can badly degrade generation.
+            // 说明：上游脚本的注释也写了“user can cut it in post”，因此这里不做自动裁剪。
             let guide = strip_endofprompt(&prompt_text);
-            let prompt = if guide.is_empty() {
-                END_OF_PROMPT.to_string()
+            let spoken = if guide.is_empty() {
+                text
             } else {
-                format!("{}{}{}", guide, guide_sep, END_OF_PROMPT)
+                format!("{}{}{}", guide, guide_sep, text)
             };
-            (text, prompt)
+            (spoken, END_OF_PROMPT.to_string())
         }
     };
 
@@ -109,10 +106,10 @@ pub fn resolve_tts_text_basic(
     })
 }
 
-/// 计算 `guide_prefix` 模式下「需要从生成音频前面裁掉的比例」。（历史兼容）
+/// 计算 `guide_prefix` 模式下「需要从生成音频前面裁掉的比例」。
 ///
-/// 说明：旧实现曾把 guide 直接拼到 `spoken_text` 前面，因此需要按 token 占比裁掉音频前缀。
-/// 目前 `guide_prefix` 已改为把 guide 放到 `prompt_inject_text`（不应被“读出来”），因此通常返回 None。
+/// 背景：`guide_prefix` 会把 guide 文本拼到 `spoken_text` 前面（用于“情绪/语气”引导），
+/// 但最终我们通常不希望把这段 guide 也读出来，因此需要在后处理阶段把它裁掉。
 ///
 /// 这里用 tokenizer 的 token 序列做一个“后缀匹配”：
 /// - full：guide + sep + text

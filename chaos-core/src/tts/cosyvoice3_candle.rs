@@ -231,8 +231,12 @@ pub struct CosyVoice3CandleEngine {
     #[allow(dead_code)]
     model_dir: PathBuf,
     cfg: CosyVoice3CandleConfig,
+    /// Flow/Vocoder 运行设备（默认随 `CHAOS_COSYVOICE3_DEVICE`）。
     device: Device,
     dtype: DType,
+    /// LLM 运行设备（默认与 Flow/Vocoder 一致；可用 `CHAOS_COSYVOICE3_LLM_DEVICE=cpu` 绕过 CUDA LLM 异常）。
+    llm_device: Device,
+    llm_dtype: DType,
     inner: Mutex<Inner>,
     #[cfg(feature = "cosyvoice3-candle-onnx")]
     frontend: Option<CosyVoice3Frontend>,
@@ -267,10 +271,52 @@ impl CosyVoice3CandleEngine {
             DType::F32
         };
 
+        // LLM 单独选设备：某些 CUDA 环境下 LLM 在 GPU 上可能出现“输出退化为啸叫/波形”的问题；
+        // 允许把 LLM 放回 CPU，但 Flow/Vocoder 仍跑 GPU（speech tokens 很小，拷贝代价可忽略）。
+        let llm_req = std::env::var("CHAOS_COSYVOICE3_LLM_DEVICE")
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_else(|| "same".to_string());
+        let (llm_device, llm_on_gpu) = match llm_req.as_str() {
+            "same" | "" => (device.clone(), on_gpu),
+            "cpu" => (Device::Cpu, false),
+            "cuda" => {
+                #[cfg(feature = "cosyvoice3-candle-cuda")]
+                {
+                    (
+                        Device::new_cuda(0).map_err(|e| {
+                            TtsError::Candle(format!(
+                                "create cuda device for llm failed: {e} (hint: set CHAOS_COSYVOICE3_LLM_DEVICE=cpu to fallback)"
+                            ))
+                        })?,
+                        true,
+                    )
+                }
+                #[cfg(not(feature = "cosyvoice3-candle-cuda"))]
+                {
+                    return Err(TtsError::NotImplemented(
+                        "llm cuda requested but feature `cosyvoice3-candle-cuda` is not enabled",
+                    ));
+                }
+            }
+            other => {
+                return Err(TtsError::InvalidArg(format!(
+                    "invalid CHAOS_COSYVOICE3_LLM_DEVICE={other}, expected same/cpu/cuda"
+                )))
+            }
+        };
+        let llm_dtype = if llm_on_gpu && use_f16 {
+            DType::F16
+        } else {
+            DType::F32
+        };
+
         eprintln!(
-            "[cosyvoice3-candle] device={} dtype={:?}",
+            "[cosyvoice3-candle] device={} dtype={:?} llm_device={} llm_dtype={:?}",
             if on_gpu { "cuda" } else { "cpu" },
-            dtype
+            dtype,
+            if llm_on_gpu { "cuda" } else { "cpu" },
+            llm_dtype
         );
 
         // Load tokenizer：优先 tokenizer/tokenizer.json，否则用 vocab+merges 构建。
@@ -280,7 +326,8 @@ impl CosyVoice3CandleEngine {
         let flow_path = model_dir.join("flow.safetensors");
         let hift_path = model_dir.join("hift.safetensors");
 
-        let llm_vb = unsafe { VarBuilder::from_mmaped_safetensors(&[&llm_path], dtype, &device) }
+        let llm_vb =
+            unsafe { VarBuilder::from_mmaped_safetensors(&[&llm_path], llm_dtype, &llm_device) }
             .map_err(|e| TtsError::Candle(format!("load llm safetensors failed: {e}")))?;
         let flow_vb = unsafe { VarBuilder::from_mmaped_safetensors(&[&flow_path], dtype, &device) }
             .map_err(|e| TtsError::Candle(format!("load flow safetensors failed: {e}")))?;
@@ -327,6 +374,8 @@ impl CosyVoice3CandleEngine {
             cfg,
             device,
             dtype,
+            llm_device,
+            llm_dtype,
             inner: Mutex::new(inner),
             #[cfg(feature = "cosyvoice3-candle-onnx")]
             frontend,
@@ -536,33 +585,33 @@ impl CosyVoice3CandleEngine {
 
         // tensors
         let text_tokens_tensor =
-            Tensor::from_slice(&text_tokens, (1, text_tokens.len()), &self.device)
+            Tensor::from_slice(&text_tokens, (1, text_tokens.len()), &self.llm_device)
                 .map_err(|e| TtsError::Candle(format!("create text_tokens tensor failed: {e}")))?
                 .to_dtype(DType::U32)
                 .map_err(|e| TtsError::Candle(format!("text_tokens to u32 failed: {e}")))?;
         let prompt_text_tensor = if prompt_text_tokens.is_empty() {
-            Tensor::zeros((1, 0), DType::U32, &self.device).map_err(|e| {
+            Tensor::zeros((1, 0), DType::U32, &self.llm_device).map_err(|e| {
                 TtsError::Candle(format!("create empty prompt_text tensor failed: {e}"))
             })?
         } else {
             Tensor::from_slice(
                 &prompt_text_tokens,
                 (1, prompt_text_tokens.len()),
-                &self.device,
+                &self.llm_device,
             )
             .map_err(|e| TtsError::Candle(format!("create prompt_text tensor failed: {e}")))?
             .to_dtype(DType::U32)
             .map_err(|e| TtsError::Candle(format!("prompt_text to u32 failed: {e}")))?
         };
         let llm_prompt_speech_tensor = if llm_prompt_speech_tokens.is_empty() {
-            Tensor::zeros((1, 0), DType::U32, &self.device).map_err(|e| {
+            Tensor::zeros((1, 0), DType::U32, &self.llm_device).map_err(|e| {
                 TtsError::Candle(format!("create empty llm prompt_speech tensor failed: {e}"))
             })?
         } else {
             Tensor::from_slice(
                 &llm_prompt_speech_tokens,
                 (1, llm_prompt_speech_tokens.len()),
-                &self.device,
+                &self.llm_device,
             )
             .map_err(|e| TtsError::Candle(format!("create llm prompt_speech tensor failed: {e}")))?
             .to_dtype(DType::U32)
@@ -618,16 +667,41 @@ impl CosyVoice3CandleEngine {
             )));
         }
 
-        // LLM
-        let speech_tokens = inner
-            .llm
-            .inference(
-                &text_tokens_tensor,
-                &prompt_text_tensor,
-                &llm_prompt_speech_tensor,
-                &sampling,
-            )
-            .map_err(|e| TtsError::Candle(format!("llm inference failed: {e}")))?;
+        // LLM（可选绕过：用于对齐/排查 —— 直接喂外部生成的 speech tokens）
+        let speech_tokens: Vec<u32> =
+            if let Some(p) = std::env::var_os("CHAOS_COSYVOICE3_SPEECH_TOKENS_JSON") {
+                let p = PathBuf::from(p);
+                let bytes = std::fs::read(&p).map_err(|e| {
+                    TtsError::InvalidArg(format!(
+                        "failed to read CHAOS_COSYVOICE3_SPEECH_TOKENS_JSON: {}: {e}",
+                        p.display()
+                    ))
+                })?;
+                let v: Vec<u32> = serde_json::from_slice(&bytes).map_err(|e| {
+                    TtsError::InvalidArg(format!(
+                        "failed to parse speech tokens json (expected JSON array of integers): {}: {e}",
+                        p.display()
+                    ))
+                })?;
+                if debug {
+                    eprintln!(
+                        "[cosyvoice3-candle][debug] bypass llm: loaded speech_tokens from json: path={} len={}",
+                        p.display(),
+                        v.len()
+                    );
+                }
+                v
+            } else {
+                inner
+                    .llm
+                    .inference(
+                        &text_tokens_tensor,
+                        &prompt_text_tensor,
+                        &llm_prompt_speech_tensor,
+                        &sampling,
+                    )
+                    .map_err(|e| TtsError::Candle(format!("llm inference failed: {e}")))?
+            };
         if speech_tokens.is_empty() {
             return Err(TtsError::Candle("llm generated no speech tokens".into()));
         }
