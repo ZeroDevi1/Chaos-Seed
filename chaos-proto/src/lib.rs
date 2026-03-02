@@ -45,6 +45,7 @@ pub const METHOD_LLM_CHAT: &str = "llm.chat";
 pub const METHOD_VOICE_CHAT_STREAM_START: &str = "voice.chat.stream.start";
 pub const METHOD_VOICE_CHAT_STREAM_CANCEL: &str = "voice.chat.stream.cancel";
 pub const NOTIF_VOICE_CHAT_CHUNK: &str = "voice.chat.chunk";
+pub const NOTIF_TTS_SFT_STATUS_CHANGED: &str = "tts.sft.statusChanged";
 
 // Bilibili video download (BV/AV) - MVP
 pub const METHOD_BILI_LOGIN_QR_CREATE: &str = "bili.loginQrCreate";
@@ -292,6 +293,14 @@ pub struct TtsSftStatus {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<TtsAudioResult>,
+}
+
+/// daemon 推送的 TTS 状态变化通知（用于替代轮询，轮询仍保留为兜底）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsSftStatusNotif {
+    pub session_id: String,
+    pub status: TtsSftStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

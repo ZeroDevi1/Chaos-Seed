@@ -1,13 +1,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::llm::{ChatMessage, ChatRequest, LlmClient, ReasoningMode};
-use crate::tts::post_process::{TrimConfig, trim_output_pcm16};
+use crate::tts::post_process::TrimConfig;
 use crate::tts::wav::{TtsPcm16Result, decode_wav_bytes_to_pcm16_mono};
 use crate::tts::{TtsError, TtsSftParams};
 
@@ -131,7 +133,7 @@ async fn run_voice_chat(
     req.tts.spk_id = req.spk_id.clone();
     req.tts.model_dir = req.model_dir.clone();
 
-    // Synthesize in blocking task, but allow cancellation via an atomic flag.
+    // 运行 python 推理（阻塞），同时在 async 侧监控 piece_*.wav，实现真正“边生成边播放”。
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let cancel_flag_for_block = cancel_flag.clone();
 
@@ -141,59 +143,169 @@ async fn run_voice_chat(
     let py_workdir2 = req.python_workdir.clone();
     let py_script2 = req.python_infer_script.clone();
 
-    let join = tokio::task::spawn_blocking(move || -> Result<TtsPcm16Result, VoiceChatError> {
-        let wav = crate::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(
+    let out_dir = std::env::temp_dir().join(format!("chaos_voice_chat_{}", fastrand::u64(..)));
+    std::fs::create_dir_all(&out_dir)
+        .map_err(|e| VoiceChatError::Internal(format!("create out_dir failed: {e}")))?;
+
+    let out_dir2 = out_dir.clone();
+    let join = tokio::task::spawn_blocking(move || -> Result<(), VoiceChatError> {
+        crate::tts::python_infer::run_infer_sft_pt_to_out_dir_with_cancel(
             &params2,
             &llm_ckpt2,
             &flow_ckpt2,
             py_workdir2.as_deref(),
             py_script2.as_deref(),
+            &out_dir2,
+            true,
             Some(cancel_flag_for_block.as_ref()),
         )
-        .map_err(|e| VoiceChatError::Tts(e.to_string()))?;
-
-        decode_wav_bytes_to_pcm16_mono(&wav.wav_bytes)
-            .map_err(|e| VoiceChatError::Tts(e.to_string()))
+        .map_err(|e| VoiceChatError::Tts(e.to_string()))
     });
 
-    let pcm_res: TtsPcm16Result = tokio::select! {
-        res = join => {
-            res.map_err(|e| VoiceChatError::Internal(e.to_string()))??
+    // piece watcher with “留一块缓冲”策略：保证最后一块能正确标记 is_last。
+    let mut next_piece: u32 = 0;
+    let mut pending: Option<TtsPcm16Result> = None;
+    let mut seq: u64 = 0;
+    let mut saw_any_piece = false;
+
+    loop {
+        if cancel.is_cancelled() {
+            cancel_flag.store(true, Ordering::Relaxed);
+            let _ = std::fs::remove_dir_all(&out_dir);
+            return Err(VoiceChatError::Canceled);
         }
+
+        let piece_path = out_dir.join(format!("piece_{next_piece:04}.wav"));
+        match tokio::fs::read(&piece_path).await {
+            Ok(bytes) => {
+                // 文件可能还在写入中：解码失败时短暂等待重试。
+                let decoded = match tokio::task::spawn_blocking(move || decode_wav_bytes_to_pcm16_mono(&bytes))
+                    .await
+                {
+                    Ok(Ok(v)) => v,
+                    Ok(Err(e)) => {
+                        if !join.is_finished() {
+                            tokio::time::sleep(Duration::from_millis(30)).await;
+                            continue;
+                        }
+                        return Err(VoiceChatError::Tts(e.to_string()));
+                    }
+                    Err(e) => return Err(VoiceChatError::Internal(e.to_string())),
+                };
+
+                saw_any_piece = true;
+
+                if let Some(prev) = pending.take() {
+                    // 发送 prev（非最后）。
+                    let chunk_samples = ((prev.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000)
+                        .max(1) as usize;
+                    for chunk in prev.pcm16.chunks(chunk_samples) {
+                        if tx
+                            .send(Ok(VoiceChunk {
+                                seq,
+                                pcm16: chunk.to_vec(),
+                                is_last: false,
+                            }))
+                            .await
+                            .is_err()
+                        {
+                            let _ = std::fs::remove_dir_all(&out_dir);
+                            return Ok(());
+                        }
+                        seq += 1;
+                    }
+                }
+
+                pending = Some(decoded);
+                next_piece = next_piece.saturating_add(1);
+                continue;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // no-op
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&out_dir);
+                return Err(VoiceChatError::Internal(format!(
+                    "read piece wav failed: {}",
+                    e
+                )));
+            }
+        }
+
+        if join.is_finished() {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // 等待 python 推理结束（成功/失败/取消）。
+    let infer_res = tokio::select! {
+        res = join => res.map_err(|e| VoiceChatError::Internal(e.to_string()))?,
         _ = cancel.cancelled() => {
             cancel_flag.store(true, Ordering::Relaxed);
+            let _ = std::fs::remove_dir_all(&out_dir);
             return Err(VoiceChatError::Canceled);
         }
     };
-
-    if cancel.is_cancelled() {
-        return Err(VoiceChatError::Canceled);
+    if let Err(e) = infer_res {
+        let _ = std::fs::remove_dir_all(&out_dir);
+        return Err(e);
     }
 
-    // Post-process trim.
-    let trimmed = trim_output_pcm16(&pcm_res.pcm16, pcm_res.sample_rate, &req.cfg.trim)
-        .map_err(|e| VoiceChatError::Tts(e.to_string()))?;
-
-    // Chunk split.
-    let chunk_samples =
-        ((pcm_res.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000).max(1) as usize;
-    let mut seq = 0u64;
-    for (i, chunk) in trimmed.chunks(chunk_samples).enumerate() {
-        if cancel.is_cancelled() {
-            return Err(VoiceChatError::Canceled);
+    // 发送最后一块（pending）。
+    if let Some(last) = pending.take() {
+        let chunk_samples =
+            ((last.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000).max(1) as usize;
+        let total_chunks = (last.pcm16.len() + chunk_samples - 1) / chunk_samples;
+        for (i, chunk) in last.pcm16.chunks(chunk_samples).enumerate() {
+            let is_last = i + 1 == total_chunks;
+            if tx
+                .send(Ok(VoiceChunk {
+                    seq,
+                    pcm16: chunk.to_vec(),
+                    is_last,
+                }))
+                .await
+                .is_err()
+            {
+                let _ = std::fs::remove_dir_all(&out_dir);
+                return Ok(());
+            }
+            seq += 1;
         }
-        let is_last = i == (trimmed.len() + chunk_samples - 1) / chunk_samples - 1;
-        let msg = VoiceChunk {
-            seq,
-            pcm16: chunk.to_vec(),
-            is_last,
-        };
-        seq += 1;
-        if tx.send(Ok(msg)).await.is_err() {
-            // Client went away.
-            return Ok(());
+    } else if !saw_any_piece {
+        // 极端兜底：若脚本未写出 piece_*.wav，则尝试读取 chunk_0000.wav 作为整段输出。
+        let wav_path = out_dir.join("chunk_0000.wav");
+        if let Ok(bytes) = tokio::fs::read(&wav_path).await {
+            if let Ok(decoded) = decode_wav_bytes_to_pcm16_mono(&bytes) {
+                let chunk_samples = ((decoded.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000)
+                    .max(1) as usize;
+                let total_chunks = (decoded.pcm16.len() + chunk_samples - 1) / chunk_samples;
+                for (i, chunk) in decoded.pcm16.chunks(chunk_samples).enumerate() {
+                    let is_last = i + 1 == total_chunks;
+                    if tx
+                        .send(Ok(VoiceChunk {
+                            seq,
+                            pcm16: chunk.to_vec(),
+                            is_last,
+                        }))
+                        .await
+                        .is_err()
+                    {
+                        let _ = std::fs::remove_dir_all(&out_dir);
+                        return Ok(());
+                    }
+                    seq += 1;
+                }
+            } else {
+                warn!("voice_chat: failed to decode chunk_0000.wav fallback");
+            }
         }
     }
+
+    // best-effort cleanup
+    let _ = std::fs::remove_dir_all(&out_dir);
 
     Ok(())
 }
@@ -203,4 +315,3 @@ impl From<TtsError> for VoiceChatError {
         VoiceChatError::Tts(e.to_string())
     }
 }
-

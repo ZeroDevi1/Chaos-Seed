@@ -133,3 +133,14 @@ public sealed class TtsSftStatus
     public TtsAudioResult? Result { get; set; }
 }
 
+public sealed class TtsSftStatusNotif
+{
+    [JsonProperty("sessionId")]
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = "";
+
+    [JsonProperty("status")]
+    [JsonPropertyName("status")]
+    public TtsSftStatus Status { get; set; } = new();
+}
+

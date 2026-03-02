@@ -121,6 +121,7 @@ use chaos_proto::{
     MusicTrackPlayUrlParams,
     MusicTrackPlayUrlResult,
     NOTIF_DANMAKU_MESSAGE,
+    NOTIF_TTS_SFT_STATUS_CHANGED,
     NOTIF_VOICE_CHAT_CHUNK,
     NowPlayingSnapshot,
     NowPlayingSnapshotParams,
@@ -131,6 +132,7 @@ use chaos_proto::{
     TtsSftStartParams,
     TtsSftStartResult,
     TtsSftStatus,
+    TtsSftStatusNotif,
     TtsSftStatusParams,
     VoiceChatChunkNotif,
     VoiceChatStreamCancelParams,
@@ -148,6 +150,7 @@ use tokio::sync::mpsc;
 pub enum DaemonNotif {
     Danmaku(chaos_proto::DanmakuMessage),
     VoiceChatChunk(VoiceChatChunkNotif),
+    TtsSftStatusChanged(TtsSftStatusNotif),
 }
 
 pub trait ChaosService: Send + Sync + 'static {
@@ -192,6 +195,7 @@ pub trait ChaosService: Send + Sync + 'static {
     fn tts_sft_start(
         &self,
         params: TtsSftStartParams,
+        notif_tx: mpsc::UnboundedSender<DaemonNotif>,
     ) -> impl Future<Output = Result<TtsSftStartResult, String>> + Send;
 
     fn tts_sft_status(
@@ -465,6 +469,7 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                 let (method, params) = match msg {
                     DaemonNotif::Danmaku(m) => (NOTIF_DANMAKU_MESSAGE, serde_json::to_value(m).unwrap_or(Value::Null)),
                     DaemonNotif::VoiceChatChunk(m) => (NOTIF_VOICE_CHAT_CHUNK, serde_json::to_value(m).unwrap_or(Value::Null)),
+                    DaemonNotif::TtsSftStatusChanged(m) => (NOTIF_TTS_SFT_STATUS_CHANGED, serde_json::to_value(m).unwrap_or(Value::Null)),
                 };
                 let payload = json!({
                     "jsonrpc": "2.0",
@@ -593,7 +598,7 @@ pub async fn run_jsonrpc_over_lsp<S: ChaosService, RW: AsyncRead + AsyncWrite + 
                                 continue;
                             }
                         };
-                        match svc.tts_sft_start(params).await {
+                        match svc.tts_sft_start(params, notif_tx.clone()).await {
                             Ok(res) => {
                                 let resp = JsonRpcResponse::ok(id, serde_json::to_value(res).unwrap());
                                 let bytes = serde_json::to_vec(&resp).unwrap_or_else(|_| b"{}".to_vec());

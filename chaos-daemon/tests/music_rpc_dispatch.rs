@@ -92,7 +92,11 @@ impl ChaosService for TestSvc {
         Ok(vec![])
     }
 
-    async fn tts_sft_start(&self, _params: TtsSftStartParams) -> Result<TtsSftStartResult, String> {
+    async fn tts_sft_start(
+        &self,
+        _params: TtsSftStartParams,
+        _notif_tx: tokio::sync::mpsc::UnboundedSender<DaemonNotif>,
+    ) -> Result<TtsSftStartResult, String> {
         Ok(TtsSftStartResult {
             session_id: "tts".to_string(),
         })

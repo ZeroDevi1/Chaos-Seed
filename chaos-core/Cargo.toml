@@ -47,6 +47,7 @@ sha2 = "0.10"
 silero-vad-rs = { version = "0.1.2", optional = true }
 strsim = "0.11"
 thiserror = "1"
+toml = "0.8"
 tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 pyo3 = { version = "0.23", features = ["auto-initialize"], optional = true }
 tokio = { version = "1", features = [

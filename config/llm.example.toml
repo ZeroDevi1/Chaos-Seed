@@ -1,0 +1,23 @@
+# OpenAI-compatible base url。
+#
+# 可写不带 /v1（例如 http://127.0.0.1:8008），程序会自动探测是否需要补 /v1。
+base_url = "http://111.61.193.80:8008"
+
+# 请在本地真实配置 `config/llm.toml` 中填写真实密钥，并确保该文件被 gitignore 忽略。
+api_key = "sk-REPLACE_ME"
+
+# 模型名（OpenAI-compatible gateway 一般用 model 字符串做路由/选择）。
+model = "Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf"
+
+# 可选：Reasoning 模式下使用的模型；留空则复用 model。
+reasoning_model = ""
+
+timeout_ms = 30000
+default_temperature = 0.7
+
+# “思考/非思考”切换（映射到 extra_body.chat_template_kwargs.enable_thinking）。
+# - Normal   => enable_thinking_normal
+# - Reasoning => enable_thinking_reasoning
+enable_thinking_normal = false
+enable_thinking_reasoning = true
+

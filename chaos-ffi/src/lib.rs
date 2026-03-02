@@ -5669,6 +5669,9 @@ pub extern "C" fn chaos_llm_config_set_json(params_json_utf8: *const c_char) -> 
             reasoning_model: params.reasoning_model.filter(|s| !s.trim().is_empty()),
             timeout_ms: params.timeout_ms.unwrap_or(30_000).max(1),
             default_temperature: params.default_temperature.unwrap_or(0.7).clamp(0.0, 5.0) as f32,
+            // FFI 配置暂不暴露 thinking 开关：使用默认映射（Normal=非思考，Reasoning=思考）。
+            enable_thinking_normal: false,
+            enable_thinking_reasoning: true,
         };
 
         {
@@ -5702,14 +5705,29 @@ pub extern "C" fn chaos_llm_chat_json(params_json_utf8: *const c_char) -> *mut c
         })?;
 
         let cfg = {
-            let locked = llm_state().lock().map_err(|_| {
+            let mut locked = llm_state().lock().map_err(|_| {
                 set_last_error("llm state poisoned", None);
             })?;
+
+            if locked.cfg.is_none() {
+                // best-effort：自动加载 config/llm.toml（真实配置应被 gitignore）。
+                match chaos_core::llm::config_toml::autoload_llm_config_with_path() {
+                    Ok(Some((_p, cfg))) => {
+                        locked.cfg = Some(cfg);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        set_last_error("LLM auto-load failed", Some(e));
+                        return Err(());
+                    }
+                }
+            }
+
             locked.cfg.clone()
         };
         let Some(cfg) = cfg else {
             set_last_error(
-                "LLM is not configured (call chaos_llm_config_set_json first)",
+                "LLM 未配置：请调用 chaos_llm_config_set_json，或创建 config/llm.toml（也可用环境变量 CHAOS_LLM_CONFIG 指定路径）",
                 None,
             );
             return Err(());

@@ -33,6 +33,7 @@ public sealed class DaemonClient : IDisposable
 
     public event EventHandler<DanmakuMessage>? DanmakuMessageReceived;
     public event EventHandler<VoiceChatChunkNotif>? VoiceChatChunkReceived;
+    public event EventHandler<TtsSftStatusNotif>? TtsSftStatusReceived;
 
     private DaemonClient()
     {
@@ -1506,6 +1507,11 @@ public sealed class DaemonClient : IDisposable
         VoiceChatChunkReceived?.Invoke(this, msg);
     }
 
+    private void OnTtsSftStatusChanged(TtsSftStatusNotif msg)
+    {
+        TtsSftStatusReceived?.Invoke(this, msg);
+    }
+
     public void Dispose()
     {
         ResetConnection();
@@ -1676,6 +1682,12 @@ public sealed class DaemonClient : IDisposable
         public void VoiceChatChunk(VoiceChatChunkNotif msg)
         {
             _client.OnVoiceChatChunk(msg);
+        }
+
+        [JsonRpcMethod("tts.sft.statusChanged")]
+        public void TtsSftStatusChanged(TtsSftStatusNotif msg)
+        {
+            _client.OnTtsSftStatusChanged(msg);
         }
     }
 }

@@ -1,4 +1,5 @@
 use serde_json::Value;
+use tracing::warn;
 
 use crate::danmaku::model::Site;
 
@@ -116,11 +117,24 @@ fn parse_room_playinfo_value(
             url: None,
             backup_urls: vec![],
         };
-        // When resolving a specific qn, only bind URLs if the server actually switched to that qn.
-        // Some rooms ignore `qn` in this endpoint and always return a low `current_qn`. Binding
-        // blindly would create a "high label, low url" mismatch.
+        // 当请求指定 qn 时：只要 qn 匹配且 urls 非空就绑定 URL。
+        //
+        // 背景：在部分房间，接口会返回异常的 `current_qn`（并不等于请求的 qn），
+        // 但返回的 URL 仍可能已经切换到目标清晰度；若严格要求 `current_qn == requested_qn`，
+        // 会导致高画质永远绑定不到 URL，最终落回低清（看起来“很糊”）。
+        //
+        // 注意：当 `current_qn != requested_qn` 时，我们仍会继续在 `resolve_variant_for_qn`
+        // 尝试更可靠的 fallback（v1 playUrl / html）；这里仅记录一次 warn 便于排查。
         let should_bind_url = match requested_qn {
-            Some(r) => r == qn && current_qn == r,
+            Some(r) => {
+                if current_qn != r {
+                    warn!(
+                        "bili_live: server returned current_qn != requested_qn (current_qn={}, requested_qn={})",
+                        current_qn, r
+                    );
+                }
+                r == qn
+            }
             None => qn == current_qn,
         };
         if should_bind_url && !urls.is_empty() {
@@ -156,18 +170,71 @@ fn find_codec<'a>(
         })
 }
 
+fn extract_v2_codec_current_qn_and_urls(v: &Value) -> Result<(i32, Vec<String>), LivestreamError> {
+    let streams = v
+        .pointer("/data/playurl_info/playurl/stream")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| LivestreamError::Parse("missing stream".to_string()))?;
+
+    // Find codec in priority order: http_stream/flv/avc, else http_hls/fmp4/avc.
+    let codec = find_codec(streams, "http_stream", "flv", "avc")
+        .or_else(|| find_codec(streams, "http_hls", "fmp4", "avc"))
+        .ok_or_else(|| LivestreamError::Parse("no suitable codec".to_string()))?;
+
+    let current_qn = codec
+        .get("current_qn")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| LivestreamError::Parse("missing current_qn".to_string()))?
+        as i32;
+
+    let base_url = codec
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| LivestreamError::Parse("missing base_url".to_string()))?;
+
+    let url_info = codec
+        .get("url_info")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| LivestreamError::Parse("missing url_info".to_string()))?;
+
+    let mut urls: Vec<String> = url_info
+        .iter()
+        .filter_map(|ui| {
+            let host = ui.get("host")?.as_str()?;
+            let extra = ui.get("extra")?.as_str().unwrap_or("");
+            Some(format!("{host}{base_url}{extra}"))
+        })
+        .collect();
+
+    urls = mbga::sort_urls(&urls);
+    Ok((current_qn, urls))
+}
+
+struct RoomPlayInfoV2 {
+    vars: Vec<StreamVariant>,
+    #[allow(dead_code)]
+    current_qn: i32,
+    urls: Vec<String>,
+}
+
 async fn fetch_room_play_info(
     http: &reqwest::Client,
     cfg: &LivestreamConfig,
     rid: i64,
     qn: i32,
-) -> Result<Vec<StreamVariant>, LivestreamError> {
+) -> Result<RoomPlayInfoV2, LivestreamError> {
     let base = cfg.endpoints.bili_api_base.trim_end_matches('/');
     let url = format!(
         "{base}/xlive/web-room/v2/index/getRoomPlayInfo?room_id={rid}&protocol=0,1&format=0,1,2&codec=0,1&qn={qn}&platform=web&ptype=8&dolby=5"
     );
     let json = get_json(http, &url).await?;
-    parse_room_playinfo_value(&json, if qn > 0 { Some(qn) } else { None })
+    let (current_qn, urls) = extract_v2_codec_current_qn_and_urls(&json)?;
+    let vars = parse_room_playinfo_value(&json, if qn > 0 { Some(qn) } else { None })?;
+    Ok(RoomPlayInfoV2 {
+        vars,
+        current_qn,
+        urls,
+    })
 }
 
 async fn fetch_room_play_info_list(
@@ -246,11 +313,19 @@ async fn fetch_play_url(
             url: None,
             backup_urls: vec![],
         };
-        // Bind URLs only if the server actually switched to the requested qn.
+        // 当请求指定 qn 时：只要 qn 匹配且 urls 非空就绑定 URL（current_qn 异常时会记录 warn）。
         if requested_qn > 0 {
-            if desc_qn == requested_qn && current_qn == requested_qn && !urls.is_empty() {
-                v.url = Some(urls[0].clone());
-                v.backup_urls = urls[1..].to_vec();
+            if desc_qn == requested_qn {
+                if current_qn != requested_qn {
+                    warn!(
+                        "bili_live(playUrl): server returned current_qn != requested_qn (current_qn={}, requested_qn={})",
+                        current_qn, requested_qn
+                    );
+                }
+                if !urls.is_empty() {
+                    v.url = Some(urls[0].clone());
+                    v.backup_urls = urls[1..].to_vec();
+                }
             }
         } else if desc_qn == current_qn && !urls.is_empty() {
             // No specific qn requested: attach to the actual current_qn (legacy behavior).
@@ -278,10 +353,25 @@ async fn resolve_variant_for_qn(
     rid: i64,
     qn: i32,
 ) -> Result<Option<StreamVariant>, LivestreamError> {
+    // v2 (getRoomPlayInfo)：
+    // - 若 `current_qn == requested qn` 且已绑定到 URL：直接返回。
+    // - 若 `current_qn != requested qn`：认为 server 的 qn 回传不可靠，继续尝试 v1 playUrl / html fallback；
+    //   若 fallback 全失败，再使用 v2 的 URL 作为最后手段（避免“高 qn 永远拿不到可播放地址”）。
+    let mut v2_last_resort: Option<(Vec<StreamVariant>, Vec<String>)> = None;
     match fetch_room_play_info(http, cfg, rid, qn).await {
-        Ok(vars) => {
-            if let Some(v) = pick_variant_with_url(vars, qn) {
-                return Ok(Some(v));
+        Ok(info) => {
+            if let Some(v) = pick_variant_with_url(info.vars.clone(), qn) {
+                if info.current_qn == qn {
+                    return Ok(Some(v));
+                }
+                // current_qn 异常：继续走 fallback；v2 URL 留作最后兜底。
+                warn!(
+                    "bili_live: v2 current_qn != requested qn (current_qn={}, requested_qn={}); will try fallback",
+                    info.current_qn, qn
+                );
+            }
+            if !info.urls.is_empty() {
+                v2_last_resort = Some((info.vars, info.urls));
             }
         }
         Err(e @ LivestreamError::NeedPassword) => return Err(e),
@@ -298,10 +388,24 @@ async fn resolve_variant_for_qn(
     }
 
     match fetch_html_fallback(http, cfg, rid, qn).await {
-        Ok(vars) => Ok(pick_variant_with_url(vars, qn)),
-        Err(e @ LivestreamError::NeedPassword) => Err(e),
-        Err(_) => Ok(None),
+        Ok(vars) => {
+            if let Some(v) = pick_variant_with_url(vars, qn) {
+                return Ok(Some(v));
+            }
+        }
+        Err(e @ LivestreamError::NeedPassword) => return Err(e),
+        Err(_) => {}
     }
+
+    if let Some((vars, urls)) = v2_last_resort {
+        if let Some(mut v) = vars.into_iter().find(|v| v.quality == qn) {
+            v.url = Some(urls[0].clone());
+            v.backup_urls = urls[1..].to_vec();
+            return Ok(Some(v));
+        }
+    }
+
+    Ok(None)
 }
 
 async fn fetch_html_fallback(

@@ -3,9 +3,13 @@
 //! This module intentionally uses `reqwest` directly so we can talk to any OpenAI-compatible
 //! provider (including self-hosted / third-party gateways) without binding to a specific SDK.
 
+pub mod config_toml;
+
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,6 +26,11 @@ pub struct LlmConfig {
     pub reasoning_model: Option<String>,
     pub timeout_ms: u64,
     pub default_temperature: f32,
+
+    /// Normal 模式下是否启用“思考”（非标准 OpenAI 字段：注入到 extra_body.chat_template_kwargs.enable_thinking）。
+    pub enable_thinking_normal: bool,
+    /// Reasoning 模式下是否启用“思考”。
+    pub enable_thinking_reasoning: bool,
 }
 
 impl Default for LlmConfig {
@@ -34,6 +43,8 @@ impl Default for LlmConfig {
             reasoning_model: None,
             timeout_ms: 30_000,
             default_temperature: 0.7,
+            enable_thinking_normal: false,
+            enable_thinking_reasoning: true,
         }
     }
 }
@@ -66,8 +77,8 @@ pub enum LlmError {
     InvalidConfig(String),
     #[error("http error: {0}")]
     Http(String),
-    #[error("provider error: {0}")]
-    Provider(String),
+    #[error("provider error: {status}: {message}")]
+    ProviderStatus { status: u16, message: String },
     #[error("parse error: {0}")]
     Parse(String),
 }
@@ -76,6 +87,7 @@ pub enum LlmError {
 pub struct LlmClient {
     cfg: LlmConfig,
     http: reqwest::Client,
+    resolved_base_url: Arc<Mutex<Option<String>>>,
 }
 
 impl LlmClient {
@@ -96,7 +108,11 @@ impl LlmClient {
             .build()
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
-        Ok(Self { cfg, http })
+        Ok(Self {
+            cfg,
+            http,
+            resolved_base_url: Arc::new(Mutex::new(None)),
+        })
     }
 
     pub fn config(&self) -> &LlmConfig {
@@ -104,10 +120,9 @@ impl LlmClient {
     }
 
     pub async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, LlmError> {
-        let url = format!(
-            "{}/chat/completions",
-            self.cfg.base_url.trim_end_matches('/')
-        );
+        // base_url 支持不带 /v1：优先尝试 `<base>/chat/completions`，若返回 404/405 再尝试 `<base>/v1/chat/completions`。
+        //
+        // 说明：这里不使用 OpenAI SDK，是为了兼容各类“OpenAI-compatible gateway / self-hosted”实现。
         let model = match req.reasoning_mode {
             ReasoningMode::Normal => self.cfg.model.clone(),
             ReasoningMode::Reasoning => self
@@ -160,34 +175,107 @@ impl LlmClient {
             }
         }
 
-        // Best-effort reasoning hint (ignored by most providers).
-        if matches!(req.reasoning_mode, ReasoningMode::Reasoning) {
-            body["reasoning"] = serde_json::json!({ "effort": "medium" });
+        // 额外参数（非标准字段）：用于 CosyVoice / Qwen 模板下的“思考/非思考”切换。
+        //
+        // 约定：
+        // - Normal => enable_thinking=false（非思考）
+        // - Reasoning => enable_thinking=true（思考）
+        let enable_thinking = match req.reasoning_mode {
+            ReasoningMode::Normal => self.cfg.enable_thinking_normal,
+            ReasoningMode::Reasoning => self.cfg.enable_thinking_reasoning,
+        };
+        // 确保 extra_body 是 object。
+        if !body.get("extra_body").is_some_and(|v| v.is_object()) {
+            body["extra_body"] = serde_json::json!({});
+        }
+        body["extra_body"]["chat_template_kwargs"]["enable_thinking"] =
+            serde_json::json!(enable_thinking);
+
+        let base0 = {
+            let locked = self.resolved_base_url.lock().await;
+            locked.clone().unwrap_or_else(|| self.cfg.base_url.trim().to_string())
+        };
+        let base0 = base0.trim_end_matches('/').to_string();
+
+        let mut tried_v1 = false;
+        let mut last_err: Option<LlmError> = None;
+        for attempt in 0..2 {
+            let base = if attempt == 0 {
+                base0.clone()
+            } else {
+                tried_v1 = true;
+                format!("{}/v1", base0.trim_end_matches("/v1"))
+            };
+            let url = format!("{base}/chat/completions");
+
+            let r = self.send_chat_once(&url, &body).await;
+            match r {
+                Ok(ok) => {
+                    // 缓存“已验证 base_url”，避免每次探测。
+                    let mut locked = self.resolved_base_url.lock().await;
+                    *locked = Some(base);
+                    return Ok(ok);
+                }
+                Err(e) => {
+                    let should_retry_v1 = matches!(
+                        &e,
+                        LlmError::ProviderStatus { status: 404, .. }
+                            | LlmError::ProviderStatus { status: 405, .. }
+                    ) && !base0.ends_with("/v1");
+                    last_err = Some(e);
+                    if attempt == 0 && should_retry_v1 {
+                        continue;
+                    }
+                    break;
+                }
+            }
         }
 
+        let _ = tried_v1;
+        let raw_err = last_err.unwrap_or_else(|| LlmError::Http("request failed".into()));
+        Err(raw_err)
+    }
+
+    async fn send_chat_once(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<ChatResponse, LlmError> {
         let resp = self
             .http
             .post(url)
             .bearer_auth(self.cfg.api_key.trim())
-            .json(&body)
+            .json(body)
             .send()
             .await
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
         let status = resp.status();
-        let raw: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| LlmError::Parse(e.to_string()))?;
+        let text_body = resp.text().await.map_err(|e| LlmError::Http(e.to_string()))?;
+
+        let raw: serde_json::Value = match serde_json::from_str(&text_body) {
+            Ok(v) => v,
+            Err(_) => serde_json::json!({ "_raw": text_body }),
+        };
 
         if !status.is_success() {
-            // Try to extract OpenAI-style error message.
             let msg = raw
                 .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(|m| m.as_str())
-                .unwrap_or("request failed");
-            return Err(LlmError::Provider(format!("{status}: {msg}")));
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    // 非 JSON 或非 OpenAI error shape：给一个截断的文本（避免爆日志）。
+                    let s = raw
+                        .get("_raw")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("request failed");
+                    s.chars().take(200).collect::<String>()
+                });
+            return Err(LlmError::ProviderStatus {
+                status: status.as_u16(),
+                message: msg,
+            });
         }
 
         let text = raw

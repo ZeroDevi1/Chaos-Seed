@@ -145,6 +145,359 @@ fn prompt_strategy_as_py(s: PromptStrategy) -> &'static str {
     }
 }
 
+/// 运行 Python 的 infer_sft.py，将结果写入指定 out_dir（用于流式：piece_*.wav）。
+///
+/// 说明：
+/// - 该函数只负责“执行脚本并落盘”，不读取 wav 内容；
+/// - `stream=true` 时会追加 `--stream`，脚本会逐段写出 `piece_XXXX.wav`；
+/// - 取消：无法硬中断 Python 脚本执行；仅支持“开始前/结束后”检查取消标记，并由调用方决定是否丢弃结果。
+pub fn run_infer_sft_pt_to_out_dir_with_cancel(
+    p: &TtsSftParams,
+    llm_ckpt: &str,
+    flow_ckpt: &str,
+    python_workdir: Option<&str>,
+    python_infer_script: Option<&str>,
+    out_dir: &Path,
+    stream: bool,
+    cancel: Option<&AtomicBool>,
+) -> Result<(), TtsError> {
+    if let Some(c) = cancel {
+        if c.load(Ordering::Relaxed) {
+            return Err(TtsError::Canceled);
+        }
+    }
+
+    let workdir = python_workdir
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| env_string("CHAOS_TTS_PY_WORKDIR"))
+        .ok_or_else(|| {
+            TtsError::InvalidArg(
+                "missing python workdir: set `pythonWorkdir` or env CHAOS_TTS_PY_WORKDIR".into(),
+            )
+        })?;
+
+    let infer_script = python_infer_script
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| env_string("CHAOS_TTS_PY_INFER_SFT"))
+        .unwrap_or_else(|| "tools/infer_sft.py".to_string());
+
+    let workdir_path = PathBuf::from(&workdir);
+    let script_path = {
+        let p = PathBuf::from(&infer_script);
+        if p.is_absolute() {
+            p
+        } else {
+            workdir_path.join(p)
+        }
+    };
+    if !script_path.exists() {
+        return Err(TtsError::InvalidArg(format!(
+            "python infer script not found: {} (workdir={})",
+            script_path.display(),
+            workdir
+        )));
+    }
+
+    let out_dir_abs = if out_dir.is_absolute() {
+        out_dir.to_path_buf()
+    } else {
+        // python 侧会在 chdir(workdir) 后解析相对路径；这里读文件时也按 workdir 解析。
+        workdir_path.join(out_dir)
+    };
+    std::fs::create_dir_all(&out_dir_abs).map_err(|e| TtsError::Io(e))?;
+
+    // 构造 argv：尽量与 VoiceLab 的 infer_sft.py 参数保持一致。
+    // 注意：infer_sft.py 的参数名为 --spk_id/--guide_sep 等（下划线风格）。
+    let argv: Vec<String> = vec![
+        script_path.to_string_lossy().to_string(),
+        "--model_dir".into(),
+        p.model_dir.clone(),
+        "--spk_id".into(),
+        p.spk_id.clone(),
+        "--text".into(),
+        p.text.clone(),
+        "--out_dir".into(),
+        out_dir_abs.to_string_lossy().to_string(),
+        "--llm_ckpt".into(),
+        llm_ckpt.to_string(),
+        "--flow_ckpt".into(),
+        flow_ckpt.to_string(),
+        "--prompt_text".into(),
+        p.prompt_text.clone(),
+        "--prompt_strategy".into(),
+        prompt_strategy_as_py(p.prompt_strategy).into(),
+        "--guide_sep".into(),
+        p.guide_sep.clone(),
+        "--speed".into(),
+        format!("{}", p.speed),
+        "--seed".into(),
+        format!("{}", p.seed),
+        "--temperature".into(),
+        format!("{}", p.sampling.temperature),
+        "--top_p".into(),
+        format!("{}", p.sampling.top_p),
+        "--top_k".into(),
+        format!("{}", p.sampling.top_k),
+        "--win_size".into(),
+        format!("{}", p.sampling.win_size),
+        "--tau_r".into(),
+        format!("{}", p.sampling.tau_r),
+    ];
+    let mut argv = argv;
+    if !p.text_frontend {
+        // infer_sft.py: argparse.BooleanOptionalAction
+        argv.push("--no-text_frontend".into());
+    }
+    if stream {
+        argv.push("--stream".into());
+    }
+
+    let site_pkgs =
+        env_string("CHAOS_TTS_PY_VENV_SITE_PACKAGES").or_else(|| pick_default_site_packages(&workdir_path));
+    let torch_abi = site_pkgs
+        .as_ref()
+        .and_then(|p| detect_torch_python_abi(Path::new(p)));
+    let script_dir = script_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| workdir_path.clone());
+
+    // 运行 Python。
+    let run_res: Result<(), TtsError> = Python::with_gil(|py| -> Result<(), TtsError> {
+        let sys = py
+            .import("sys")
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+        if env_bool("CHAOS_TTS_PY_DEBUG") {
+            // 仅在 debug 时打印，避免污染正常输出。
+            // 这些信息对排查 “torch DLL load failed / WinError 126” 很关键（通常是 Python 版本/ABI 不匹配）。
+            let platform = py
+                .import("platform")
+                .map_err(|e| TtsError::Candle(e.to_string()))?;
+            let version: String = sys
+                .getattr("version")
+                .map_err(|e| TtsError::Candle(e.to_string()))?
+                .extract()
+                .unwrap_or_else(|_| "<unknown>".to_string());
+            let executable: String = sys
+                .getattr("executable")
+                .map_err(|e| TtsError::Candle(e.to_string()))?
+                .extract()
+                .unwrap_or_else(|_| "<unknown>".to_string());
+            let prefix: String = sys
+                .getattr("prefix")
+                .map_err(|e| TtsError::Candle(e.to_string()))?
+                .extract()
+                .unwrap_or_else(|_| "<unknown>".to_string());
+            let base_prefix: String = sys
+                .getattr("base_prefix")
+                .map_err(|e| TtsError::Candle(e.to_string()))?
+                .extract()
+                .unwrap_or_else(|_| "<unknown>".to_string());
+            let arch: String = platform
+                .call_method0("architecture")
+                .map_err(|e| TtsError::Candle(e.to_string()))?
+                .extract()
+                .unwrap_or_else(|_| "<unknown>".to_string());
+            eprintln!(
+                "[pyo3(pt)] python: version={} executable={} prefix={} base_prefix={} arch={}",
+                version, executable, prefix, base_prefix, arch
+            );
+            if let Some(site) = site_pkgs.as_ref() {
+                eprintln!("[pyo3(pt)] venv_site_packages={site}");
+            }
+        }
+
+        if let Some((need_major, need_minor, tag)) = torch_abi.as_ref() {
+            // 如果 site-packages 的 torch wheel 与当前嵌入式 Python 版本不匹配，
+            // 继续执行通常会变成 WinError 126（无法加载 .pyd/.dll），这里提前给出明确提示。
+            let vi = sys
+                .getattr("version_info")
+                .map_err(|e| TtsError::Candle(e.to_string()))?;
+            let cur_major: u8 = vi
+                .getattr("major")
+                .map_err(|e| TtsError::Candle(e.to_string()))?
+                .extract()
+                .unwrap_or(0);
+            let cur_minor: u8 = vi
+                .getattr("minor")
+                .map_err(|e| TtsError::Candle(e.to_string()))?
+                .extract()
+                .unwrap_or(0);
+            if cur_major != *need_major || cur_minor != *need_minor {
+                return Err(TtsError::InvalidArg(format!(
+                    "python ABI mismatch: embedded python={cur_major}.{cur_minor}, but torch wheel in site-packages requires {need_major}.{need_minor} ({tag}). \
+请在编译时设置环境变量 `PYO3_PYTHON` 指向对应版本的 python.exe（建议指向 VoiceLab 的 .venv\\Scripts\\python.exe），然后重新编译/运行。"
+                )));
+            }
+        }
+
+        let path = sys
+            .getattr("path")
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+        let _ = path
+            .call_method1("insert", (0usize, script_dir.to_string_lossy().to_string()))
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+
+        if let Some(site) = site_pkgs.as_ref() {
+            // 1) 用 site.addsitedir 解析 .pth（更贴近 venv python 行为）
+            let site_mod = py
+                .import("site")
+                .map_err(|e| TtsError::Candle(e.to_string()))?;
+            site_mod
+                .call_method1("addsitedir", (site.as_str(),))
+                .map_err(|e| TtsError::Candle(e.to_string()))?;
+
+            // 2) 防御：确保路径靠前（避免被同名包覆盖）
+            let _ = path
+                .call_method1("insert", (0usize, site.as_str()))
+                .map_err(|e| TtsError::Candle(e.to_string()))?;
+
+            // 3) Windows：torch/torchaudio 通常需要 DLL 搜索路径；best-effort 增加 torch/lib
+            let os = py
+                .import("os")
+                .map_err(|e| TtsError::Candle(e.to_string()))?;
+            if let Ok(add_dll) = os.getattr("add_dll_directory") {
+                // 重要：add_dll_directory 返回的 handle 必须保持引用，否则可能被 GC 回收导致目录失效。
+                // 这里把 handle 挂到 sys 模块上，确保本次脚本执行期间有效。
+                let mut handles: Vec<PyObject> = Vec::new();
+
+                // 额外增加 venv 的目录：很多 wheel 依赖会在 venv/Scripts 或 venv 根目录下解析 DLL。
+                let site_path = PathBuf::from(site);
+                if let Some(venv_root) = derive_venv_root_from_site_packages(&site_path) {
+                    let venv_scripts = venv_root.join("Scripts");
+                    let venv_library_bin = venv_root.join("Library").join("bin");
+                    if venv_scripts.exists() {
+                        if let Ok(h) =
+                            add_dll.call1((venv_scripts.to_string_lossy().to_string(),))
+                        {
+                            handles.push(h.into_py(py));
+                        }
+                    }
+                    if venv_library_bin.exists() {
+                        if let Ok(h) =
+                            add_dll.call1((venv_library_bin.to_string_lossy().to_string(),))
+                        {
+                            handles.push(h.into_py(py));
+                        }
+                    }
+                    if venv_root.exists() {
+                        if let Ok(h) = add_dll.call1((venv_root.to_string_lossy().to_string(),)) {
+                            handles.push(h.into_py(py));
+                        }
+                    }
+                    if let Ok(env) = os.getattr("environ") {
+                        let prev: String = match env.get_item("PATH") {
+                            Ok(v) => v.extract::<String>().unwrap_or_default(),
+                            Err(_) => String::new(),
+                        };
+                        let new_path = format!(
+                            "{};{};{};{}",
+                            venv_scripts.to_string_lossy(),
+                            venv_library_bin.to_string_lossy(),
+                            venv_root.to_string_lossy(),
+                            prev
+                        );
+                        let _ = env.set_item("PATH", new_path);
+                    }
+                }
+
+                let torch_lib = PathBuf::from(site).join("torch").join("lib");
+                if torch_lib.exists() {
+                    if let Ok(h) = add_dll.call1((torch_lib.to_string_lossy().to_string(),)) {
+                        handles.push(h.into_py(py));
+                    }
+                    if let Ok(env) = os.getattr("environ") {
+                        let prev: String = match env.get_item("PATH") {
+                            Ok(v) => v.extract::<String>().unwrap_or_default(),
+                            Err(_) => String::new(),
+                        };
+                        let new_path = format!("{};{}", torch_lib.to_string_lossy(), prev);
+                        let _ = env.set_item("PATH", new_path);
+                    }
+                }
+                let torchaudio_lib = PathBuf::from(site).join("torchaudio").join("lib");
+                if torchaudio_lib.exists() {
+                    if let Ok(h) = add_dll.call1((torchaudio_lib.to_string_lossy().to_string(),)) {
+                        handles.push(h.into_py(py));
+                    }
+                }
+
+                if !handles.is_empty() {
+                    let keep =
+                        PyList::new(py, &handles).map_err(|e| TtsError::Candle(e.to_string()))?;
+                    match sys.getattr("_chaos_added_dll_dirs") {
+                        Ok(prev) => {
+                            let _ = prev.call_method1("extend", (keep,));
+                        }
+                        Err(_) => {
+                            sys.setattr("_chaos_added_dll_dirs", keep)
+                                .map_err(|e| TtsError::Candle(e.to_string()))?;
+                        }
+                    }
+                }
+            }
+        }
+
+        let os = py
+            .import("os")
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+        os.call_method1("chdir", (workdir.as_str(),))
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+
+        let py_argv = PyList::new(py, &argv).map_err(|e| TtsError::Candle(e.to_string()))?;
+        sys.setattr("argv", py_argv)
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+
+        let runpy = py
+            .import("runpy")
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+        // run_name="__main__"：让脚本按命令行方式执行。
+        let kwargs = [("run_name", "__main__")]
+            .into_py_dict(py)
+            .map_err(|e| TtsError::Candle(e.to_string()))?;
+        match runpy.call_method(
+            "run_path",
+            (script_path.to_string_lossy().to_string(),),
+            Some(&kwargs),
+        ) {
+            Ok(_) => {}
+            Err(e) => {
+                // VoiceLab 的脚本末尾可能调用 sys.exit()；这种情况下 runpy 会抛 SystemExit。
+                // code=0 视为成功（继续去 out_dir 里取 wav）；非 0 才当错误返回。
+                if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) {
+                    let code = e
+                        .value(py)
+                        .getattr("code")
+                        .ok()
+                        .and_then(|v| v.extract::<i64>().ok())
+                        .unwrap_or(0);
+                    if code != 0 {
+                        return Err(TtsError::Candle(format!("python SystemExit: code={code}")));
+                    }
+                } else {
+                    return Err(TtsError::Candle(e.to_string()));
+                }
+            }
+        }
+
+        Ok(())
+    });
+
+    if let Err(e) = run_res {
+        return Err(e);
+    }
+
+    if let Some(c) = cancel {
+        if c.load(Ordering::Relaxed) {
+            return Err(TtsError::Canceled);
+        }
+    }
+
+    Ok(())
+}
+
 /// 运行 Python 的 infer_sft.py，返回 WAV bytes（PCM16）。
 pub fn infer_sft_pt_wav_bytes_with_cancel(
     p: &TtsSftParams,

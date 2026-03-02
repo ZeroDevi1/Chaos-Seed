@@ -12,6 +12,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.Transitions>
                 <TransitionCollection>
@@ -20,9 +21,9 @@
             </Grid.Transitions>
 
             <StackPanel Grid.Row="0" Spacing="6">
-                <TextBlock Text="实时对话（开发中）" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="实时对话" FontSize="28" FontWeight="SemiBold" />
                 <TextBlock
-                    Text="规划：音频/文本输入 → ASR 转文本 → LLM 生成回复 → TTS 流式输出 PCM（类似 AI 语音通话）。当前仅预留页面样式，暂不实现业务逻辑。"
+                    Text="当前版本：仅支持文本输入 → LLM 生成回复 → TTS 流式输出 PCM16（voice.chat.chunk），边收边播。"
                     Opacity="0.8"
                     TextWrapping="Wrap" />
             </StackPanel>
@@ -30,29 +31,35 @@
             <muxc:InfoBar
                 Grid.Row="1"
                 IsOpen="True"
-                Severity="Warning"
+                Severity="Informational"
                 Title="提示"
-                Message="该功能为长期开发目标，目前仅提供 UI 占位。" />
+                Message="需要先启动 daemon，并确保已配置 TTS Python 环境（CosyVoice）与 LLM 配置（config/llm.toml）。" />
 
             <Border Grid.Row="2" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                 <StackPanel Spacing="10">
-                    <TextBlock Text="会话" FontSize="18" FontWeight="SemiBold" />
-                    <TextBlock Text="（占位）这里将显示对话消息列表（用户/AI），支持滚动、复制文本、回放语音。" Opacity="0.75" TextWrapping="Wrap" />
-                    <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="10" Padding="12" MinHeight="220">
-                        <TextBlock Text="消息列表占位…" Opacity="0.65" />
-                    </Border>
+                    <TextBlock Text="参数" FontSize="18" FontWeight="SemiBold" />
+                    <TextBox x:Name="ModelDirBox" Header="modelDir（可空：使用 daemon 侧默认/环境变量）" TextWrapping="Wrap" />
+                    <TextBox x:Name="SpkIdBox" Header="spkId（可空：使用 daemon 侧默认）" TextWrapping="Wrap" />
+                    <muxc:ToggleSwitch x:Name="ReasoningToggle" Header="思考模式（Reasoning）" OffContent="Normal" OnContent="Reasoning" />
                 </StackPanel>
             </Border>
 
             <Border Grid.Row="3" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
                 <StackPanel Spacing="10">
                     <TextBlock Text="输入" FontSize="18" FontWeight="SemiBold" />
-                    <TextBox PlaceholderText="（占位）输入文本，或点击麦克风开始录音" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="80" />
+                    <TextBox x:Name="InputTextBox" PlaceholderText="输入文本（将作为 user 消息发送到 LLM）" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="96" />
                     <StackPanel Orientation="Horizontal" Spacing="12">
-                        <Button Content="录音" IsEnabled="False" />
-                        <Button Content="发送" IsEnabled="False" />
-                        <Button Content="结束会话" IsEnabled="False" />
+                        <Button x:Name="StartBtn" Content="开始" Click="OnStartClicked" />
+                        <Button x:Name="CancelBtn" Content="取消" Click="OnCancelClicked" IsEnabled="False" />
                     </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="4" Style="{StaticResource ChaosCardBorderStyle}" Padding="16">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="状态" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock x:Name="SessionText" Text="session: (none)" Opacity="0.75" />
+                    <TextBlock x:Name="StatusText" Text="status: idle" Opacity="0.75" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
         </Grid>

@@ -556,6 +556,7 @@ mod win {
         status: Arc<Mutex<TtsSftStatus>>,
         cancel: Arc<AtomicBool>,
         handle: tokio::task::JoinHandle<()>,
+        notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
     }
 
     struct TtsManager {
@@ -574,6 +575,7 @@ mod win {
         async fn start(
             self: Arc<Self>,
             params: TtsSftStartParams,
+            notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
         ) -> Result<TtsSftStartResult, String> {
             let session_id = gen_session_id("tts_sft");
 
@@ -585,6 +587,17 @@ mod win {
                 result: None,
             }));
             let cancel = Arc::new(AtomicBool::new(false));
+
+            // 先推送一次初始状态，便于 UI 立刻进入“运行中”状态（不必轮询）。
+            {
+                let st = status.lock().await.clone();
+                let _ = notif_tx.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                    chaos_proto::TtsSftStatusNotif {
+                        session_id: session_id.clone(),
+                        status: st,
+                    },
+                ));
+            }
 
             let status2 = status.clone();
             let cancel2 = cancel.clone();
@@ -638,6 +651,8 @@ mod win {
             let text_frontend = params.text_frontend.unwrap_or(true);
 
             let mgr = self.clone();
+            let notif_tx2 = notif_tx.clone();
+            let sid2 = session_id.clone();
 
             let handle = tokio::spawn(async move {
                 // Use owned permit so it can live inside the spawned task.
@@ -652,6 +667,15 @@ mod win {
                     let mut st = status2.lock().await;
                     st.state = TtsJobState::Running;
                     st.stage = Some("loading".to_string());
+                }
+                {
+                    let st = status2.lock().await.clone();
+                    let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                        chaos_proto::TtsSftStatusNotif {
+                            session_id: sid2.clone(),
+                            status: st,
+                        },
+                    ));
                 }
 
                 // 仅使用 Python(.pt) 后端：复刻 VoiceLab 的 infer_sft.py。
@@ -680,6 +704,12 @@ mod win {
                         "missing llmCkpt: set request.llmCkpt or env CHAOS_TTS_PY_LLM_CKPT"
                             .to_string(),
                     );
+                    let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                        chaos_proto::TtsSftStatusNotif {
+                            session_id: sid2.clone(),
+                            status: st.clone(),
+                        },
+                    ));
                     return;
                 };
                 let Some(flow_ckpt) = flow_ckpt else {
@@ -691,6 +721,12 @@ mod win {
                         "missing flowCkpt: set request.flowCkpt or env CHAOS_TTS_PY_FLOW_CKPT"
                             .to_string(),
                     );
+                    let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                        chaos_proto::TtsSftStatusNotif {
+                            session_id: sid2.clone(),
+                            status: st.clone(),
+                        },
+                    ));
                     return;
                 };
 
@@ -703,12 +739,27 @@ mod win {
                         "missing modelDir: set request.modelDir or env CHAOS_TTS_PY_MODEL_DIR"
                             .to_string(),
                     );
+                    let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                        chaos_proto::TtsSftStatusNotif {
+                            session_id: sid2.clone(),
+                            status: st.clone(),
+                        },
+                    ));
                     return;
                 }
 
                 {
                     let mut st = status2.lock().await;
                     st.stage = Some("python".to_string());
+                }
+                {
+                    let st = status2.lock().await.clone();
+                    let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                        chaos_proto::TtsSftStatusNotif {
+                            session_id: sid2.clone(),
+                            status: st,
+                        },
+                    ));
                 }
 
                 let tts_params = chaos_core::tts::TtsSftParams {
@@ -774,6 +825,12 @@ mod win {
                             channels: wav.channels,
                             duration_ms: wav.duration_ms,
                         });
+                        let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                            chaos_proto::TtsSftStatusNotif {
+                                session_id: sid2.clone(),
+                                status: st.clone(),
+                            },
+                        ));
                     }
                     Ok(Err(e)) => {
                         let canceled = cancel2.load(Ordering::Relaxed)
@@ -787,6 +844,12 @@ mod win {
                         };
                         st.stage = Some(if canceled { "canceled" } else { "failed" }.to_string());
                         st.error = Some(e);
+                        let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                            chaos_proto::TtsSftStatusNotif {
+                                session_id: sid2.clone(),
+                                status: st.clone(),
+                            },
+                        ));
                     }
                     Err(e) => {
                         let mut st = status2.lock().await;
@@ -794,6 +857,12 @@ mod win {
                         st.state = TtsJobState::Failed;
                         st.stage = Some("failed".to_string());
                         st.error = Some(e);
+                        let _ = notif_tx2.send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                            chaos_proto::TtsSftStatusNotif {
+                                session_id: sid2.clone(),
+                                status: st.clone(),
+                            },
+                        ));
                     }
                 }
             });
@@ -806,6 +875,7 @@ mod win {
                         status,
                         cancel,
                         handle,
+                        notif_tx: notif_tx.clone(),
                     },
                 );
             }
@@ -842,6 +912,14 @@ mod win {
                 st.state = TtsJobState::Canceled;
                 st.stage = Some("canceled".to_string());
                 st.error = None;
+                let _ = sess
+                    .notif_tx
+                    .send(chaos_daemon::DaemonNotif::TtsSftStatusChanged(
+                        chaos_proto::TtsSftStatusNotif {
+                            session_id: sid.clone(),
+                            status: st.clone(),
+                        },
+                    ));
             }
             Ok(OkReply { ok: true })
         }
@@ -854,7 +932,20 @@ mod win {
 
     impl LlmManager {
         fn new() -> Self {
-            Self::default()
+            // best-effort：daemon 启动时自动加载 config/llm.toml（真实配置应被 gitignore）。
+            let (path, cfg) = match chaos_core::llm::config_toml::autoload_llm_config_with_path() {
+                Ok(Some((p, cfg))) => {
+                    eprintln!("[llm] 已自动加载配置：{}", p.display());
+                    (Some(p), Some(cfg))
+                }
+                Ok(None) => (None, None),
+                Err(e) => {
+                    eprintln!("[llm] 自动加载配置失败：{e}");
+                    (None, None)
+                }
+            };
+            let _ = path;
+            Self { cfg: Mutex::new(cfg) }
         }
 
         async fn set_config(&self, params: LlmConfigSetParams) -> Result<OkReply, String> {
@@ -882,6 +973,9 @@ mod win {
                 reasoning_model: params.reasoning_model.filter(|s| !s.trim().is_empty()),
                 timeout_ms,
                 default_temperature,
+                // RPC 配置暂不暴露 thinking 开关：使用默认映射（Normal=非思考，Reasoning=思考）。
+                enable_thinking_normal: false,
+                enable_thinking_reasoning: true,
             };
 
             *self.cfg.lock().await = Some(cfg);
@@ -889,9 +983,26 @@ mod win {
         }
 
         async fn get_client(&self) -> Result<chaos_core::llm::LlmClient, String> {
-            let locked = self.cfg.lock().await;
+            let mut locked = self.cfg.lock().await;
+            if locked.is_none() {
+                // best-effort：允许用户在 daemon 已启动后补齐 config/llm.toml，无需重启。
+                match chaos_core::llm::config_toml::autoload_llm_config_with_path() {
+                    Ok(Some((p, cfg))) => {
+                        eprintln!("[llm] 已自动加载配置：{}", p.display());
+                        *locked = Some(cfg);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!("[llm] 自动加载配置失败：{e}");
+                    }
+                }
+            }
+
             let Some(cfg) = locked.clone() else {
-                return Err("LLM is not configured (call llm.config.set first)".into());
+                return Err(
+                    "LLM 未配置：请调用 llm.config.set，或创建 config/llm.toml（也可用环境变量 CHAOS_LLM_CONFIG 指定路径）"
+                        .into(),
+                );
             };
             chaos_core::llm::LlmClient::new(cfg).map_err(|e| e.to_string())
         }
@@ -1367,8 +1478,9 @@ mod win {
         async fn tts_sft_start(
             &self,
             params: TtsSftStartParams,
+            notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
         ) -> Result<TtsSftStartResult, String> {
-            self.tts.clone().start(params).await
+            self.tts.clone().start(params, notif_tx).await
         }
 
         async fn tts_sft_status(&self, params: TtsSftStatusParams) -> Result<TtsSftStatus, String> {

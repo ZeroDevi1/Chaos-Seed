@@ -511,6 +511,143 @@ async fn decode_manifest_room_play_info_ignores_qn_fallback_to_playurl() {
 }
 
 #[tokio::test]
+async fn decode_manifest_v2_current_qn_mismatch_uses_v2_url_as_last_resort() {
+    let server = MockServer::start();
+    let base = server.base_url();
+
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/room/v1/Room/get_info")
+            .query_param("room_id", "12");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": { "room_id": 1212, "title": "t12", "live_status": 1, "user_cover": "" }
+        }));
+    });
+
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/live_user/v1/UserInfo/get_anchor_in_room")
+            .query_param("roomid", "1212");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": { "info": { "uname": "u12", "face": "f12" } }
+        }));
+    });
+
+    // v2 called with qn=10000: current_qn is abnormal (250), but returned URL has already switched to high quality.
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/xlive/web-room/v2/index/getRoomPlayInfo")
+            .query_param("qn", "10000");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": {
+                "encrypted": false,
+                "pwd_verified": true,
+                "playurl_info": {
+                    "playurl": {
+                        "g_qn_desc": [
+                            {"qn": 250, "desc": "超清"},
+                            {"qn": 10000, "desc": "原画"}
+                        ],
+                        "stream": [{
+                            "protocol_name": "http_stream",
+                            "format": [{
+                                "format_name": "flv",
+                                "codec": [{
+                                    "codec_name": "avc",
+                                    "current_qn": 250,
+                                    "accept_qn": [250, 10000],
+                                    "base_url": "/live-bvc/hi_10000.flv",
+                                    "url_info": [
+                                        {"host": "https://up-mirror.bilivideo.com", "extra": "?x=1"}
+                                    ]
+                                }]
+                            }]
+                        }]
+                    }
+                }
+            }
+        }));
+    });
+
+    // Quality enumeration (no qn): current_qn is low.
+    server.mock(|when, then| {
+        when.method(GET)
+            .path("/xlive/web-room/v2/index/getRoomPlayInfo");
+        then.status(200).json_body(serde_json::json!({
+            "code": 0,
+            "data": {
+                "encrypted": false,
+                "pwd_verified": true,
+                "playurl_info": {
+                    "playurl": {
+                        "g_qn_desc": [
+                            {"qn": 250, "desc": "超清"},
+                            {"qn": 10000, "desc": "原画"}
+                        ],
+                        "stream": [{
+                            "protocol_name": "http_stream",
+                            "format": [{
+                                "format_name": "flv",
+                                "codec": [{
+                                    "codec_name": "avc",
+                                    "current_qn": 250,
+                                    "accept_qn": [250, 10000],
+                                    "base_url": "/live-bvc/low_2500.flv",
+                                    "url_info": [
+                                        {"host": "https://up-mirror.bilivideo.com", "extra": "?x=1"}
+                                    ]
+                                }]
+                            }]
+                        }]
+                    }
+                }
+            }
+        }));
+    });
+
+    // v1 playUrl fails (simulating rooms where v1 is restricted/unstable); should fall back to v2 URL.
+    let playurl_10000 = server.mock(|when, then| {
+        when.method(GET)
+            .path("/room/v1/Room/playUrl")
+            .query_param("cid", "1212")
+            .query_param("qn", "10000")
+            .query_param("platform", "web");
+        then.status(500).body("playUrl failed");
+    });
+
+    let cfg = LivestreamConfig {
+        endpoints: Endpoints {
+            bili_api_base: base.clone(),
+            bili_live_base: base.clone(),
+            ..Endpoints::default()
+        },
+        env: fixed_env(),
+    };
+    let client = LivestreamClient::with_config(cfg).expect("client");
+    let man = client
+        .decode_manifest("https://live.bilibili.com/12", ResolveOptions::default())
+        .await
+        .expect("manifest");
+
+    assert_eq!(man.site, Site::BiliLive);
+    assert_eq!(man.room_id, "1212");
+    assert_eq!(playurl_10000.hits(), 1, "should try v1 playUrl before v2 last resort");
+
+    let high = man
+        .variants
+        .iter()
+        .find(|v| v.quality == 10000)
+        .expect("high");
+    assert!(
+        high.url.as_deref().unwrap_or("").contains("hi_10000.flv"),
+        "expected v2 high url to be bound even when current_qn is abnormal"
+    );
+}
+
+#[tokio::test]
 async fn resolve_variant_fallback_to_playurl_when_v2_does_not_switch() {
     let server = MockServer::start();
     let base = server.base_url();

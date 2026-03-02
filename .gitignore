@@ -49,3 +49,6 @@ sync_to_win.sh
 /chaos-winui3/ChaosSeed.WinUI3/FFmpeg/**
 !/chaos-winui3/ChaosSeed.WinUI3/FFmpeg/.gitkeep
 .ace-tool/
+
+# LLM 本地配置（包含密钥，禁止提交）
+/config/llm.toml
