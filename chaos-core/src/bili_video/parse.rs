@@ -1,6 +1,6 @@
 use regex::Regex;
-use serde_json::Value;
 use reqwest::Url;
+use serde_json::Value;
 
 use super::{BiliClient, BiliError, bili_check_code, header_map_with_cookie};
 
@@ -71,7 +71,9 @@ pub fn parse_video_id(input: &str) -> Result<VideoId, BiliError> {
         });
     }
 
-    Err(BiliError::InvalidInput("unsupported input (expect BV/av/url)".to_string()))
+    Err(BiliError::InvalidInput(
+        "unsupported input (expect BV/av/url)".to_string(),
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,29 +164,62 @@ pub async fn fetch_view_info(
 ) -> Result<ViewInfo, BiliError> {
     let base = client.endpoints.api_base.trim_end_matches('/');
     let url = if let Some(bv) = id.bvid.as_deref().filter(|s| !s.trim().is_empty()) {
-        format!("{base}/x/web-interface/view?bvid={}", urlencoding::encode(bv))
+        format!(
+            "{base}/x/web-interface/view?bvid={}",
+            urlencoding::encode(bv)
+        )
     } else if let Some(aid) = id.aid.as_deref().filter(|s| !s.trim().is_empty()) {
-        format!("{base}/x/web-interface/view?aid={}", urlencoding::encode(aid))
+        format!(
+            "{base}/x/web-interface/view?aid={}",
+            urlencoding::encode(aid)
+        )
     } else {
         return Err(BiliError::InvalidInput("missing aid/bvid".to_string()));
     };
 
     let headers = header_map_with_cookie(cookie);
-    let json: Value = client.http.get(url).headers(headers).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(headers)
+        .send()
+        .await?
+        .json()
+        .await?;
     bili_check_code(&json)?;
 
     let data = json
         .get("data")
         .ok_or_else(|| BiliError::Parse("missing data".to_string()))?;
 
-    let aid = data.get("aid").and_then(|v| v.as_i64()).map(|v| v.to_string()).unwrap_or_default();
-    let bvid = data.get("bvid").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let title = data.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let aid = data
+        .get("aid")
+        .and_then(|v| v.as_i64())
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let bvid = data
+        .get("bvid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let title = data
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if aid.is_empty() || bvid.is_empty() || title.is_empty() {
         return Err(BiliError::Parse("missing aid/bvid/title".to_string()));
     }
-    let desc = data.get("desc").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let pic = data.get("pic").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let desc = data
+        .get("desc")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let pic = data
+        .get("pic")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let pub_time = data.get("pubdate").and_then(|v| v.as_i64());
 
     let (owner_name, owner_mid) = data
@@ -192,7 +227,9 @@ pub async fn fetch_view_info(
         .and_then(|v| v.as_object())
         .map(|o| {
             (
-                o.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                o.get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
                 o.get("mid").and_then(|v| v.as_i64()).map(|v| v.to_string()),
             )
         })
@@ -202,21 +239,33 @@ pub async fn fetch_view_info(
     if let Some(arr) = data.get("pages").and_then(|v| v.as_array()) {
         for p in arr {
             let page_number = p.get("page").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let cid = p.get("cid").and_then(|v| v.as_u64()).map(|v| v.to_string()).unwrap_or_default();
-            let part = p.get("part").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let cid = p
+                .get("cid")
+                .and_then(|v| v.as_u64())
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let part = p
+                .get("part")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if page_number == 0 || cid.is_empty() || part.is_empty() {
                 continue;
             }
             let duration_s = p.get("duration").and_then(|v| v.as_u64()).map(|v| v as u32);
-            let dimension = p.get("dimension").and_then(|v| v.as_object()).and_then(|d| {
-                let w = d.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
-                let h = d.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
-                if w > 0 && h > 0 {
-                    Some(format!("{w}x{h}"))
-                } else {
-                    None
-                }
-            });
+            let dimension = p
+                .get("dimension")
+                .and_then(|v| v.as_object())
+                .and_then(|d| {
+                    let w = d.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let h = d.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+                    if w > 0 && h > 0 {
+                        Some(format!("{w}x{h}"))
+                    } else {
+                        None
+                    }
+                });
             pages.push(ViewPage {
                 page_number,
                 cid,

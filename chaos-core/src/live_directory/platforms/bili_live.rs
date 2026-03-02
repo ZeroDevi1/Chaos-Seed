@@ -491,9 +491,8 @@ pub async fn get_category_rooms(
                 return fallback_v3(client, base, pid, cid, page).await;
             }
         }
-        return Err(last_err.unwrap_or_else(|| {
-            LiveDirectoryError::Parse("bilibili request failed".to_string())
-        }));
+        return Err(last_err
+            .unwrap_or_else(|| LiveDirectoryError::Parse("bilibili request failed".to_string())));
     };
     let has_more = v
         .pointer("/data/has_more")

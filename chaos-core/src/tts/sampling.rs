@@ -58,7 +58,10 @@ pub fn sample_ras_next(
     }
 
     // Temperature scaling: logits /= temperature.
-    let scores: Vec<f32> = weighted_scores.iter().map(|x| x / cfg.temperature).collect();
+    let scores: Vec<f32> = weighted_scores
+        .iter()
+        .map(|x| x / cfg.temperature)
+        .collect();
 
     let top_id = nucleus_sampling(&scores, cfg.top_p, cfg.top_k, rng)?;
 
@@ -150,7 +153,11 @@ fn nucleus_sampling(
     // top-k 候选：按「可参与 softmax 的分数」排序；非有限值在参考实现中会被当作 0 概率，因此这里当作 -inf 参与比较。
     let mut top: Vec<(usize, f32)> = Vec::with_capacity(k);
     for (i, &x) in scores.iter().enumerate() {
-        let e = if x.is_finite() { (x - max).exp() as f64 } else { 0.0 };
+        let e = if x.is_finite() {
+            (x - max).exp() as f64
+        } else {
+            0.0
+        };
         sum_exp += e;
 
         let rank = if x.is_finite() { x } else { f32::NEG_INFINITY };
@@ -454,20 +461,15 @@ mod tests {
             },
         ];
 
-        let params = [
-            (1.0, 1),
-            (1.0, 20),
-            (0.9, 20),
-            (0.75, 20),
-            (0.6, 10),
-        ];
+        let params = [(1.0, 1), (1.0, 20), (0.9, 20), (0.75, 20), (0.6, 10)];
 
         for scores in cases {
             for (top_p, top_k) in params {
                 let a = nucleus_sampling_reference(&scores, top_p, top_k, &mut rng1).unwrap();
                 let b = nucleus_sampling(&scores, top_p, top_k, &mut rng2).unwrap();
                 assert_eq!(
-                    a, b,
+                    a,
+                    b,
                     "mismatch: top_p={top_p} top_k={top_k} len={}",
                     scores.len()
                 );
@@ -475,4 +477,3 @@ mod tests {
         }
     }
 }
-

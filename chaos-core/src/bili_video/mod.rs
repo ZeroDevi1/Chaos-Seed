@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use reqwest::cookie::{CookieStore, Jar};
-use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use reqwest::Url;
+use reqwest::cookie::{CookieStore, Jar};
+use reqwest::header::{HeaderMap, HeaderValue};
 
 pub mod auth;
 pub mod download;
@@ -108,10 +108,7 @@ impl BiliClient {
         Self::with_endpoints(BiliEndpoints::default(), Duration::from_secs(18))
     }
 
-    pub fn with_endpoints(
-        endpoints: BiliEndpoints,
-        timeout: Duration,
-    ) -> Result<Self, BiliError> {
+    pub fn with_endpoints(endpoints: BiliEndpoints, timeout: Duration) -> Result<Self, BiliError> {
         let jar = std::sync::Arc::new(Jar::default());
         let http = Client::builder()
             .user_agent(default_user_agent())
@@ -135,7 +132,9 @@ impl BiliClient {
             .lock()
             .ok()
             .and_then(|g| g.clone())
-            .and_then(|c| (c.fetched_at.elapsed() < TTL && !c.cookie.trim().is_empty()).then_some(c.cookie))
+            .and_then(|c| {
+                (c.fetched_at.elapsed() < TTL && !c.cookie.trim().is_empty()).then_some(c.cookie)
+            })
     }
 
     pub fn wbi_mixin_cached(&self) -> Option<String> {
@@ -144,7 +143,10 @@ impl BiliClient {
             .lock()
             .ok()
             .and_then(|g| g.clone())
-            .and_then(|c| (c.fetched_at.elapsed() < TTL && !c.mixin_key.trim().is_empty()).then_some(c.mixin_key))
+            .and_then(|c| {
+                (c.fetched_at.elapsed() < TTL && !c.mixin_key.trim().is_empty())
+                    .then_some(c.mixin_key)
+            })
     }
 
     pub(crate) fn set_buvid_cookie(&self, cookie: String) {
@@ -169,7 +171,11 @@ impl BiliClient {
         let u = Url::parse(url).ok()?;
         let hv = self.cookie_jar.cookies(&u)?;
         let s = hv.to_str().ok()?.trim();
-        if s.is_empty() { None } else { Some(s.to_string()) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        }
     }
 
     pub fn cookies_for_www(&self) -> Option<String> {
@@ -237,7 +243,11 @@ pub fn merge_cookie_strings(old_cookie: &str, new_cookie: &str) -> Option<String
     for (k, v) in parse_cookie_kv(new_cookie) {
         kv.insert(k, v);
     }
-    let s = cookie_kv_to_string(&kv).trim().trim_end_matches(';').trim().to_string();
+    let s = cookie_kv_to_string(&kv)
+        .trim()
+        .trim_end_matches(';')
+        .trim()
+        .to_string();
     if s.is_empty() { None } else { Some(s) }
 }
 
@@ -286,7 +296,10 @@ pub fn header_map_with_cookie(cookie: Option<&str>) -> HeaderMap {
             h.insert(reqwest::header::COOKIE, v);
         }
     }
-    h.insert(reqwest::header::REFERER, HeaderValue::from_static(default_referer()));
+    h.insert(
+        reqwest::header::REFERER,
+        HeaderValue::from_static(default_referer()),
+    );
     h
 }
 
@@ -294,8 +307,12 @@ pub fn extract_set_cookie_kv(headers: &HeaderMap) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for v in headers.get_all(reqwest::header::SET_COOKIE).iter() {
         let Ok(s) = v.to_str() else { continue };
-        let Some(first) = s.split(';').next() else { continue };
-        let Some((k, val)) = first.split_once('=') else { continue };
+        let Some(first) = s.split(';').next() else {
+            continue;
+        };
+        let Some((k, val)) = first.split_once('=') else {
+            continue;
+        };
         let k = k.trim();
         let val = val.trim();
         if !k.is_empty() && !val.is_empty() {

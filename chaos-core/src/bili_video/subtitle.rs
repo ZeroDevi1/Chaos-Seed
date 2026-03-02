@@ -28,7 +28,14 @@ pub async fn fetch_subtitles(
         urlencoding::encode(c)
     );
     let headers = header_map_with_cookie(cookie);
-    let json: Value = client.http.get(url).headers(headers).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(headers)
+        .send()
+        .await?
+        .json()
+        .await?;
     bili_check_code(&json)?;
 
     let subs = json
@@ -39,7 +46,11 @@ pub async fn fetch_subtitles(
 
     let mut out: Vec<SubtitleTrack> = Vec::new();
     for s in subs {
-        let url = s.get("subtitle_url").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let url = s
+            .get("subtitle_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         if url.is_empty() {
             continue;
         }
@@ -48,7 +59,12 @@ pub async fn fetch_subtitles(
         } else {
             url.to_string()
         };
-        let lang = s.get("lan").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let lang = s
+            .get("lan")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         let lang_doc = s
             .get("lan_doc")
             .and_then(|v| v.as_str())
@@ -58,7 +74,11 @@ pub async fn fetch_subtitles(
         if lang.is_empty() {
             continue;
         }
-        out.push(SubtitleTrack { lang, lang_doc, url });
+        out.push(SubtitleTrack {
+            lang,
+            lang_doc,
+            url,
+        });
     }
     Ok(out)
 }
@@ -118,7 +138,13 @@ pub async fn download_subtitle_srt(
         return Err(BiliError::InvalidInput("empty subtitle url".to_string()));
     }
     let headers = header_map_with_cookie(cookie);
-    let json: Value = client.http.get(u).headers(headers).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .get(u)
+        .headers(headers)
+        .send()
+        .await?
+        .json()
+        .await?;
     bcc_json_to_srt(&json)
 }
-

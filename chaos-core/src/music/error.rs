@@ -21,4 +21,3 @@ pub enum MusicError {
     #[error("other error: {0}")]
     Other(String),
 }
-

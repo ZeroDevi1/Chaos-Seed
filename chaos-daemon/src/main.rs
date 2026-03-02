@@ -558,9 +558,7 @@ mod win {
         handle: tokio::task::JoinHandle<()>,
     }
 
-    #[derive(Debug)]
     struct TtsManager {
-        engines: Mutex<HashMap<String, Arc<chaos_core::tts::CosyVoiceEngine>>>,
         sessions: Mutex<HashMap<String, TtsSession>>,
         sem: Arc<Semaphore>,
     }
@@ -568,44 +566,9 @@ mod win {
     impl TtsManager {
         fn new() -> Self {
             Self {
-                engines: Mutex::new(HashMap::new()),
                 sessions: Mutex::new(HashMap::new()),
                 sem: Arc::new(Semaphore::new(1)),
             }
-        }
-
-        async fn get_engine(
-            &self,
-            model_dir: &str,
-        ) -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
-            let key = model_dir.trim().to_string();
-            if key.is_empty() {
-                return Err("modelDir is empty".into());
-            }
-            {
-                let locked = self.engines.lock().await;
-                if let Some(e) = locked.get(&key) {
-                    return Ok(e.clone());
-                }
-            }
-
-            // Loading/optimizing tract plans can be expensive; do it off the async scheduler.
-            let key2 = key.clone();
-            let engine = tokio::task::spawn_blocking(
-                move || -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
-                    let pack =
-                        chaos_core::tts::CosyVoicePack::load(&key2).map_err(|e| e.to_string())?;
-                    let engine =
-                        chaos_core::tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
-                    Ok(Arc::new(engine))
-                },
-            )
-            .await
-            .map_err(|e| e.to_string())??;
-
-            let mut locked = self.engines.lock().await;
-            locked.insert(key, engine.clone());
-            Ok(engine)
         }
 
         async fn start(
@@ -625,13 +588,44 @@ mod win {
 
             let status2 = status.clone();
             let cancel2 = cancel.clone();
-            let model_dir = params.model_dir.trim().to_string();
+            let model_dir = {
+                let raw = params.model_dir.trim().to_string();
+                if !raw.is_empty() {
+                    raw
+                } else {
+                    std::env::var("CHAOS_TTS_PY_MODEL_DIR")
+                        .ok()
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or_default()
+                }
+            };
             let spk_id = params.spk_id.trim().to_string();
             let text = params.text.clone();
             let prompt_text = params.prompt_text.clone();
+            let llm_ckpt = params
+                .llm_ckpt
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+            let flow_ckpt = params
+                .flow_ckpt
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+            let python_workdir = params
+                .python_workdir
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+            let python_infer_script = params
+                .python_infer_script
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
 
             let prompt_strategy = params.prompt_strategy.unwrap_or(TtsPromptStrategy::Inject);
             let guide_sep = params.guide_sep.unwrap_or_else(|| " ".to_string());
+            let prompt_strategy2 = match prompt_strategy {
+                TtsPromptStrategy::Inject => chaos_core::tts::PromptStrategy::Inject,
+                TtsPromptStrategy::GuidePrefix => chaos_core::tts::PromptStrategy::GuidePrefix,
+            };
 
             let speed = params.speed.unwrap_or(1.0).max(0.01);
             let seed = params.seed.unwrap_or(1986);
@@ -660,35 +654,70 @@ mod win {
                     st.stage = Some("loading".to_string());
                 }
 
-                let engine = match mgr.get_engine(&model_dir).await {
-                    Ok(v) => v,
-                    Err(e) => {
-                        let mut st = status2.lock().await;
-                        st.done = true;
-                        st.state = TtsJobState::Failed;
-                        st.stage = Some("loading".to_string());
-                        st.error = Some(e);
-                        return;
-                    }
+                // 仅使用 Python(.pt) 后端：复刻 VoiceLab 的 infer_sft.py。
+                //
+                // - llmCkpt/flowCkpt 可由请求传入；也可通过环境变量提供默认值（便于 WinUI3 “解压即用”）。
+                // - pythonWorkdir/pythonInferScript 可选；若不传则由 python_infer 读取环境变量。
+                let llm_ckpt = llm_ckpt.or_else(|| {
+                    std::env::var("CHAOS_TTS_PY_LLM_CKPT")
+                        .ok()
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                });
+                let flow_ckpt = flow_ckpt.or_else(|| {
+                    std::env::var("CHAOS_TTS_PY_FLOW_CKPT")
+                        .ok()
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                });
+
+                let Some(llm_ckpt) = llm_ckpt else {
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = TtsJobState::Failed;
+                    st.stage = Some("python".to_string());
+                    st.error = Some(
+                        "missing llmCkpt: set request.llmCkpt or env CHAOS_TTS_PY_LLM_CKPT"
+                            .to_string(),
+                    );
+                    return;
                 };
+                let Some(flow_ckpt) = flow_ckpt else {
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = TtsJobState::Failed;
+                    st.stage = Some("python".to_string());
+                    st.error = Some(
+                        "missing flowCkpt: set request.flowCkpt or env CHAOS_TTS_PY_FLOW_CKPT"
+                            .to_string(),
+                    );
+                    return;
+                };
+
+                if model_dir.trim().is_empty() {
+                    let mut st = status2.lock().await;
+                    st.done = true;
+                    st.state = TtsJobState::Failed;
+                    st.stage = Some("python".to_string());
+                    st.error = Some(
+                        "missing modelDir: set request.modelDir or env CHAOS_TTS_PY_MODEL_DIR"
+                            .to_string(),
+                    );
+                    return;
+                }
 
                 {
                     let mut st = status2.lock().await;
-                    st.stage = Some("llm".to_string());
+                    st.stage = Some("python".to_string());
                 }
 
-                let prompt_strategy2 = match prompt_strategy {
-                    TtsPromptStrategy::Inject => chaos_core::tts::PromptStrategy::Inject,
-                    TtsPromptStrategy::GuidePrefix => chaos_core::tts::PromptStrategy::GuidePrefix,
-                };
-
-                let params2 = chaos_core::tts::TtsSftParams {
+                let tts_params = chaos_core::tts::TtsSftParams {
                     model_dir: model_dir.clone(),
                     spk_id: spk_id.clone(),
-                    text,
-                    prompt_text,
+                    text: text.clone(),
+                    prompt_text: prompt_text.clone(),
                     prompt_strategy: prompt_strategy2,
-                    guide_sep,
+                    guide_sep: guide_sep.clone(),
                     speed: speed as f32,
                     seed,
                     sampling: chaos_core::tts::SamplingConfig {
@@ -701,92 +730,38 @@ mod win {
                     text_frontend,
                 };
 
-                {
-                    let mut st = status2.lock().await;
-                    st.stage = Some("infer".to_string());
-                }
-
                 let cancel_for_run = cancel2.clone();
                 let res = tokio::task::spawn_blocking(
                     move || -> Result<chaos_core::tts::TtsWavResult, String> {
-                        let pcm = engine
-                            .synthesize_pcm16_with_cancel(&params2, Some(cancel_for_run.as_ref()))
-                            .map_err(|e| e.to_string())?;
-
-                        // 1) guide_prefix：按 tokenizer token 估算前缀占比，把“情绪 prompt”读出来的那一段裁掉。
-                        // 2) 然后再做一次 VAD 裁剪，去掉首尾静音/多余 padding。
-                        let mut trim = chaos_core::tts::TrimConfig::default();
-                        trim.enable_vad_trim = true;
-
-                        if matches!(
-                            params2.prompt_strategy,
-                            chaos_core::tts::PromptStrategy::GuidePrefix
-                        ) {
-                            let add_special = engine.pack().cfg.tokenizer_add_special_tokens;
-                            let r = chaos_core::tts::compute_guide_prefix_ratio_tokens(
-                                &engine.pack().tokenizer,
-                                add_special,
-                                &params2.text,
-                                &params2.prompt_text,
-                                &params2.guide_sep,
-                                params2.text_frontend,
+                        #[cfg(feature = "tts-python")]
+                        {
+                            chaos_core::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(
+                                &tts_params,
+                                &llm_ckpt,
+                                &flow_ckpt,
+                                python_workdir.as_deref(),
+                                python_infer_script.as_deref(),
+                                Some(cancel_for_run.as_ref()),
                             )
-                            .map_err(|e| e.to_string())?;
-                            if let Some(r) = r {
-                                trim.enable_prompt_trim = true;
-                                trim.prompt_prefix_ratio = Some(r);
-                            }
+                            .map_err(|e| e.to_string())
                         }
-
-                        // 优先用 silero-vad-rs（需要 modelDir/silero_vad.onnx 存在），否则退化到能量 VAD。
-                        let silero_model =
-                            std::path::PathBuf::from(&params2.model_dir).join("silero_vad.onnx");
-                        let trimmed_pcm16 = if silero_model.exists() {
-                            // silero 的 threshold 是概率（0..1），默认配置是给能量 VAD 用的，这里调整一下。
-                            trim.vad.threshold = 0.5;
-                            let vad = chaos_core::tts::SileroVad::new(&silero_model)
-                                .map_err(|e| e.to_string())?;
-                            chaos_core::tts::trim_output_pcm16_with_engine(
-                                &pcm.pcm16,
-                                pcm.sample_rate,
-                                &trim,
-                                &vad,
-                            )
-                            .map_err(|e| e.to_string())?
-                        } else {
-                            let vad = chaos_core::tts::EnergyVad::default();
-                            chaos_core::tts::trim_output_pcm16_with_engine(
-                                &pcm.pcm16,
-                                pcm.sample_rate,
-                                &trim,
-                                &vad,
-                            )
-                            .map_err(|e| e.to_string())?
-                        };
-
-                        let wav_bytes = chaos_core::tts::wav::encode_wav_pcm16_mono(
-                            pcm.sample_rate,
-                            &trimmed_pcm16,
-                        )
-                        .map_err(|e| e.to_string())?;
-                        let duration_ms =
-                            chaos_core::tts::wav::duration_ms(pcm.sample_rate, trimmed_pcm16.len());
-
-                        Ok(chaos_core::tts::TtsWavResult {
-                            sample_rate: pcm.sample_rate,
-                            channels: 1,
-                            duration_ms,
-                            wav_bytes,
-                        })
+                        #[cfg(not(feature = "tts-python"))]
+                        {
+                            let _ = tts_params;
+                            let _ = llm_ckpt;
+                            let _ = flow_ckpt;
+                            Err("python backend not enabled: build chaos-daemon with feature `tts-python`".to_string())
+                        }
                     },
                 )
-                .await;
+                .await
+                .map_err(|e| e.to_string());
 
                 match res {
-                    Ok(Ok(r)) => {
-                        let wav_b64 = base64::Engine::encode(
+                    Ok(Ok(wav)) => {
+                        let wav_base64 = base64::Engine::encode(
                             &base64::engine::general_purpose::STANDARD,
-                            &r.wav_bytes,
+                            &wav.wav_bytes,
                         );
                         let mut st = status2.lock().await;
                         st.done = true;
@@ -794,15 +769,15 @@ mod win {
                         st.stage = Some("done".to_string());
                         st.result = Some(TtsAudioResult {
                             mime: "audio/wav".to_string(),
-                            wav_base64: wav_b64,
-                            sample_rate: r.sample_rate,
-                            channels: r.channels,
-                            duration_ms: r.duration_ms,
+                            wav_base64,
+                            sample_rate: wav.sample_rate,
+                            channels: wav.channels,
+                            duration_ms: wav.duration_ms,
                         });
                     }
                     Ok(Err(e)) => {
                         let canceled = cancel2.load(Ordering::Relaxed)
-                            || e.to_string().to_lowercase().contains("canceled");
+                            || e.to_lowercase().contains("canceled");
                         let mut st = status2.lock().await;
                         st.done = true;
                         st.state = if canceled {
@@ -811,14 +786,14 @@ mod win {
                             TtsJobState::Failed
                         };
                         st.stage = Some(if canceled { "canceled" } else { "failed" }.to_string());
-                        st.error = Some(e.to_string());
+                        st.error = Some(e);
                     }
                     Err(e) => {
                         let mut st = status2.lock().await;
                         st.done = true;
                         st.state = TtsJobState::Failed;
                         st.stage = Some("failed".to_string());
-                        st.error = Some(e.to_string());
+                        st.error = Some(e);
                     }
                 }
             });
@@ -967,10 +942,20 @@ mod win {
             self: Arc<Self>,
             params: VoiceChatStreamStartParams,
             llm: Arc<LlmManager>,
-            tts: Arc<TtsManager>,
             notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
         ) -> Result<VoiceChatStreamStartResult, String> {
-            let model_dir = params.model_dir.trim().to_string();
+            let model_dir = {
+                let raw = params.model_dir.trim().to_string();
+                if !raw.is_empty() {
+                    raw
+                } else {
+                    std::env::var("CHAOS_TTS_PY_MODEL_DIR")
+                        .ok()
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or_default()
+                }
+            };
             let spk_id = params.spk_id.trim().to_string();
             if model_dir.is_empty() {
                 return Err("modelDir is empty".into());
@@ -982,8 +967,24 @@ mod win {
                 return Err("messages is empty".into());
             }
 
-            let engine = tts.get_engine(&model_dir).await?;
-            let sample_rate = engine.pack().cfg.sample_rate;
+            // CosyVoice3 输出采样率一般为 24k；这里作为启动时的固定元信息返回。
+            let sample_rate = 24_000u32;
+
+            // voice chat 依赖 TTS（当前仅支持 PyO3/Python 后端），因此必须有默认 ckpt。
+            let llm_ckpt = std::env::var("CHAOS_TTS_PY_LLM_CKPT")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| {
+                    "missing env CHAOS_TTS_PY_LLM_CKPT (required for voice chat tts)".to_string()
+                })?;
+            let flow_ckpt = std::env::var("CHAOS_TTS_PY_FLOW_CKPT")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .ok_or_else(|| {
+                    "missing env CHAOS_TTS_PY_FLOW_CKPT (required for voice chat tts)".to_string()
+                })?;
 
             let session_id = gen_session_id("voice_chat");
             let cancel = tokio_util::sync::CancellationToken::new();
@@ -1004,7 +1005,8 @@ mod win {
                     reasoning_mode,
                     chunk_ms,
                     llm,
-                    engine,
+                    llm_ckpt,
+                    flow_ckpt,
                     notif_tx,
                     cancel2.clone(),
                 )
@@ -1051,7 +1053,8 @@ mod win {
         reasoning_mode: ReasoningMode,
         chunk_ms: u32,
         llm: Arc<LlmManager>,
-        engine: Arc<chaos_core::tts::CosyVoiceEngine>,
+        llm_ckpt: String,
+        flow_ckpt: String,
         notif_tx: mpsc::UnboundedSender<chaos_daemon::DaemonNotif>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<(), String> {
@@ -1113,18 +1116,17 @@ mod win {
             spk_id: spk_id.clone(),
             model_dir: model_dir.clone(),
             tts: tts_params,
+            llm_ckpt,
+            flow_ckpt,
+            python_workdir: None,
+            python_infer_script: None,
             cfg: chaos_core::voice_chat::VoiceChatConfig {
                 chunk_ms,
                 ..Default::default()
             },
         };
 
-        let mut stream = chaos_core::voice_chat::realtime_chat_stream(
-            vc_req,
-            llm_client,
-            engine,
-            cancel.clone(),
-        );
+        let mut stream = chaos_core::voice_chat::realtime_chat_stream(vc_req, llm_client, cancel.clone());
 
         while let Some(item) = stream.next().await {
             match item {
@@ -1392,7 +1394,7 @@ mod win {
         ) -> Result<VoiceChatStreamStartResult, String> {
             self.voice_chat
                 .clone()
-                .start(params, self.llm.clone(), self.tts.clone(), notif_tx)
+                .start(params, self.llm.clone(), notif_tx)
                 .await
         }
 

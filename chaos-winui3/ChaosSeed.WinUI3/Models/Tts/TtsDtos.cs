@@ -17,6 +17,22 @@ public sealed class TtsSftStartParams
     [JsonPropertyName("text")]
     public string Text { get; set; } = "";
 
+    [JsonProperty("llmCkpt")]
+    [JsonPropertyName("llmCkpt")]
+    public string? LlmCkpt { get; set; }
+
+    [JsonProperty("flowCkpt")]
+    [JsonPropertyName("flowCkpt")]
+    public string? FlowCkpt { get; set; }
+
+    [JsonProperty("pythonWorkdir")]
+    [JsonPropertyName("pythonWorkdir")]
+    public string? PythonWorkdir { get; set; }
+
+    [JsonProperty("pythonInferScript")]
+    [JsonPropertyName("pythonInferScript")]
+    public string? PythonInferScript { get; set; }
+
     [JsonProperty("promptText")]
     [JsonPropertyName("promptText")]
     public string? PromptText { get; set; }

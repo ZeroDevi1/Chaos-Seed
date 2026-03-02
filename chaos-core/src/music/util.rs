@@ -130,7 +130,11 @@ pub fn build_track_path_by_template(
     // Prevent traversal ('.' / '..') and sanitize each component.
     let mut p = PathBuf::from(out_dir);
     for seg in parts.drain(..) {
-        let seg = if seg == "." || seg == ".." { "unknown" } else { seg };
+        let seg = if seg == "." || seg == ".." {
+            "unknown"
+        } else {
+            seg
+        };
         p.push(sanitize_component(seg));
     }
     p

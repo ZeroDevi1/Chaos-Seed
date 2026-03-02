@@ -42,7 +42,9 @@ fn music_download_start_json_with_target(target_json: &str) -> String {
 
 #[test]
 fn music_download_target_album_accepts_camelcase_album_id() {
-    let json = music_download_start_json_with_target(r#"{ "type": "album", "service": "qq", "albumId": "123" }"#);
+    let json = music_download_start_json_with_target(
+        r#"{ "type": "album", "service": "qq", "albumId": "123" }"#,
+    );
     let params: MusicDownloadStartParams = serde_json::from_str(&json).expect("deserialize");
     match params.target {
         MusicDownloadTarget::Album { service, album_id } => {
@@ -55,8 +57,9 @@ fn music_download_target_album_accepts_camelcase_album_id() {
 
 #[test]
 fn music_download_target_album_accepts_snakecase_album_id_alias() {
-    let json =
-        music_download_start_json_with_target(r#"{ "type": "album", "service": "qq", "album_id": "123" }"#);
+    let json = music_download_start_json_with_target(
+        r#"{ "type": "album", "service": "qq", "album_id": "123" }"#,
+    );
     let params: MusicDownloadStartParams = serde_json::from_str(&json).expect("deserialize");
     match params.target {
         MusicDownloadTarget::Album { service, album_id } => {
@@ -69,8 +72,9 @@ fn music_download_target_album_accepts_snakecase_album_id_alias() {
 
 #[test]
 fn music_download_target_artist_all_accepts_camelcase_artist_id() {
-    let json =
-        music_download_start_json_with_target(r#"{ "type": "artist_all", "service": "qq", "artistId": "456" }"#);
+    let json = music_download_start_json_with_target(
+        r#"{ "type": "artist_all", "service": "qq", "artistId": "456" }"#,
+    );
     let params: MusicDownloadStartParams = serde_json::from_str(&json).expect("deserialize");
     match params.target {
         MusicDownloadTarget::ArtistAll { service, artist_id } => {
@@ -83,8 +87,9 @@ fn music_download_target_artist_all_accepts_camelcase_artist_id() {
 
 #[test]
 fn music_download_target_artist_all_accepts_snakecase_artist_id_alias() {
-    let json =
-        music_download_start_json_with_target(r#"{ "type": "artist_all", "service": "qq", "artist_id": "456" }"#);
+    let json = music_download_start_json_with_target(
+        r#"{ "type": "artist_all", "service": "qq", "artist_id": "456" }"#,
+    );
     let params: MusicDownloadStartParams = serde_json::from_str(&json).expect("deserialize");
     match params.target {
         MusicDownloadTarget::ArtistAll { service, artist_id } => {

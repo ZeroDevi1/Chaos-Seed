@@ -31,7 +31,11 @@ fn parse_season_json(json: &Value) -> Result<PgcSeason, BiliError> {
         .get("season_id")
         .and_then(|v| v.as_i64())
         .map(|v| v.to_string())
-        .or_else(|| root.get("season_id").and_then(|v| v.as_str()).map(|s| s.trim().to_string()))
+        .or_else(|| {
+            root.get("season_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+        })
         .unwrap_or_default();
 
     let title = root
@@ -42,7 +46,10 @@ fn parse_season_json(json: &Value) -> Result<PgcSeason, BiliError> {
         .trim()
         .to_string();
 
-    let cover = root.get("cover").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let cover = root
+        .get("cover")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     let mut episodes: Vec<PgcEpisode> = Vec::new();
     if let Some(arr) = root.get("episodes").and_then(|v| v.as_array()) {
@@ -51,7 +58,11 @@ fn parse_season_json(json: &Value) -> Result<PgcSeason, BiliError> {
                 .get("id")
                 .and_then(|v| v.as_i64())
                 .map(|v| v.to_string())
-                .or_else(|| e.get("id").and_then(|v| v.as_str()).map(|s| s.trim().to_string()))
+                .or_else(|| {
+                    e.get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim().to_string())
+                })
                 .unwrap_or_default();
             let aid = e
                 .get("aid")
@@ -66,10 +77,27 @@ fn parse_season_json(json: &Value) -> Result<PgcSeason, BiliError> {
             if ep_id.is_empty() || aid.is_empty() || cid.is_empty() {
                 continue;
             }
-            let t = e.get("share_copy").and_then(|v| v.as_str()).or_else(|| e.get("title").and_then(|v| v.as_str())).unwrap_or("").trim().to_string();
-            let lt = e.get("long_title").and_then(|v| v.as_str()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-            let cover = e.get("cover").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let title = if !t.is_empty() { t } else { lt.clone().unwrap_or_else(|| ep_id.clone()) };
+            let t = e
+                .get("share_copy")
+                .and_then(|v| v.as_str())
+                .or_else(|| e.get("title").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let lt = e
+                .get("long_title")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let cover = e
+                .get("cover")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let title = if !t.is_empty() {
+                t
+            } else {
+                lt.clone().unwrap_or_else(|| ep_id.clone())
+            };
             episodes.push(PgcEpisode {
                 ep_id,
                 aid,
@@ -103,8 +131,18 @@ pub async fn fetch_pgc_season_by_ep_id(
         return Err(BiliError::InvalidInput("missing ep_id".to_string()));
     }
     let base = client.endpoints.api_base.trim_end_matches('/');
-    let url = format!("{base}/pgc/view/web/season?ep_id={}", urlencoding::encode(id));
-    let json: Value = client.http.get(url).headers(header_map_with_cookie(cookie)).send().await?.json().await?;
+    let url = format!(
+        "{base}/pgc/view/web/season?ep_id={}",
+        urlencoding::encode(id)
+    );
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(header_map_with_cookie(cookie))
+        .send()
+        .await?
+        .json()
+        .await?;
     parse_season_json(&json)
 }
 
@@ -118,8 +156,17 @@ pub async fn fetch_pgc_season_by_season_id(
         return Err(BiliError::InvalidInput("missing season_id".to_string()));
     }
     let base = client.endpoints.api_base.trim_end_matches('/');
-    let url = format!("{base}/pgc/view/web/season?season_id={}", urlencoding::encode(id));
-    let json: Value = client.http.get(url).headers(header_map_with_cookie(cookie)).send().await?.json().await?;
+    let url = format!(
+        "{base}/pgc/view/web/season?season_id={}",
+        urlencoding::encode(id)
+    );
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(header_map_with_cookie(cookie))
+        .send()
+        .await?
+        .json()
+        .await?;
     parse_season_json(&json)
 }
-

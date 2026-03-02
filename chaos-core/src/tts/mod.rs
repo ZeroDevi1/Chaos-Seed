@@ -1,22 +1,19 @@
-//! Text-to-speech (CosyVoice3 pack) + post-processing + VAD utilities.
+//! Text-to-speech (CosyVoice3 SFT) + post-processing + VAD utilities.
 //!
 //! Design goals:
 //! - Core logic lives in `chaos-core` (single source of truth).
-//! - Prefer pure-Rust inference backends (planned: candle-onnx). Where some models/op-sets are
-//!   not supported, the caller can decide whether to enable a fallback backend.
+//! - 推理默认走 PyO3(Python/.pt) 复刻（更贴近 VoiceLab 的 infer_sft.py）。ONNX 相关依赖已移除（仅保留 VAD 的 onnxruntime）。
 
-pub mod cosyvoice;
-#[cfg(feature = "cosyvoice3-candle")]
-pub mod cosyvoice3_candle;
+pub mod params;
 pub mod post_process;
+#[cfg(feature = "tts-python")]
+pub mod python_infer;
 pub mod sampling;
 pub mod text;
 pub mod vad;
 pub mod wav;
 
-pub use cosyvoice::{CosyVoiceEngine, CosyVoicePack, CosyVoicePackConfig, Spk2Info, TtsSftParams};
-#[cfg(feature = "cosyvoice3-candle")]
-pub use cosyvoice3_candle::{CosyVoice3CandleEngine, CosyVoice3CandleParams, CosyVoice3Mode, CosyVoice3PromptFeatures, CosyVoice3WavDebugResult};
+pub use params::{Spk2Info, TtsSftParams};
 pub use post_process::{TrimConfig, trim_output_pcm16, trim_output_pcm16_with_engine};
 pub use sampling::{SamplingConfig, sample_ras_next};
 pub use text::{
@@ -40,8 +37,6 @@ pub enum TtsError {
     Json(#[from] serde_json::Error),
     #[error("tokenizer error: {0}")]
     Tokenizer(String),
-    #[error("onnx error: {0}")]
-    Onnx(String),
     #[error("candle error: {0}")]
     Candle(String),
     #[error("vad error: {0}")]

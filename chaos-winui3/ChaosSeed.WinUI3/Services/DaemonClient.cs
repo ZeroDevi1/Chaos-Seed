@@ -77,6 +77,55 @@ public sealed class DaemonClient : IDisposable
                     StandardErrorEncoding = Encoding.UTF8
                 }
             };
+
+            // TTS（PyO3/PT）：为 zip 分发“解压即用”注入默认环境（仅当用户未显式设置）。
+            try
+            {
+                var baseDir = AppContext.BaseDirectory;
+                var pyHome = Path.Combine(baseDir, "python");
+                var venvRoot = Path.Combine(baseDir, ".venv");
+                var venvSite = Path.Combine(venvRoot, "Lib", "site-packages");
+                var workdir = Path.Combine(baseDir, "voicelab", "workflows", "cosyvoice");
+
+                void SetIfEmpty(string key, string value)
+                {
+                    if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key)))
+                    {
+                        _proc.StartInfo.Environment[key] = value;
+                    }
+                }
+
+                if (Directory.Exists(pyHome))
+                {
+                    SetIfEmpty("PYTHONHOME", pyHome);
+                    SetIfEmpty("PYTHONPATH", $"{Path.Combine(pyHome, "Lib")};{Path.Combine(pyHome, "DLLs")}");
+
+                    // 让 daemon 能加载 python310.dll 等依赖
+                    var prevPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                    if (!prevPath.Contains(pyHome, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _proc.StartInfo.Environment["PATH"] = $"{pyHome};{prevPath}";
+                    }
+                }
+
+                if (Directory.Exists(venvSite))
+                {
+                    SetIfEmpty("CHAOS_TTS_PY_VENV_SITE_PACKAGES", venvSite);
+                }
+                if (Directory.Exists(workdir))
+                {
+                    SetIfEmpty("CHAOS_TTS_PY_WORKDIR", workdir);
+                }
+
+                // 默认 dream_sft（可由 UI 覆盖）
+                SetIfEmpty("CHAOS_TTS_PY_MODEL_DIR", "pretrained_models/Fun-CosyVoice3-0.5B-dream-sft");
+                SetIfEmpty("CHAOS_TTS_PY_LLM_CKPT", "exp/dream_sft/llm/torch_ddp/epoch_5_whole.pt");
+                SetIfEmpty("CHAOS_TTS_PY_FLOW_CKPT", "exp/dream_sft/flow/torch_ddp/flow_avg.pt");
+            }
+            catch (Exception ex)
+            {
+                DaemonLog("env", "tts python env init failed: " + ex.Message);
+            }
             var proc = _proc;
             proc.EnableRaisingEvents = true;
             proc.OutputDataReceived += (_, e) =>
@@ -735,6 +784,10 @@ public sealed class DaemonClient : IDisposable
                 modelDir = (p.ModelDir ?? "").Trim(),
                 spkId = (p.SpkId ?? "").Trim(),
                 text = (p.Text ?? "").Trim(),
+                llmCkpt = string.IsNullOrWhiteSpace(p.LlmCkpt) ? null : p.LlmCkpt!.Trim(),
+                flowCkpt = string.IsNullOrWhiteSpace(p.FlowCkpt) ? null : p.FlowCkpt!.Trim(),
+                pythonWorkdir = string.IsNullOrWhiteSpace(p.PythonWorkdir) ? null : p.PythonWorkdir!.Trim(),
+                pythonInferScript = string.IsNullOrWhiteSpace(p.PythonInferScript) ? null : p.PythonInferScript!.Trim(),
                 promptText = p.PromptText,
                 promptStrategy = p.PromptStrategy,
                 guideSep = p.GuideSep,

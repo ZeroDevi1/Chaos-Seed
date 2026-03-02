@@ -47,9 +47,33 @@ fn help() -> String {
 
 fn build_winui3(release: bool) -> Result<(), String> {
     let profile = if release { "release" } else { "debug" };
+    let root = repo_root()?;
+
+    // 若本仓库已同步了分发用 python venv，则优先用它来绑定 PyO3（避免 ABI 不匹配导致 torch 导入失败）。
+    // 说明：PyO3 会在编译期选择/绑定某个 Python；运行时我们又会随包分发 python + venv，
+    // 因此这里尽量保证“编译期 Python == 分发的 Python”。
+    let pyo3_python = root
+        .join("third_party")
+        .join("voicelab_py_env")
+        .join(".venv")
+        .join("Scripts")
+        .join("python.exe");
+    let use_pyo3_python = pyo3_python.exists();
+    if use_pyo3_python {
+        eprintln!("> Using PYO3_PYTHON={}", pyo3_python.display());
+    } else if env::var("PYO3_PYTHON").ok().is_none() {
+        eprintln!(
+            "> Hint: set PYO3_PYTHON to VoiceLab venv python.exe to avoid torch ABI mismatch (or run tools/sync_voicelab_python_env.ps1)"
+        );
+    }
 
     let mut cargo = Command::new("cargo");
     cargo.arg("build").arg("-p").arg("chaos-daemon");
+    // 仅使用 PyO3(Python/.pt) 后端。
+    cargo.arg("--features").arg("tts-python");
+    if use_pyo3_python {
+        cargo.env("PYO3_PYTHON", &pyo3_python);
+    }
     if release {
         cargo.arg("--release");
     }
@@ -57,6 +81,11 @@ fn build_winui3(release: bool) -> Result<(), String> {
 
     let mut cargo_ffi = Command::new("cargo");
     cargo_ffi.arg("build").arg("-p").arg("chaos-ffi");
+    // 同上：FFI 侧也启用 PyO3(Python/.pt) 后端。
+    cargo_ffi.arg("--features").arg("tts-python");
+    if use_pyo3_python {
+        cargo_ffi.env("PYO3_PYTHON", &pyo3_python);
+    }
     if release {
         cargo_ffi.arg("--release");
     }
@@ -66,7 +95,6 @@ fn build_winui3(release: bool) -> Result<(), String> {
         return Ok(());
     }
 
-    let root = repo_root()?;
     let sln = root.join("chaos-winui3").join("ChaosSeed.WinUI3.sln");
     if !sln.exists() {
         return Err(format!("missing solution: {}", sln.display()));

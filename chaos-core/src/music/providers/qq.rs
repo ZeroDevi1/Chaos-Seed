@@ -4,7 +4,9 @@ use reqwest::Client;
 use serde_json::{Value, json};
 
 use crate::music::error::MusicError;
-use crate::music::model::{AuthState, MusicAlbum, MusicArtist, MusicQuality, MusicService, MusicTrack};
+use crate::music::model::{
+    AuthState, MusicAlbum, MusicArtist, MusicQuality, MusicService, MusicTrack,
+};
 use crate::music::util::quality_fallback_order;
 
 const BASE_URL: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
@@ -40,7 +42,12 @@ async fn post_musicu_at(
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-async fn post_musicu(http: &Client, body: &Value, timeout: Duration, sign: Option<&str>) -> Result<Value, MusicError> {
+async fn post_musicu(
+    http: &Client,
+    body: &Value,
+    timeout: Duration,
+    sign: Option<&str>,
+) -> Result<Value, MusicError> {
     post_musicu_at(http, BASE_URL, body, timeout, sign).await
 }
 
@@ -116,11 +123,19 @@ pub async fn search_tracks(
 
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let mid = it.get("mid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let mid = it
+            .get("mid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if mid.is_empty() {
             continue;
         }
-        let title = it.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = it
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let mut artists = Vec::new();
         let mut artist_ids = Vec::new();
         if let Some(arr) = it.get("singer").and_then(|v| v.as_array()) {
@@ -137,17 +152,26 @@ pub async fn search_tracks(
                 }
             }
         }
-        let album = it.pointer("/album/name").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let album_id = it.pointer("/album/mid").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let pmid = it.pointer("/album/pmid").and_then(|v| v.as_str()).unwrap_or("");
+        let album = it
+            .pointer("/album/name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let album_id = it
+            .pointer("/album/mid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let pmid = it
+            .pointer("/album/pmid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let cover_url = (!pmid.trim().is_empty()).then_some(format!(
             "https://y.qq.com/music/photo_new/T002R800x800M000{pmid}.jpg"
         ));
-        let duration_ms = it.get("interval").and_then(|v| v.as_u64()).map(|s| s * 1000);
-        let qualities = it
-            .get("file")
-            .map(qualities_from_file)
-            .unwrap_or_default();
+        let duration_ms = it
+            .get("interval")
+            .and_then(|v| v.as_u64())
+            .map(|s| s * 1000);
+        let qualities = it.get("file").map(qualities_from_file).unwrap_or_default();
 
         out.push(MusicTrack {
             service: MusicService::Qq,
@@ -201,12 +225,23 @@ pub async fn search_artists(
 
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let id = it.get("singerMID").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = it
+            .get("singerMID")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
-        let name = it.get("singerName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let cover = it.get("singerPic").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let name = it
+            .get("singerName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let cover = it
+            .get("singerPic")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let album_count = it
             .get("albumNum")
             .and_then(|v| v.as_str())
@@ -258,14 +293,31 @@ pub async fn search_albums(
 
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let id = it.get("albumMID").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = it
+            .get("albumMID")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
-        let title = it.get("albumName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.get("singerName").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let artist_id = it.get("singerID").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let cover = it.get("albumPic").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let title = it
+            .get("albumName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .get("singerName")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let artist_id = it
+            .get("singerID")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let cover = it
+            .get("albumPic")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         out.push(MusicAlbum {
             service: MusicService::Qq,
             id,
@@ -316,11 +368,19 @@ pub async fn album_tracks(
     let mut out = Vec::with_capacity(list.len());
     for it in list {
         let song = it.get("songInfo").unwrap_or(&Value::Null);
-        let id = song.get("mid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = song
+            .get("mid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
-        let title = song.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = song
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let mut artists = Vec::new();
         let mut artist_ids = Vec::new();
         if let Some(arr) = song.get("singer").and_then(|v| v.as_array()) {
@@ -337,14 +397,29 @@ pub async fn album_tracks(
                 }
             }
         }
-        let album = song.pointer("/album/name").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let album_id = song.pointer("/album/mid").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let pmid = song.pointer("/album/pmid").and_then(|v| v.as_str()).unwrap_or("");
+        let album = song
+            .pointer("/album/name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let album_id = song
+            .pointer("/album/mid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let pmid = song
+            .pointer("/album/pmid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let cover_url = (!pmid.trim().is_empty()).then_some(format!(
             "https://y.qq.com/music/photo_new/T002R800x800M000{pmid}.jpg"
         ));
-        let duration_ms = song.get("interval").and_then(|v| v.as_u64()).map(|s| s * 1000);
-        let qualities = song.get("file").map(qualities_from_file).unwrap_or_default();
+        let duration_ms = song
+            .get("interval")
+            .and_then(|v| v.as_u64())
+            .map(|s| s * 1000);
+        let qualities = song
+            .get("file")
+            .map(qualities_from_file)
+            .unwrap_or_default();
 
         out.push(MusicTrack {
             service: MusicService::Qq,
@@ -389,14 +464,31 @@ pub async fn artist_albums(
 
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let id = it.get("album_mid").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = it
+            .get("album_mid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
-        let title = it.get("album_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.get("singer_name").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let artist_id = it.get("singer_mid").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let publish_time = it.get("pub_time").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let title = it
+            .get("album_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .get("singer_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let artist_id = it
+            .get("singer_mid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let publish_time = it
+            .get("pub_time")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let cover_url = Some(format!(
             "https://y.qq.com/music/photo_new/T002R800x800M000{id}.jpg"
         ));
@@ -452,12 +544,18 @@ pub fn sign_request_payload(json_text: &str) -> Result<String, MusicError> {
     let tail = extract(b, &[18, 11, 3, 2, 1, 7, 6, 25]);
 
     // middle: convert hex-pairs to bytes then xor with table.
-    let ol: [u8; 16] = [212, 45, 80, 68, 195, 163, 163, 203, 157, 220, 254, 91, 204, 79, 104, 6];
+    let ol: [u8; 16] = [
+        212, 45, 80, 68, 195, 163, 163, 203, 157, 220, 254, 91, 204, 79, 104, 6,
+    ];
     let mut mid = Vec::with_capacity(16);
     for j in 0..16 {
         let i = j * 2;
-        let hi = (b[i] as char).to_digit(16).ok_or_else(|| MusicError::Other("bad md5 hex".to_string()))?;
-        let lo = (b[i + 1] as char).to_digit(16).ok_or_else(|| MusicError::Other("bad md5 hex".to_string()))?;
+        let hi = (b[i] as char)
+            .to_digit(16)
+            .ok_or_else(|| MusicError::Other("bad md5 hex".to_string()))?;
+        let lo = (b[i + 1] as char)
+            .to_digit(16)
+            .ok_or_else(|| MusicError::Other("bad md5 hex".to_string()))?;
         let r = ((hi as u8) << 4) ^ (lo as u8);
         mid.push(r ^ ol[j]);
     }
@@ -503,17 +601,9 @@ pub async fn track_download_url_with_base(
         .as_ref()
         .ok_or_else(|| MusicError::Unauthorized("missing qq cookie".to_string()))?;
 
-    let musickey = cookie
-        .musickey
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let musickey = cookie.musickey.as_deref().unwrap_or("").trim().to_string();
     let qq = cookie.musicid.as_deref().unwrap_or("").trim().to_string();
-    let login_type = cookie
-        .login_type
-        .map(|v| v.to_string())
-        .unwrap_or_default();
+    let login_type = cookie.login_type.map(|v| v.to_string()).unwrap_or_default();
 
     if musickey.is_empty() || qq.is_empty() || login_type.is_empty() {
         return Err(MusicError::Unauthorized(

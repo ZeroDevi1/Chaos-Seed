@@ -34,4 +34,3 @@ async fn kugou_album_tracks_reports_invalid_input_without_requiring_base_url() {
         .expect_err("should fail");
     assert!(matches!(err, MusicError::InvalidInput(_)));
 }
-

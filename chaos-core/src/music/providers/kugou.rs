@@ -15,7 +15,11 @@ pub mod signatures;
 
 fn qualities_from_item(item: &Value) -> Vec<MusicQuality> {
     let mut out = Vec::new();
-    let file_128 = item.get("FileSize").or_else(|| item.get("fileSize")).and_then(|v| v.as_i64()).unwrap_or(0);
+    let file_128 = item
+        .get("FileSize")
+        .or_else(|| item.get("fileSize"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     if file_128 > 0 {
         out.push(MusicQuality {
             id: "mp3_128".to_string(),
@@ -26,7 +30,11 @@ fn qualities_from_item(item: &Value) -> Vec<MusicQuality> {
         });
     }
     if let Some(hq) = item.get("HQ").or_else(|| item.get("hq")) {
-        let sz = hq.get("FileSize").or_else(|| hq.get("fileSize")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let sz = hq
+            .get("FileSize")
+            .or_else(|| hq.get("fileSize"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         if sz > 0 {
             out.push(MusicQuality {
                 id: "mp3_320".to_string(),
@@ -38,7 +46,11 @@ fn qualities_from_item(item: &Value) -> Vec<MusicQuality> {
         }
     }
     if let Some(sq) = item.get("SQ").or_else(|| item.get("sq")) {
-        let sz = sq.get("FileSize").or_else(|| sq.get("fileSize")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let sz = sq
+            .get("FileSize")
+            .or_else(|| sq.get("fileSize"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         if sz > 0 {
             out.push(MusicQuality {
                 id: "flac".to_string(),
@@ -75,7 +87,13 @@ pub async fn search_tracks(
     params.insert("pagesize".to_string(), page_size.clamp(1, 50).to_string());
     params.insert("platform".to_string(), "AndroidFilter".to_string());
     let json = kg
-        .gateway_get("/v3/search/song", "complexsearch.kugou.com", params, None, timeout)
+        .gateway_get(
+            "/v3/search/song",
+            "complexsearch.kugou.com",
+            params,
+            None,
+            timeout,
+        )
         .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
@@ -89,7 +107,12 @@ pub async fn search_tracks(
 
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let id = it.get("FileHash").or_else(|| it.get("fileHash")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = it
+            .get("FileHash")
+            .or_else(|| it.get("fileHash"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
@@ -101,14 +124,35 @@ pub async fn search_tracks(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let album = it.get("AlbumName").or_else(|| it.get("albumName")).and_then(|v| v.as_str()).map(|s| s.to_string());
-        let album_id = it.get("AlbumID").or_else(|| it.get("albumID")).or_else(|| it.get("albumId")).and_then(|v| v.as_i64()).map(|n| n.to_string());
-        let duration_ms = it.get("Duration").or_else(|| it.get("duration")).and_then(|v| v.as_i64()).map(|s| (s.max(0) as u64) * 1000);
+        let album = it
+            .get("AlbumName")
+            .or_else(|| it.get("albumName"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let album_id = it
+            .get("AlbumID")
+            .or_else(|| it.get("albumID"))
+            .or_else(|| it.get("albumId"))
+            .and_then(|v| v.as_i64())
+            .map(|n| n.to_string());
+        let duration_ms = it
+            .get("Duration")
+            .or_else(|| it.get("duration"))
+            .and_then(|v| v.as_i64())
+            .map(|s| (s.max(0) as u64) * 1000);
         let mut artists = Vec::new();
         let mut artist_ids = Vec::new();
-        if let Some(arr) = it.get("Singers").or_else(|| it.get("singers")).and_then(|v| v.as_array()) {
+        if let Some(arr) = it
+            .get("Singers")
+            .or_else(|| it.get("singers"))
+            .and_then(|v| v.as_array())
+        {
             for s in arr {
-                if let Some(n) = s.get("Name").or_else(|| s.get("name")).and_then(|v| v.as_str()) {
+                if let Some(n) = s
+                    .get("Name")
+                    .or_else(|| s.get("name"))
+                    .and_then(|v| v.as_str())
+                {
                     if !n.trim().is_empty() {
                         artists.push(n.to_string());
                     }
@@ -117,7 +161,11 @@ pub async fn search_tracks(
                     artist_ids.push(i.to_string());
                 }
             }
-        } else if let Some(singer) = it.get("SingerName").or_else(|| it.get("singerName")).and_then(|v| v.as_str()) {
+        } else if let Some(singer) = it
+            .get("SingerName")
+            .or_else(|| it.get("singerName"))
+            .and_then(|v| v.as_str())
+        {
             if !singer.trim().is_empty() {
                 artists.push(singer.to_string());
             }
@@ -169,7 +217,13 @@ pub async fn search_artists(
     params.insert("pagesize".to_string(), page_size.clamp(1, 50).to_string());
     params.insert("platform".to_string(), "AndroidFilter".to_string());
     let json = kg
-        .gateway_get("/v1/search/author", "complexsearch.kugou.com", params, None, timeout)
+        .gateway_get(
+            "/v1/search/author",
+            "complexsearch.kugou.com",
+            params,
+            None,
+            timeout,
+        )
         .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
@@ -182,11 +236,21 @@ pub async fn search_artists(
         .unwrap_or_default();
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let id = it.get("AuthorId").or_else(|| it.get("authorId")).and_then(|v| v.as_i64()).map(|n| n.to_string()).unwrap_or_default();
+        let id = it
+            .get("AuthorId")
+            .or_else(|| it.get("authorId"))
+            .and_then(|v| v.as_i64())
+            .map(|n| n.to_string())
+            .unwrap_or_default();
         if id.is_empty() {
             continue;
         }
-        let name = it.get("AuthorName").or_else(|| it.get("authorName")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let name = it
+            .get("AuthorName")
+            .or_else(|| it.get("authorName"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let cover = it
             .get("Avatar")
             .or_else(|| it.get("avatar"))
@@ -230,7 +294,13 @@ pub async fn search_albums(
     params.insert("pagesize".to_string(), page_size.clamp(1, 50).to_string());
     params.insert("platform".to_string(), "AndroidFilter".to_string());
     let json = kg
-        .gateway_get("/v1/search/album", "complexsearch.kugou.com", params, None, timeout)
+        .gateway_get(
+            "/v1/search/album",
+            "complexsearch.kugou.com",
+            params,
+            None,
+            timeout,
+        )
         .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
@@ -253,9 +323,22 @@ pub async fn search_albums(
         if id.is_empty() {
             continue;
         }
-        let title = it.get("AlbumName").or_else(|| it.get("albumName")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.get("AuthorName").or_else(|| it.get("authorName")).and_then(|v| v.as_str()).map(|s| s.to_string());
-        let artist_id = it.get("AuthorId").or_else(|| it.get("authorId")).and_then(|v| v.as_i64()).map(|n| n.to_string());
+        let title = it
+            .get("AlbumName")
+            .or_else(|| it.get("albumName"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .get("AuthorName")
+            .or_else(|| it.get("authorName"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let artist_id = it
+            .get("AuthorId")
+            .or_else(|| it.get("authorId"))
+            .and_then(|v| v.as_i64())
+            .map(|n| n.to_string());
         let cover = it
             .get("SizableCover")
             .or_else(|| it.get("sizableCover"))
@@ -270,8 +353,16 @@ pub async fn search_albums(
             artist,
             artist_id,
             cover_url: cover,
-            publish_time: it.get("PublishDate").or_else(|| it.get("publishDate")).and_then(|v| v.as_str()).map(|s| s.to_string()),
-            track_count: it.get("SongCount").or_else(|| it.get("songCount")).and_then(|v| v.as_i64()).and_then(|n| u32::try_from(n).ok()),
+            publish_time: it
+                .get("PublishDate")
+                .or_else(|| it.get("publishDate"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            track_count: it
+                .get("SongCount")
+                .or_else(|| it.get("songCount"))
+                .and_then(|v| v.as_i64())
+                .and_then(|n| u32::try_from(n).ok()),
         });
     }
     Ok(out)
@@ -297,7 +388,14 @@ pub async fn artist_albums(
         "area_code": "all"
     });
     let json = kg
-        .gateway_post("/kmr/v1/author/albums", "openapi.kugou.com", Some("36"), &payload, None, timeout)
+        .gateway_post(
+            "/kmr/v1/author/albums",
+            "openapi.kugou.com",
+            Some("36"),
+            &payload,
+            None,
+            timeout,
+        )
         .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
@@ -311,14 +409,31 @@ pub async fn artist_albums(
         .unwrap_or_default();
     let mut out = Vec::new();
     for it in list {
-        let album_id = it.get("album_id").or_else(|| it.get("albumId")).and_then(|v| v.as_str()).map(|s| s.to_string())
-            .or_else(|| it.get("album_id").and_then(|v| v.as_i64()).map(|n| n.to_string()))
+        let album_id = it
+            .get("album_id")
+            .or_else(|| it.get("albumId"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                it.get("album_id")
+                    .and_then(|v| v.as_i64())
+                    .map(|n| n.to_string())
+            })
             .unwrap_or_default();
         if album_id.is_empty() {
             continue;
         }
-        let title = it.get("album_name").or_else(|| it.get("albumName")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let cover = it.get("sizable_cover").or_else(|| it.get("sizableCover")).and_then(|v| v.as_str()).map(|s| s.replace("{size}", "480"));
+        let title = it
+            .get("album_name")
+            .or_else(|| it.get("albumName"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let cover = it
+            .get("sizable_cover")
+            .or_else(|| it.get("sizableCover"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.replace("{size}", "480"));
         out.push(MusicAlbum {
             service: MusicService::Kugou,
             id: album_id,
@@ -326,7 +441,11 @@ pub async fn artist_albums(
             artist: None,
             artist_id: Some(id.to_string()),
             cover_url: cover,
-            publish_time: it.get("publish_date").or_else(|| it.get("publishDate")).and_then(|v| v.as_str()).map(|s| s.to_string()),
+            publish_time: it
+                .get("publish_date")
+                .or_else(|| it.get("publishDate"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             track_count: None,
         });
     }
@@ -356,7 +475,14 @@ pub async fn album_tracks(
             "pagesize": page_size
         });
         let json = kg
-            .gateway_post("/v1/album_audio/lite", "openapi.kugou.com", Some("255"), &payload, None, timeout)
+            .gateway_post(
+                "/v1/album_audio/lite",
+                "openapi.kugou.com",
+                Some("255"),
+                &payload,
+                None,
+                timeout,
+            )
             .await?;
         let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
         if status != 1 {
@@ -377,47 +503,115 @@ pub async fn album_tracks(
         }
 
         for s in songs {
-            let audio = s.get("audio_info").or_else(|| s.get("audioInfo")).unwrap_or(&Value::Null);
+            let audio = s
+                .get("audio_info")
+                .or_else(|| s.get("audioInfo"))
+                .unwrap_or(&Value::Null);
             let base_node = s.get("base").unwrap_or(&Value::Null);
-            let album_info = s.get("album_info").or_else(|| s.get("albumInfo")).unwrap_or(&Value::Null);
-            let trans = s.get("trans_param").or_else(|| s.get("transParam")).unwrap_or(&Value::Null);
+            let album_info = s
+                .get("album_info")
+                .or_else(|| s.get("albumInfo"))
+                .unwrap_or(&Value::Null);
+            let trans = s
+                .get("trans_param")
+                .or_else(|| s.get("transParam"))
+                .unwrap_or(&Value::Null);
 
-            let hash = audio.get("hash").or_else(|| audio.get("Hash")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let hash = audio
+                .get("hash")
+                .or_else(|| audio.get("Hash"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if hash.is_empty() {
                 continue;
             }
-            let title = base_node.get("audio_name").or_else(|| base_node.get("audioName")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let duration_ms = audio.get("duration").and_then(|v| v.as_i64()).map(|d| (d.max(0) as u64) * 1000);
-            let album_name = album_info.get("album_name").or_else(|| album_info.get("albumName")).and_then(|v| v.as_str()).map(|s| s.to_string());
-            let album_id = base_node.get("album_id").or_else(|| base_node.get("albumId")).and_then(|v| v.as_i64()).map(|n| n.to_string());
-            let cover = trans.get("union_cover").or_else(|| trans.get("unionCover")).and_then(|v| v.as_str()).map(|s| s.replace("{size}", "400"));
+            let title = base_node
+                .get("audio_name")
+                .or_else(|| base_node.get("audioName"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let duration_ms = audio
+                .get("duration")
+                .and_then(|v| v.as_i64())
+                .map(|d| (d.max(0) as u64) * 1000);
+            let album_name = album_info
+                .get("album_name")
+                .or_else(|| album_info.get("albumName"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let album_id = base_node
+                .get("album_id")
+                .or_else(|| base_node.get("albumId"))
+                .and_then(|v| v.as_i64())
+                .map(|n| n.to_string());
+            let cover = trans
+                .get("union_cover")
+                .or_else(|| trans.get("unionCover"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.replace("{size}", "400"));
 
             let mut artists = Vec::new();
             let mut artist_ids = Vec::new();
             if let Some(arr) = s.get("authors").and_then(|v| v.as_array()) {
                 for a in arr {
-                    if let Some(n) = a.get("author_name").or_else(|| a.get("authorName")).and_then(|v| v.as_str()) {
+                    if let Some(n) = a
+                        .get("author_name")
+                        .or_else(|| a.get("authorName"))
+                        .and_then(|v| v.as_str())
+                    {
                         if !n.trim().is_empty() {
                             artists.push(n.to_string());
                         }
                     }
-                    if let Some(i) = a.get("author_id").or_else(|| a.get("authorId")).and_then(|v| v.as_i64()) {
+                    if let Some(i) = a
+                        .get("author_id")
+                        .or_else(|| a.get("authorId"))
+                        .and_then(|v| v.as_i64())
+                    {
                         artist_ids.push(i.to_string());
                     }
                 }
             }
 
             let mut qualities = Vec::new();
-            let hash_320 = audio.get("hash320").or_else(|| audio.get("hash_320")).and_then(|v| v.as_str()).unwrap_or("");
-            let hash_flac = audio.get("hash_flac").or_else(|| audio.get("hashFlac")).and_then(|v| v.as_str()).unwrap_or("");
+            let hash_320 = audio
+                .get("hash320")
+                .or_else(|| audio.get("hash_320"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let hash_flac = audio
+                .get("hash_flac")
+                .or_else(|| audio.get("hashFlac"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if !hash.is_empty() {
-                qualities.push(MusicQuality { id: "mp3_128".to_string(), label: "MP3 128".to_string(), format: "mp3".to_string(), bitrate_kbps: Some(128), lossless: false });
+                qualities.push(MusicQuality {
+                    id: "mp3_128".to_string(),
+                    label: "MP3 128".to_string(),
+                    format: "mp3".to_string(),
+                    bitrate_kbps: Some(128),
+                    lossless: false,
+                });
             }
             if !hash_320.trim().is_empty() {
-                qualities.push(MusicQuality { id: "mp3_320".to_string(), label: "MP3 320".to_string(), format: "mp3".to_string(), bitrate_kbps: Some(320), lossless: false });
+                qualities.push(MusicQuality {
+                    id: "mp3_320".to_string(),
+                    label: "MP3 320".to_string(),
+                    format: "mp3".to_string(),
+                    bitrate_kbps: Some(320),
+                    lossless: false,
+                });
             }
             if !hash_flac.trim().is_empty() {
-                qualities.push(MusicQuality { id: "flac".to_string(), label: "FLAC".to_string(), format: "flac".to_string(), bitrate_kbps: Some(2000), lossless: true });
+                qualities.push(MusicQuality {
+                    id: "flac".to_string(),
+                    label: "FLAC".to_string(),
+                    format: "flac".to_string(),
+                    bitrate_kbps: Some(2000),
+                    lossless: true,
+                });
             }
 
             out.push(MusicTrack {
@@ -461,16 +655,24 @@ pub async fn track_download_url(
     }
 
     let Some(user) = auth.kugou.as_ref() else {
-        return Err(MusicError::Unauthorized("kugou: missing token/userid".to_string()));
+        return Err(MusicError::Unauthorized(
+            "kugou: missing token/userid".to_string(),
+        ));
     };
     let token = user.token.trim();
     let userid = user.userid.trim();
     if token.is_empty() || userid.is_empty() {
-        return Err(MusicError::Unauthorized("kugou: missing token/userid".to_string()));
+        return Err(MusicError::Unauthorized(
+            "kugou: missing token/userid".to_string(),
+        ));
     }
 
     let kg = client::KugouClient::new(http);
-    let desired_ext = if quality_id.trim() == "flac" { "flac" } else { "mp3" };
+    let desired_ext = if quality_id.trim() == "flac" {
+        "flac"
+    } else {
+        "mp3"
+    };
     let qualities = match quality_id.trim() {
         "flac" => vec!["flac", "320", "128"],
         "mp3_320" => vec!["320", "128"],
@@ -513,7 +715,9 @@ pub async fn track_download_url(
         "vip": 0
     });
 
-    let json = kg.tracker_post("/v6/priv_url", &payload, Some(auth), timeout).await?;
+    let json = kg
+        .tracker_post("/v6/priv_url", &payload, Some(auth), timeout)
+        .await?;
 
     fn collect_urls(v: &Value, out: &mut Vec<String>) {
         match v {
@@ -591,12 +795,27 @@ pub async fn kugou_qr_create(
     if status != 1 {
         return Err(MusicError::Other(format!("kugou: qrcode status={status}")));
     }
-    let key = json.pointer("/data/qrcode").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let img = json.pointer("/data/qrcode_img").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let key = json
+        .pointer("/data/qrcode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let img = json
+        .pointer("/data/qrcode_img")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if key.is_empty() || img.is_empty() {
-        return Err(MusicError::Parse("kugou: missing qrcode/qrcode_img".to_string()));
+        return Err(MusicError::Parse(
+            "kugou: missing qrcode/qrcode_img".to_string(),
+        ));
     }
-    Ok(KugouQr { key, image_base64: img })
+    Ok(KugouQr {
+        key,
+        image_base64: img,
+    })
 }
 
 pub async fn kugou_qr_poll(
@@ -616,17 +835,32 @@ pub async fn kugou_qr_poll(
     params.insert("srcappid".to_string(), kg.srcappid().to_string());
     params.insert("qrcode".to_string(), q.to_string());
 
-    let json = kg.login_user_get("/v2/get_userinfo_qrcode", params, timeout).await?;
+    let json = kg
+        .login_user_get("/v2/get_userinfo_qrcode", params, timeout)
+        .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(None);
     }
-    let qrstatus = json.pointer("/data/status").and_then(|v| v.as_i64()).unwrap_or(0);
+    let qrstatus = json
+        .pointer("/data/status")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     if qrstatus != 4 {
         return Ok(None);
     }
-    let token = json.pointer("/data/token").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let userid = json.pointer("/data/userid").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let token = json
+        .pointer("/data/token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let userid = json
+        .pointer("/data/userid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if token.is_empty() || userid.is_empty() {
         return Ok(None);
     }
@@ -658,10 +892,22 @@ pub async fn kugou_wx_qr_create(
     if status != 1 {
         return Err(MusicError::Other(format!("kugou: qrcode status={status}")));
     }
-    let key = json.pointer("/data/qrcode").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let img = json.pointer("/data/qrcode_img").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let key = json
+        .pointer("/data/qrcode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let img = json
+        .pointer("/data/qrcode_img")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if key.is_empty() || img.is_empty() {
-        return Err(MusicError::Parse("kugou: missing qrcode/qrcode_img".to_string()));
+        return Err(MusicError::Parse(
+            "kugou: missing qrcode/qrcode_img".to_string(),
+        ));
     }
     Ok((key, format!("data:image/png;base64,{img}")))
 }
@@ -683,17 +929,32 @@ pub async fn kugou_wx_qr_poll(
     params.insert("srcappid".to_string(), kg.srcappid().to_string());
     params.insert("qrcode".to_string(), q.to_string());
 
-    let json = kg.login_user_get("/v2/get_userinfo_qrcode", params, timeout).await?;
+    let json = kg
+        .login_user_get("/v2/get_userinfo_qrcode", params, timeout)
+        .await?;
     let status = json.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
     if status != 1 {
         return Ok(None);
     }
-    let qrstatus = json.pointer("/data/status").and_then(|v| v.as_i64()).unwrap_or(0);
+    let qrstatus = json
+        .pointer("/data/status")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     if qrstatus != 4 {
         return Ok(None);
     }
-    let token = json.pointer("/data/token").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let userid = json.pointer("/data/userid").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let token = json
+        .pointer("/data/token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let userid = json
+        .pointer("/data/userid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if token.is_empty() || userid.is_empty() {
         return Ok(None);
     }

@@ -104,7 +104,10 @@ impl LlmClient {
     }
 
     pub async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, LlmError> {
-        let url = format!("{}/chat/completions", self.cfg.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/chat/completions",
+            self.cfg.base_url.trim_end_matches('/')
+        );
         let model = match req.reasoning_mode {
             ReasoningMode::Normal => self.cfg.model.clone(),
             ReasoningMode::Reasoning => self
@@ -115,7 +118,12 @@ impl LlmClient {
         };
 
         let mut messages: Vec<serde_json::Value> = Vec::new();
-        if let Some(sys) = req.system.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Some(sys) = req
+            .system
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
             messages.push(serde_json::json!({
                 "role": "system",
                 "content": sys,
@@ -206,9 +214,12 @@ mod tests {
 
     #[test]
     fn client_validates_config() {
-        let err = LlmClient::new(LlmConfig { api_key: "".into(), ..Default::default() })
-            .err()
-            .expect("expected invalid config error");
+        let err = LlmClient::new(LlmConfig {
+            api_key: "".into(),
+            ..Default::default()
+        })
+        .err()
+        .expect("expected invalid config error");
         assert!(matches!(err, LlmError::InvalidConfig(_)));
     }
 }

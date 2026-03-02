@@ -103,13 +103,27 @@ pub async fn search_tracks(
 
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let rid = it.get("MUSICRID").or_else(|| it.get("musicrid")).and_then(|v| v.as_str()).unwrap_or("");
+        let rid = it
+            .get("MUSICRID")
+            .or_else(|| it.get("musicrid"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let id = rid.trim().trim_start_matches("MUSIC_").to_string();
         if id.is_empty() {
             continue;
         }
-        let title = it.get("NAME").or_else(|| it.get("name")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.get("ARTIST").or_else(|| it.get("artist")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = it
+            .get("NAME")
+            .or_else(|| it.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .get("ARTIST")
+            .or_else(|| it.get("artist"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let artists: Vec<String> = artist
             .split('&')
             .map(|s| s.trim().to_string())
@@ -124,15 +138,28 @@ pub async fn search_tracks(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        let album = it.get("ALBUM").or_else(|| it.get("album")).and_then(|v| v.as_str()).map(|s| s.to_string());
-        let album_id = it.get("ALBUMID").or_else(|| it.get("albumid")).and_then(|v| v.as_str()).map(|s| s.to_string());
+        let album = it
+            .get("ALBUM")
+            .or_else(|| it.get("album"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let album_id = it
+            .get("ALBUMID")
+            .or_else(|| it.get("albumid"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let duration_ms = it
             .get("DURATION")
             .or_else(|| it.get("duration"))
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<u64>().ok())
             .map(|s| s * 1000);
-        let nm = it.get("NMINFO").or_else(|| it.get("N_MINFO")).or_else(|| it.get("nMinfo")).and_then(|v| v.as_str()).unwrap_or("");
+        let nm = it
+            .get("NMINFO")
+            .or_else(|| it.get("N_MINFO"))
+            .or_else(|| it.get("nMinfo"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let qualities = parse_nm_info_to_qualities(nm);
 
         let cover = it
@@ -184,11 +211,21 @@ pub async fn search_artists(
         .unwrap_or_default();
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let id = it.get("ARTISTID").or_else(|| it.get("artistid")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = it
+            .get("ARTISTID")
+            .or_else(|| it.get("artistid"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
-        let name = it.get("ARTIST").or_else(|| it.get("artist")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let name = it
+            .get("ARTIST")
+            .or_else(|| it.get("artist"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let cover = it
             .get("hts_picpath")
             .or_else(|| it.get("htsPicpath"))
@@ -233,13 +270,31 @@ pub async fn search_albums(
         .unwrap_or_default();
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let id = it.get("albumid").or_else(|| it.get("ALBUMID")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let id = it
+            .get("albumid")
+            .or_else(|| it.get("ALBUMID"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if id.is_empty() {
             continue;
         }
-        let title = it.get("name").or_else(|| it.get("NAME")).and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.get("artist").or_else(|| it.get("ARTIST")).and_then(|v| v.as_str()).map(|s| s.to_string());
-        let artist_id = it.get("artistid").or_else(|| it.get("ARTISTID")).and_then(|v| v.as_str()).map(|s| s.to_string());
+        let title = it
+            .get("name")
+            .or_else(|| it.get("NAME"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .get("artist")
+            .or_else(|| it.get("ARTIST"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let artist_id = it
+            .get("artistid")
+            .or_else(|| it.get("ARTISTID"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let cover = it
             .get("pic")
             .and_then(|v| v.as_str())
@@ -251,7 +306,10 @@ pub async fn search_albums(
             artist,
             artist_id,
             cover_url: cover,
-            publish_time: it.get("pub").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            publish_time: it
+                .get("pub")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             track_count: it
                 .get("musiccnt")
                 .and_then(|v| v.as_str())
@@ -275,8 +333,15 @@ pub async fn album_tracks(
         .replace("{rn}", "10000")
         .replace("{albumid}", id);
     let json = get_json(http, &url, timeout).await?;
-    let album_title = json.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let album_id = json.get("albumid").or_else(|| json.get("id")).and_then(|v| v.as_str()).map(|s| s.to_string());
+    let album_title = json
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let album_id = json
+        .get("albumid")
+        .or_else(|| json.get("id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let list = json
         .get("musiclist")
         .and_then(|v| v.as_array())
@@ -285,12 +350,24 @@ pub async fn album_tracks(
 
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let track_id = it.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let track_id = it
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if track_id.is_empty() {
             continue;
         }
-        let title = it.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = it
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .get("artist")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let artists: Vec<String> = artist
             .split('&')
             .map(|s| s.trim().to_string())
@@ -354,13 +431,28 @@ pub async fn artist_albums(
         .unwrap_or_default();
     let mut out = Vec::with_capacity(list.len());
     for it in list {
-        let album_id = it.get("albumid").or_else(|| it.get("id")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let album_id = it
+            .get("albumid")
+            .or_else(|| it.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if album_id.is_empty() {
             continue;
         }
-        let title = it.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.get("artist").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let artist_id = it.get("artistid").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let title = it
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .get("artist")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let artist_id = it
+            .get("artistid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let cover = it
             .get("pic")
             .and_then(|v| v.as_str())
@@ -372,7 +464,10 @@ pub async fn artist_albums(
             artist,
             artist_id,
             cover_url: cover,
-            publish_time: it.get("pub").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            publish_time: it
+                .get("pub")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             track_count: it
                 .get("musiccnt")
                 .and_then(|v| v.as_str())
@@ -404,9 +499,7 @@ pub async fn track_download_url_with_template(
         return Err(MusicError::InvalidInput("empty track_id".to_string()));
     }
     let br = map_br(quality_id.trim());
-    let url = template
-        .replace("{rid}", id)
-        .replace("{br}", br);
+    let url = template.replace("{rid}", id).replace("{br}", br);
     let json = get_json(http, &url, timeout).await?;
     let url = json
         .pointer("/data/url")

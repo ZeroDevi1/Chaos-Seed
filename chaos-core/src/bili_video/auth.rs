@@ -7,15 +7,15 @@ use qrcode::QrCode;
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use rsa::pkcs8::DecodePublicKey;
-use rsa::{Oaep, RsaPublicKey};
 use rsa::rand_core::OsRng;
+use rsa::{Oaep, RsaPublicKey};
 use serde_json::Value;
 use sha2::Sha256;
 
 use super::{
     BiliClient, BiliError, bili_check_code, build_cookie_string_from_set_cookie, cookie_get,
-    cookie_kv_to_string, extract_cookie_kv_from_url_query, header_map_with_cookie, merge_cookie_header,
-    merge_cookie_strings,
+    cookie_kv_to_string, extract_cookie_kv_from_url_query, header_map_with_cookie,
+    merge_cookie_header, merge_cookie_strings,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -77,12 +77,22 @@ pub async fn login_qr_create(client: &BiliClient) -> Result<LoginQr, BiliError> 
     );
 
     let buvid = super::playurl::ensure_buvid_cookie(client).await.ok();
-    let headers = header_map_with_cookie(super::merge_cookie_header(buvid.as_deref(), None).as_deref());
+    let headers =
+        header_map_with_cookie(super::merge_cookie_header(buvid.as_deref(), None).as_deref());
 
-    let json: Value = client.http.get(url).headers(headers).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(headers)
+        .send()
+        .await?
+        .json()
+        .await?;
     bili_check_code(&json)?;
 
-    let data = json.get("data").ok_or_else(|| BiliError::Parse("missing data".to_string()))?;
+    let data = json
+        .get("data")
+        .ok_or_else(|| BiliError::Parse("missing data".to_string()))?;
     let login_url = data
         .get("url")
         .and_then(|v| v.as_str())
@@ -100,7 +110,10 @@ pub async fn login_qr_create(client: &BiliClient) -> Result<LoginQr, BiliError> 
     }
 
     let code = QrCode::new(login_url.as_bytes()).map_err(|e| BiliError::Parse(e.to_string()))?;
-    let img = code.render::<image::Luma<u8>>().max_dimensions(320, 320).build();
+    let img = code
+        .render::<image::Luma<u8>>()
+        .max_dimensions(320, 320)
+        .build();
     let dyn_img = image::DynamicImage::ImageLuma8(img);
     let mut buf: Vec<u8> = Vec::new();
     dyn_img
@@ -117,7 +130,10 @@ pub async fn login_qr_create(client: &BiliClient) -> Result<LoginQr, BiliError> 
     })
 }
 
-pub async fn login_qr_poll(client: &BiliClient, qrcode_key: &str) -> Result<LoginQrPollResult, BiliError> {
+pub async fn login_qr_poll(
+    client: &BiliClient,
+    qrcode_key: &str,
+) -> Result<LoginQrPollResult, BiliError> {
     let key = qrcode_key.trim();
     if key.is_empty() {
         return Err(BiliError::InvalidInput("empty qrcode_key".to_string()));
@@ -130,22 +146,47 @@ pub async fn login_qr_poll(client: &BiliClient, qrcode_key: &str) -> Result<Logi
     );
 
     let buvid = super::playurl::ensure_buvid_cookie(client).await.ok();
-    let headers = header_map_with_cookie(super::merge_cookie_header(buvid.as_deref(), None).as_deref());
+    let headers =
+        header_map_with_cookie(super::merge_cookie_header(buvid.as_deref(), None).as_deref());
 
     let resp = client.http.get(url).headers(headers.clone()).send().await?;
     let headers_resp = resp.headers().clone();
     let json: Value = resp.json().await?;
     bili_check_code(&json)?;
 
-    let data = json.get("data").ok_or_else(|| BiliError::Parse("missing data".to_string()))?;
+    let data = json
+        .get("data")
+        .ok_or_else(|| BiliError::Parse("missing data".to_string()))?;
     let code = data.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    let cross_url = data.get("url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let refresh_token = data.get("refresh_token").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let cross_url = data
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let refresh_token = data
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
 
     match code {
-        86101 => Ok(LoginQrPollResult { state: LoginQrState::Scan, message: None, auth: None }),
-        86090 => Ok(LoginQrPollResult { state: LoginQrState::Confirm, message: Some("scan ok, waiting confirm".to_string()), auth: None }),
-        86038 => Ok(LoginQrPollResult { state: LoginQrState::Timeout, message: Some("qrcode timeout".to_string()), auth: None }),
+        86101 => Ok(LoginQrPollResult {
+            state: LoginQrState::Scan,
+            message: None,
+            auth: None,
+        }),
+        86090 => Ok(LoginQrPollResult {
+            state: LoginQrState::Confirm,
+            message: Some("scan ok, waiting confirm".to_string()),
+            auth: None,
+        }),
+        86038 => Ok(LoginQrPollResult {
+            state: LoginQrState::Timeout,
+            message: Some("qrcode timeout".to_string()),
+            auth: None,
+        }),
         0 => {
             fn best_cookie(client: &BiliClient, headers: &HeaderMap) -> Option<String> {
                 client
@@ -159,7 +200,11 @@ pub async fn login_qr_poll(client: &BiliClient, qrcode_key: &str) -> Result<Logi
 
             let mut cookie = best_cookie(client, &headers_resp);
             let url_kv = extract_cookie_kv_from_url_query(&cross_url);
-            let url_cookie = if url_kv.is_empty() { None } else { Some(cookie_kv_to_string(&url_kv)) };
+            let url_cookie = if url_kv.is_empty() {
+                None
+            } else {
+                Some(cookie_kv_to_string(&url_kv))
+            };
             if let Some(u) = url_cookie.as_deref() {
                 cookie = merge_cookie_strings(cookie.as_deref().unwrap_or(""), u);
             }
@@ -199,7 +244,11 @@ pub async fn login_qr_poll(client: &BiliClient, qrcode_key: &str) -> Result<Logi
                 }),
             })
         }
-        _ => Ok(LoginQrPollResult { state: LoginQrState::Other, message: Some(format!("unknown code={code}")), auth: None }),
+        _ => Ok(LoginQrPollResult {
+            state: LoginQrState::Other,
+            message: Some(format!("unknown code={code}")),
+            auth: None,
+        }),
     }
 }
 
@@ -249,7 +298,10 @@ fn build_tv_login_base_params() -> Vec<(String, String)> {
         ("device".to_string(), "OnePlus".to_string()),
         ("device_id".to_string(), device_id),
         ("device_name".to_string(), "OnePlus7TPro".to_string()),
-        ("device_platform".to_string(), "Android10OnePlusHD1910".to_string()),
+        (
+            "device_platform".to_string(),
+            "Android10OnePlusHD1910".to_string(),
+        ),
         ("fingerprint".to_string(), fingerprint.clone()),
         ("guid".to_string(), buvid.clone()),
         ("local_fingerprint".to_string(), fingerprint.clone()),
@@ -268,7 +320,9 @@ fn now_unix_s() -> i64 {
         .as_secs() as i64
 }
 
-pub async fn login_tv_qr_create(client: &BiliClient) -> Result<(LoginQr, TvLoginSession), BiliError> {
+pub async fn login_tv_qr_create(
+    client: &BiliClient,
+) -> Result<(LoginQr, TvLoginSession), BiliError> {
     // BBDown uses this host for auth_code creation.
     let create_url = "https://passport.snm0516.aisee.tv/x/passport-tv-login/qrcode/auth_code";
 
@@ -289,8 +343,15 @@ pub async fn login_tv_qr_create(client: &BiliClient) -> Result<(LoginQr, TvLogin
         .await?;
     bili_check_code(&json)?;
 
-    let data = json.get("data").ok_or_else(|| BiliError::Parse("missing data".to_string()))?;
-    let login_url = data.get("url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let data = json
+        .get("data")
+        .ok_or_else(|| BiliError::Parse("missing data".to_string()))?;
+    let login_url = data
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let auth_code = data
         .get("auth_code")
         .and_then(|v| v.as_str())
@@ -302,7 +363,10 @@ pub async fn login_tv_qr_create(client: &BiliClient) -> Result<(LoginQr, TvLogin
     }
 
     let code = QrCode::new(login_url.as_bytes()).map_err(|e| BiliError::Parse(e.to_string()))?;
-    let img = code.render::<image::Luma<u8>>().max_dimensions(320, 320).build();
+    let img = code
+        .render::<image::Luma<u8>>()
+        .max_dimensions(320, 320)
+        .build();
     let dyn_img = image::DynamicImage::ImageLuma8(img);
     let mut buf: Vec<u8> = Vec::new();
     dyn_img
@@ -326,7 +390,10 @@ pub async fn login_tv_qr_create(client: &BiliClient) -> Result<(LoginQr, TvLogin
     Ok((qr, sess))
 }
 
-pub async fn login_tv_qr_poll(client: &BiliClient, sess: &TvLoginSession) -> Result<TvLoginQrPollResult, BiliError> {
+pub async fn login_tv_qr_poll(
+    client: &BiliClient,
+    sess: &TvLoginSession,
+) -> Result<TvLoginQrPollResult, BiliError> {
     let auth_code = sess.auth_code.trim();
     if auth_code.is_empty() {
         return Err(BiliError::InvalidInput("empty auth_code".to_string()));
@@ -343,12 +410,27 @@ pub async fn login_tv_qr_poll(client: &BiliClient, sess: &TvLoginSession) -> Res
     let q = build_query_for_sign(&params);
     params.push(("sign".to_string(), tv_sign(&q)));
 
-    let json: Value = client.http.post(poll_url).form(&params).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .post(poll_url)
+        .form(&params)
+        .send()
+        .await?
+        .json()
+        .await?;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
 
     match code {
-        86039 => Ok(TvLoginQrPollResult { state: LoginQrState::Scan, message: None, access_token: None }),
-        86038 => Ok(TvLoginQrPollResult { state: LoginQrState::Timeout, message: Some("qrcode timeout".to_string()), access_token: None }),
+        86039 => Ok(TvLoginQrPollResult {
+            state: LoginQrState::Scan,
+            message: None,
+            access_token: None,
+        }),
+        86038 => Ok(TvLoginQrPollResult {
+            state: LoginQrState::Timeout,
+            message: Some("qrcode timeout".to_string()),
+            access_token: None,
+        }),
         0 => {
             let token = json
                 .pointer("/data/access_token")
@@ -363,7 +445,11 @@ pub async fn login_tv_qr_poll(client: &BiliClient, sess: &TvLoginSession) -> Res
                     access_token: None,
                 });
             }
-            Ok(TvLoginQrPollResult { state: LoginQrState::Done, message: None, access_token: Some(token) })
+            Ok(TvLoginQrPollResult {
+                state: LoginQrState::Done,
+                message: None,
+                access_token: Some(token),
+            })
         }
         _ => {
             let msg = json
@@ -374,7 +460,11 @@ pub async fn login_tv_qr_poll(client: &BiliClient, sess: &TvLoginSession) -> Res
                 .to_string();
             Ok(TvLoginQrPollResult {
                 state: LoginQrState::Other,
-                message: Some(if msg.is_empty() { format!("unknown code={code}") } else { format!("code={code}: {msg}") }),
+                message: Some(if msg.is_empty() {
+                    format!("unknown code={code}")
+                } else {
+                    format!("code={code}: {msg}")
+                }),
                 access_token: None,
             })
         }
@@ -392,12 +482,22 @@ pub async fn check_login_web(client: &BiliClient, cookie: &str) -> Result<bool, 
         client.endpoints.api_base.trim_end_matches('/')
     );
     let headers = header_map_with_cookie(Some(c));
-    let json: Value = client.http.get(url).headers(headers).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(headers)
+        .send()
+        .await?
+        .json()
+        .await?;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
     if code != 0 {
         return Ok(false);
     }
-    Ok(json.pointer("/data/isLogin").and_then(|v| v.as_bool()).unwrap_or(false))
+    Ok(json
+        .pointer("/data/isLogin")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false))
 }
 
 fn public_key_pem() -> &'static str {
@@ -443,13 +543,26 @@ async fn cookie_info_needs_refresh(
         urlencoding::encode(csrf)
     );
     let headers = header_map_with_cookie(Some(cookie_hdr));
-    let json: Value = client.http.get(url).headers(headers).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(headers)
+        .send()
+        .await?
+        .json()
+        .await?;
     bili_check_code(&json)?;
-    let refresh = json.pointer("/data/refresh").and_then(|v| v.as_bool()).unwrap_or(false);
+    let refresh = json
+        .pointer("/data/refresh")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if !refresh {
         return Ok(None);
     }
-    let ts = json.pointer("/data/timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
+    let ts = json
+        .pointer("/data/timestamp")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     if ts <= 0 {
         return Ok(Some(now_unix_ms()));
     }
@@ -467,8 +580,16 @@ async fn fetch_refresh_csrf(
         correspond_path.trim()
     );
     let headers = header_map_with_cookie(Some(cookie_hdr));
-    let html = client.http.get(url).headers(headers).send().await?.text().await?;
-    extract_refresh_csrf(&html).ok_or_else(|| BiliError::Parse("refresh_csrf not found".to_string()))
+    let html = client
+        .http
+        .get(url)
+        .headers(headers)
+        .send()
+        .await?
+        .text()
+        .await?;
+    extract_refresh_csrf(&html)
+        .ok_or_else(|| BiliError::Parse("refresh_csrf not found".to_string()))
 }
 
 async fn refresh_cookie_post(
@@ -507,7 +628,9 @@ async fn refresh_cookie_post(
         .to_string();
     let cookie = build_cookie_string_from_set_cookie(&hdr).or_else(|| client.cookies_for_www());
     if cookie.as_deref().unwrap_or("").trim().is_empty() || new_refresh_token.is_empty() {
-        return Err(BiliError::Parse("refresh response missing cookie/refresh_token".to_string()));
+        return Err(BiliError::Parse(
+            "refresh response missing cookie/refresh_token".to_string(),
+        ));
     }
     Ok((
         AuthState {
@@ -542,7 +665,10 @@ async fn confirm_refresh(
     Ok(())
 }
 
-pub async fn refresh_cookie_if_needed(client: &BiliClient, auth: &AuthState) -> Result<AuthState, BiliError> {
+pub async fn refresh_cookie_if_needed(
+    client: &BiliClient,
+    auth: &AuthState,
+) -> Result<AuthState, BiliError> {
     refresh_cookie_if_needed_with(client, auth, correspond_path).await
 }
 
@@ -554,10 +680,13 @@ pub async fn refresh_cookie_if_needed_with(
     let cookie = auth.cookie.as_deref().unwrap_or("").trim();
     let refresh_token = auth.refresh_token.as_deref().unwrap_or("").trim();
     if cookie.is_empty() || refresh_token.is_empty() {
-        return Err(BiliError::InvalidInput("missing cookie/refresh_token".to_string()));
+        return Err(BiliError::InvalidInput(
+            "missing cookie/refresh_token".to_string(),
+        ));
     }
 
-    let csrf = cookie_get(cookie, "bili_jct").ok_or_else(|| BiliError::InvalidInput("cookie missing bili_jct".to_string()))?;
+    let csrf = cookie_get(cookie, "bili_jct")
+        .ok_or_else(|| BiliError::InvalidInput("cookie missing bili_jct".to_string()))?;
 
     let buvid = super::playurl::ensure_buvid_cookie(client).await.ok();
     let cookie_hdr = merge_cookie_header(buvid.as_deref(), Some(cookie))
@@ -572,16 +701,19 @@ pub async fn refresh_cookie_if_needed_with(
     let refresh_csrf = fetch_refresh_csrf(client, &cookie_hdr, &path).await?;
 
     let old_refresh = refresh_token.to_string();
-    let (mut new_auth, _hdr) = refresh_cookie_post(client, &cookie_hdr, &csrf, &refresh_csrf, &old_refresh).await?;
+    let (mut new_auth, _hdr) =
+        refresh_cookie_post(client, &cookie_hdr, &csrf, &refresh_csrf, &old_refresh).await?;
     if let Some(new_cookie) = new_auth.cookie.as_deref() {
-        new_auth.cookie = merge_cookie_strings(cookie, new_cookie).or_else(|| Some(new_cookie.to_string()));
+        new_auth.cookie =
+            merge_cookie_strings(cookie, new_cookie).or_else(|| Some(new_cookie.to_string()));
     }
 
     // Confirm refresh using new cookie's bili_jct and old refresh_token.
     let new_cookie = new_auth.cookie.as_deref().unwrap_or("").trim();
     let new_csrf = cookie_get(new_cookie, "bili_jct").unwrap_or_else(|| csrf.clone());
     let buvid2 = super::playurl::ensure_buvid_cookie(client).await.ok();
-    let new_cookie_hdr = merge_cookie_header(buvid2.as_deref(), Some(new_cookie)).unwrap_or_else(|| new_cookie.to_string());
+    let new_cookie_hdr = merge_cookie_header(buvid2.as_deref(), Some(new_cookie))
+        .unwrap_or_else(|| new_cookie.to_string());
     let _ = confirm_refresh(client, &new_cookie_hdr, &new_csrf, &old_refresh).await;
 
     Ok(new_auth)

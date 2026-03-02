@@ -59,4 +59,3 @@ pub fn select_page_indices(total_pages: usize, select_page: &str) -> Result<Vec<
     out.sort_unstable();
     Ok(out)
 }
-

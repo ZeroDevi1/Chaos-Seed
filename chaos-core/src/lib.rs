@@ -1,13 +1,15 @@
-pub mod danmaku;
 pub mod bili_video;
+pub mod danmaku;
 pub mod live_directory;
 pub mod livestream;
-pub mod lyrics;
 pub mod llm;
+pub mod lyrics;
 pub mod music;
 pub mod now_playing;
 pub mod subtitle;
 pub mod tts;
+// voice_chat 依赖 TTS 推理（当前仅支持 PyO3/Python 后端）。
+#[cfg(feature = "tts-python")]
 pub mod voice_chat;
 
 // Ensure Rustls has a selected CryptoProvider in builds where multiple providers are enabled.

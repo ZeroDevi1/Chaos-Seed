@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::Stream;
 use tokio::sync::mpsc;
@@ -8,8 +8,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::llm::{ChatMessage, ChatRequest, LlmClient, ReasoningMode};
 use crate::tts::post_process::{TrimConfig, trim_output_pcm16};
-use crate::tts::wav::TtsPcm16Result;
-use crate::tts::{CosyVoiceEngine, TtsSftParams};
+use crate::tts::wav::{TtsPcm16Result, decode_wav_bytes_to_pcm16_mono};
+use crate::tts::{TtsError, TtsSftParams};
 
 #[derive(Debug, Clone)]
 pub struct VoiceChatConfig {
@@ -35,6 +35,15 @@ pub struct VoiceChatRequest {
     pub spk_id: String,
     pub model_dir: String,
     pub tts: TtsSftParams,
+
+    /// Python(.pt) 推理所需 ckpt（路径可为绝对，或相对于 python_workdir）。
+    pub llm_ckpt: String,
+    pub flow_ckpt: String,
+
+    /// （可选）python workdir / script；为空则使用 python_infer 内部的 env 兜底（CHAOS_TTS_PY_WORKDIR/CHAOS_TTS_PY_INFER_SFT）。
+    pub python_workdir: Option<String>,
+    pub python_infer_script: Option<String>,
+
     pub cfg: VoiceChatConfig,
 }
 
@@ -60,18 +69,16 @@ pub enum VoiceChatError {
 pub fn realtime_chat_stream(
     req: VoiceChatRequest,
     llm: LlmClient,
-    tts_engine: Arc<CosyVoiceEngine>,
     cancel: CancellationToken,
 ) -> impl Stream<Item = Result<VoiceChunk, VoiceChatError>> {
     let (tx, rx) = mpsc::channel::<Result<VoiceChunk, VoiceChatError>>(16);
 
     tokio::spawn(async move {
-        let r = run_voice_chat(req, llm, tts_engine, cancel.clone(), tx).await;
+        let r = run_voice_chat(req, llm, cancel.clone(), tx).await;
         if let Err(e) = r {
             // Best-effort: only send error if stream isn't canceled.
             if !cancel.is_cancelled() {
                 let _ = cancel.cancel();
-                // We can't reliably push into the channel if receiver is gone.
                 let _ = e;
             }
         }
@@ -83,7 +90,6 @@ pub fn realtime_chat_stream(
 async fn run_voice_chat(
     mut req: VoiceChatRequest,
     llm: LlmClient,
-    tts_engine: Arc<CosyVoiceEngine>,
     cancel: CancellationToken,
     tx: mpsc::Sender<Result<VoiceChunk, VoiceChatError>>,
 ) -> Result<(), VoiceChatError> {
@@ -95,6 +101,12 @@ async fn run_voice_chat(
     }
     if req.spk_id.trim().is_empty() {
         return Err(VoiceChatError::Internal("spk_id is empty".into()));
+    }
+    if req.llm_ckpt.trim().is_empty() {
+        return Err(VoiceChatError::Internal("llm_ckpt is empty".into()));
+    }
+    if req.flow_ckpt.trim().is_empty() {
+        return Err(VoiceChatError::Internal("flow_ckpt is empty".into()));
     }
 
     let llm_req = ChatRequest {
@@ -123,11 +135,24 @@ async fn run_voice_chat(
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let cancel_flag_for_block = cancel_flag.clone();
 
-    let engine2 = tts_engine.clone();
     let params2 = req.tts.clone();
-    let join = tokio::task::spawn_blocking(move || {
-        engine2
-            .synthesize_pcm16_with_cancel(&params2, Some(cancel_flag_for_block.as_ref()))
+    let llm_ckpt2 = req.llm_ckpt.clone();
+    let flow_ckpt2 = req.flow_ckpt.clone();
+    let py_workdir2 = req.python_workdir.clone();
+    let py_script2 = req.python_infer_script.clone();
+
+    let join = tokio::task::spawn_blocking(move || -> Result<TtsPcm16Result, VoiceChatError> {
+        let wav = crate::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(
+            &params2,
+            &llm_ckpt2,
+            &flow_ckpt2,
+            py_workdir2.as_deref(),
+            py_script2.as_deref(),
+            Some(cancel_flag_for_block.as_ref()),
+        )
+        .map_err(|e| VoiceChatError::Tts(e.to_string()))?;
+
+        decode_wav_bytes_to_pcm16_mono(&wav.wav_bytes)
             .map_err(|e| VoiceChatError::Tts(e.to_string()))
     });
 
@@ -150,7 +175,8 @@ async fn run_voice_chat(
         .map_err(|e| VoiceChatError::Tts(e.to_string()))?;
 
     // Chunk split.
-    let chunk_samples = ((pcm_res.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000).max(1) as usize;
+    let chunk_samples =
+        ((pcm_res.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000).max(1) as usize;
     let mut seq = 0u64;
     for (i, chunk) in trimmed.chunks(chunk_samples).enumerate() {
         if cancel.is_cancelled() {
@@ -171,3 +197,10 @@ async fn run_voice_chat(
 
     Ok(())
 }
+
+impl From<TtsError> for VoiceChatError {
+    fn from(e: TtsError) -> Self {
+        VoiceChatError::Tts(e.to_string())
+    }
+}
+

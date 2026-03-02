@@ -7,4 +7,3 @@ fn qq_sign_is_stable_for_known_payload() {
     let sign = sign_request_payload(payload).expect("sign");
     assert_eq!(sign, "zzb0550d996q7woarat5bllem6fs0bbgce19fd27");
 }
-

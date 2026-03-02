@@ -4,7 +4,9 @@ use reqwest::Client;
 use serde_json::{Value, json};
 
 use crate::music::error::MusicError;
-use crate::music::model::{AuthState, MusicAlbum, MusicArtist, MusicQuality, MusicService, MusicTrack, ProviderConfig};
+use crate::music::model::{
+    AuthState, MusicAlbum, MusicArtist, MusicQuality, MusicService, MusicTrack, ProviderConfig,
+};
 
 const DEFAULT_NETEASE_BASE_URLS: &[&str] = &[
     "http://plugin.changsheng.space:3000",
@@ -37,7 +39,9 @@ fn bases(cfg: &ProviderConfig) -> Result<Vec<String>, MusicError> {
         }
     }
     if out.is_empty() {
-        return Err(MusicError::NotConfigured("neteaseBaseUrls is empty".to_string()));
+        return Err(MusicError::NotConfigured(
+            "neteaseBaseUrls is empty".to_string(),
+        ));
     }
     Ok(out)
 }
@@ -72,9 +76,18 @@ pub async fn fetch_anonymous_cookie(
     for base in bases(cfg)? {
         let url = format!(
             "{base}{}",
-            if p.starts_with('/') { p.clone() } else { format!("/{p}") }
+            if p.starts_with('/') {
+                p.clone()
+            } else {
+                format!("/{p}")
+            }
         );
-        let resp = match http.get(append_timestamp(&url)).timeout(timeout).send().await {
+        let resp = match http
+            .get(append_timestamp(&url))
+            .timeout(timeout)
+            .send()
+            .await
+        {
             Ok(v) => v,
             Err(e) => {
                 last = Some(MusicError::Http(e));
@@ -101,7 +114,9 @@ pub async fn fetch_anonymous_cookie(
             .trim()
             .to_string();
         if cookie.is_empty() {
-            last = Some(MusicError::Parse("netease anon: missing cookie".to_string()));
+            last = Some(MusicError::Parse(
+                "netease anon: missing cookie".to_string(),
+            ));
             continue;
         }
         return Ok(cookie);
@@ -206,15 +221,35 @@ fn qualities_from_song(song: &Value) -> Vec<MusicQuality> {
 }
 
 fn map_song_to_track(song: &Value) -> Option<MusicTrack> {
-    let id = song.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string()).unwrap_or_default();
+    let id = song
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .map(|n| n.to_string())
+        .unwrap_or_default();
     if id.is_empty() {
         return None;
     }
-    let title = song.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let duration_ms = song.get("dt").and_then(|v| v.as_i64()).map(|n| n.max(0) as u64);
-    let album = song.pointer("/al/name").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let album_id = song.pointer("/al/id").and_then(|v| v.as_i64()).map(|n| n.to_string());
-    let cover = song.pointer("/al/picUrl").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let title = song
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let duration_ms = song
+        .get("dt")
+        .and_then(|v| v.as_i64())
+        .map(|n| n.max(0) as u64);
+    let album = song
+        .pointer("/al/name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let album_id = song
+        .pointer("/al/id")
+        .and_then(|v| v.as_i64())
+        .map(|n| n.to_string());
+    let cover = song
+        .pointer("/al/picUrl")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let mut artists = Vec::new();
     let mut artist_ids = Vec::new();
     if let Some(arr) = song.get("ar").and_then(|v| v.as_array()) {
@@ -268,8 +303,15 @@ pub async fn search_tracks(
     if code != 200 {
         return Ok(vec![]);
     }
-    let songs = json.pointer("/result/songs").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    Ok(songs.into_iter().filter_map(|s| map_song_to_track(&s)).collect())
+    let songs = json
+        .pointer("/result/songs")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(songs
+        .into_iter()
+        .filter_map(|s| map_song_to_track(&s))
+        .collect())
 }
 
 pub async fn search_albums(
@@ -295,17 +337,38 @@ pub async fn search_albums(
     if code != 200 {
         return Ok(vec![]);
     }
-    let list = json.pointer("/result/albums").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let list = json
+        .pointer("/result/albums")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut out = Vec::new();
     for it in list {
-        let id = it.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string()).unwrap_or_default();
+        let id = it
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|n| n.to_string())
+            .unwrap_or_default();
         if id.is_empty() {
             continue;
         }
-        let title = it.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let artist = it.pointer("/artist/name").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let artist_id = it.pointer("/artist/id").and_then(|v| v.as_i64()).map(|n| n.to_string());
-        let cover = it.get("picUrl").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let title = it
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let artist = it
+            .pointer("/artist/name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let artist_id = it
+            .pointer("/artist/id")
+            .and_then(|v| v.as_i64())
+            .map(|n| n.to_string());
+        let cover = it
+            .get("picUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         out.push(MusicAlbum {
             service: MusicService::Netease,
             id,
@@ -313,7 +376,10 @@ pub async fn search_albums(
             artist,
             artist_id,
             cover_url: cover,
-            publish_time: it.get("publishTime").and_then(|v| v.as_i64()).map(|n| n.to_string()),
+            publish_time: it
+                .get("publishTime")
+                .and_then(|v| v.as_i64())
+                .map(|n| n.to_string()),
             track_count: None,
         });
     }
@@ -343,16 +409,34 @@ pub async fn search_artists(
     if code != 200 {
         return Ok(vec![]);
     }
-    let list = json.pointer("/result/artists").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let list = json
+        .pointer("/result/artists")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut out = Vec::new();
     for it in list {
-        let id = it.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string()).unwrap_or_default();
+        let id = it
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|n| n.to_string())
+            .unwrap_or_default();
         if id.is_empty() {
             continue;
         }
-        let name = it.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let cover = it.get("picUrl").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let album_count = it.get("albumSize").and_then(|v| v.as_i64()).and_then(|n| u32::try_from(n).ok());
+        let name = it
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let cover = it
+            .get("picUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let album_count = it
+            .get("albumSize")
+            .and_then(|v| v.as_i64())
+            .and_then(|n| u32::try_from(n).ok());
         out.push(MusicArtist {
             service: MusicService::Netease,
             id,
@@ -380,8 +464,15 @@ pub async fn album_tracks(
     if code != 200 {
         return Ok(vec![]);
     }
-    let songs = json.get("songs").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    Ok(songs.into_iter().filter_map(|s| map_song_to_track(&s)).collect())
+    let songs = json
+        .get("songs")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(songs
+        .into_iter()
+        .filter_map(|s| map_song_to_track(&s))
+        .collect())
 }
 
 pub async fn artist_albums(
@@ -400,15 +491,30 @@ pub async fn artist_albums(
     if code != 200 {
         return Ok(vec![]);
     }
-    let list = json.pointer("/hotAlbums").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let list = json
+        .pointer("/hotAlbums")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut out = Vec::new();
     for it in list {
-        let album_id = it.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string()).unwrap_or_default();
+        let album_id = it
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .map(|n| n.to_string())
+            .unwrap_or_default();
         if album_id.is_empty() {
             continue;
         }
-        let title = it.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let cover = it.get("picUrl").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let title = it
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let cover = it
+            .get("picUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         out.push(MusicAlbum {
             service: MusicService::Netease,
             id: album_id,
@@ -416,7 +522,10 @@ pub async fn artist_albums(
             artist: None,
             artist_id: Some(id.to_string()),
             cover_url: cover,
-            publish_time: it.get("publishTime").and_then(|v| v.as_i64()).map(|n| n.to_string()),
+            publish_time: it
+                .get("publishTime")
+                .and_then(|v| v.as_i64())
+                .map(|n| n.to_string()),
             track_count: None,
         });
     }
@@ -496,13 +605,14 @@ pub async fn track_download_url(
             } else {
                 format!("{base}/{path}")
             };
-            let json = match post_json(http, &append_timestamp(&url), payload, cookie, timeout).await {
-                Ok(v) => v,
-                Err(e) => {
-                    last_info = Some(format!("baseUrl={base} path={path} httpError={e}"));
-                    continue;
-                }
-            };
+            let json =
+                match post_json(http, &append_timestamp(&url), payload, cookie, timeout).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        last_info = Some(format!("baseUrl={base} path={path} httpError={e}"));
+                        continue;
+                    }
+                };
             let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
             if code != 200 && code != 0 {
                 last_info = Some(format!("baseUrl={base} path={path} code={code}"));

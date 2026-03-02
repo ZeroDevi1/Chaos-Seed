@@ -22,7 +22,10 @@ pub fn signature_android_params(params: &BTreeMap<String, String>, data: Option<
         .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join("");
-    md5_hex_lower(&format!("{salt}{params_string}{}{salt}", data.unwrap_or("")))
+    md5_hex_lower(&format!(
+        "{salt}{params_string}{}{salt}",
+        data.unwrap_or("")
+    ))
 }
 
 pub fn signature_register_params(params: &BTreeMap<String, String>) -> String {

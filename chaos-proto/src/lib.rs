@@ -203,6 +203,22 @@ pub struct TtsSftStartParams {
     pub model_dir: String,
     pub spk_id: String,
     pub text: String,
+    /// （可选）PyTorch LLM checkpoint 路径（.pt）。
+    ///
+    /// 说明：当前推理仅支持 Python(PT) 后端；若不传，则会尝试从环境变量 `CHAOS_TTS_PY_LLM_CKPT` 读取默认值。
+    #[serde(default)]
+    pub llm_ckpt: Option<String>,
+    /// （可选）PyTorch Flow checkpoint 路径（.pt）。
+    ///
+    /// 说明：当前推理仅支持 Python(PT) 后端；若不传，则会尝试从环境变量 `CHAOS_TTS_PY_FLOW_CKPT` 读取默认值。
+    #[serde(default)]
+    pub flow_ckpt: Option<String>,
+    /// （可选）Python 推理脚本运行目录（等价于 `cd <workdir>`）。
+    #[serde(default)]
+    pub python_workdir: Option<String>,
+    /// （可选）Python 推理脚本路径（相对 workdir 或绝对路径），默认 `tools/infer_sft.py`。
+    #[serde(default)]
+    pub python_infer_script: Option<String>,
     #[serde(default)]
     pub prompt_text: String,
     #[serde(default)]
@@ -657,9 +673,15 @@ pub struct MusicAuthState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum MusicDownloadTarget {
-    Track { track: MusicTrack },
+    Track {
+        track: MusicTrack,
+    },
     Album {
         service: MusicService,
         #[serde(alias = "album_id")]
@@ -1183,7 +1205,6 @@ pub struct MusicLoginQrPollResult {
 pub struct MusicRefreshCookieParams {
     pub cookie: QqMusicCookie,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

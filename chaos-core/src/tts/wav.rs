@@ -133,6 +133,84 @@ pub fn duration_ms(sample_rate: u32, samples: usize) -> u64 {
     ((samples as u128) * 1000u128 / (sample_rate as u128)) as u64
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct WavMeta {
+    pub sample_rate: u32,
+    pub channels: u16,
+    /// 每声道样本数（即帧数）。
+    pub samples: u32,
+}
+
+/// 从 WAV bytes 中读取最基本的元信息（不解码完整 PCM）。
+pub fn read_wav_meta_from_bytes(wav_bytes: &[u8]) -> Result<WavMeta, TtsError> {
+    let reader = hound::WavReader::new(Cursor::new(wav_bytes))
+        .map_err(|e| TtsError::Io(std::io::Error::other(e)))?;
+    let spec = reader.spec();
+    let total_samples = reader.duration(); // 总样本数（所有声道）
+    let ch = spec.channels.max(1) as u32;
+    let samples_per_ch = (total_samples / ch).min(u32::MAX as u32);
+    Ok(WavMeta {
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+        samples: samples_per_ch,
+    })
+}
+
+/// 将 WAV bytes 解码为单声道 PCM16。
+///
+/// 说明：
+/// - VoiceLab 的 infer_sft.py 典型输出是 PCM16 单声道，但这里做一些兼容兜底（float32/int32）。
+/// - 若遇到多声道输出，当前直接报错（避免“错误混音”导致听感异常）。
+pub fn decode_wav_bytes_to_pcm16_mono(wav_bytes: &[u8]) -> Result<TtsPcm16Result, TtsError> {
+    let mut reader = hound::WavReader::new(Cursor::new(wav_bytes))
+        .map_err(|e| TtsError::Io(std::io::Error::other(e)))?;
+    let spec = reader.spec();
+    if spec.channels != 1 {
+        return Err(TtsError::NotImplemented("only mono wav is supported"));
+    }
+
+    let sample_rate = spec.sample_rate;
+    if sample_rate == 0 {
+        return Err(TtsError::InvalidArg("wav sample_rate must be > 0".into()));
+    }
+
+    let pcm16: Vec<i16> = match (spec.sample_format, spec.bits_per_sample) {
+        (hound::SampleFormat::Int, 16) => reader
+            .samples::<i16>()
+            .map(|s| s.map_err(|e| TtsError::Io(std::io::Error::other(e))))
+            .collect::<Result<Vec<_>, _>>()?,
+        (hound::SampleFormat::Int, 32) => {
+            let x: Vec<i32> = reader
+                .samples::<i32>()
+                .map(|s| s.map_err(|e| TtsError::Io(std::io::Error::other(e))))
+                .collect::<Result<Vec<_>, _>>()?;
+            x.into_iter()
+                .map(|v| (v / 65536).clamp(i16::MIN as i32, i16::MAX as i32) as i16)
+                .collect()
+        }
+        (hound::SampleFormat::Float, 32) => {
+            let x: Vec<f32> = reader
+                .samples::<f32>()
+                .map(|s| s.map_err(|e| TtsError::Io(std::io::Error::other(e))))
+                .collect::<Result<Vec<_>, _>>()?;
+            f32_to_pcm16_mono(&x)
+        }
+        _ => {
+            return Err(TtsError::NotImplemented(
+                "unsupported wav sample format (expected int16/int32/float32)",
+            ));
+        }
+    };
+
+    let duration_ms = duration_ms(sample_rate, pcm16.len());
+    Ok(TtsPcm16Result {
+        sample_rate,
+        channels: 1,
+        pcm16,
+        duration_ms,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,4 +265,3 @@ mod tests {
         assert!(after < before * 0.5, "before={before} after={after}");
     }
 }
-

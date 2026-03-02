@@ -134,6 +134,17 @@ internal static partial class ChaosFfi
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_music_download_blocking_json(string start_params_json_utf8);
 
+    // ----- tts (CosyVoice3 SFT) -----
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_tts_sft_start_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_tts_sft_status_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_tts_sft_cancel_json(string session_id_utf8);
+
     // ----- bilibili (video download) -----
 
     [LibraryImport(Dll)]

@@ -4,9 +4,7 @@ use serde_json::Value;
 
 use crate::live_directory::util::bili_wbi::BiliWbi;
 
-use super::{
-    BiliClient, BiliError, bili_check_code, header_map_with_cookie, merge_cookie_header,
-};
+use super::{BiliClient, BiliError, bili_check_code, header_map_with_cookie, merge_cookie_header};
 
 fn md5_hex_lower(s: &str) -> String {
     let digest = md5::compute(s.as_bytes());
@@ -77,8 +75,16 @@ async fn fetch_buvid_cookie(client: &BiliClient) -> Result<String, BiliError> {
         .json()
         .await?;
     bili_check_code(&json)?;
-    let b3 = json.pointer("/data/b_3").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let b4 = json.pointer("/data/b_4").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let b3 = json
+        .pointer("/data/b_3")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let b4 = json
+        .pointer("/data/b_4")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     if b3.is_empty() || b4.is_empty() {
         return Err(BiliError::Parse("buvid missing".to_string()));
     }
@@ -98,11 +104,26 @@ async fn fetch_wbi_mixin_key(client: &BiliClient, buvid_cookie: &str) -> Result<
     let base = client.endpoints.api_base.trim_end_matches('/');
     let url = format!("{base}/x/web-interface/nav");
     let headers = header_map_with_cookie(Some(buvid_cookie));
-    let json: Value = client.http.get(url).headers(headers).send().await?.json().await?;
+    let json: Value = client
+        .http
+        .get(url)
+        .headers(headers)
+        .send()
+        .await?
+        .json()
+        .await?;
     bili_check_code(&json)?;
 
-    let img_url = json.pointer("/data/wbi_img/img_url").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let sub_url = json.pointer("/data/wbi_img/sub_url").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let img_url = json
+        .pointer("/data/wbi_img/img_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let sub_url = json
+        .pointer("/data/wbi_img/sub_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     let img_key = img_url
         .split('/')
         .last()
@@ -137,7 +158,11 @@ pub async fn ensure_wbi_mixin_key(client: &BiliClient) -> Result<String, BiliErr
     Ok(mixin)
 }
 
-pub fn choose_qn_by_dfn_priority(accept_quality: &[i32], accept_description: &[String], dfn_priority: &str) -> Option<i32> {
+pub fn choose_qn_by_dfn_priority(
+    accept_quality: &[i32],
+    accept_description: &[String],
+    dfn_priority: &str,
+) -> Option<i32> {
     if accept_quality.is_empty() || accept_description.is_empty() {
         return None;
     }
@@ -296,7 +321,8 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
         if let Some(vs) = dash.get("video").and_then(|v| v.as_array()) {
             for v in vs {
                 let id = v.get("id").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
-                let base_url = normalize_media_url(v.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
+                let base_url =
+                    normalize_media_url(v.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
                 if id == 0 || base_url.is_empty() {
                     continue;
                 }
@@ -310,12 +336,20 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
                             .collect()
                     })
                     .unwrap_or_default();
-                let codecs = v.get("codecs").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                let codecs = v
+                    .get("codecs")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
                 let codecid = v.get("codecid").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
                 let bandwidth = v.get("bandwidth").and_then(|x| x.as_u64()).unwrap_or(0);
                 let width = v.get("width").and_then(|x| x.as_u64()).map(|v| v as u32);
                 let height = v.get("height").and_then(|x| x.as_u64()).map(|v| v as u32);
-                let frame_rate = v.get("frame_rate").and_then(|x| x.as_str()).map(|s| s.to_string());
+                let frame_rate = v
+                    .get("frame_rate")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string());
                 dash_videos.push(DashVideo {
                     id,
                     base_url,
@@ -332,7 +366,8 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
         if let Some(as_) = dash.get("audio").and_then(|v| v.as_array()) {
             for a in as_ {
                 let id = a.get("id").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
-                let base_url = normalize_media_url(a.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
+                let base_url =
+                    normalize_media_url(a.get("base_url").and_then(|x| x.as_str()).unwrap_or(""));
                 if id == 0 || base_url.is_empty() {
                     continue;
                 }
@@ -346,7 +381,12 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
                             .collect()
                     })
                     .unwrap_or_default();
-                let codecs = a.get("codecs").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                let codecs = a
+                    .get("codecs")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
                 let bandwidth = a.get("bandwidth").and_then(|x| x.as_u64()).unwrap_or(0);
                 dash_audios.push(DashAudio {
                     id,
@@ -360,7 +400,9 @@ fn parse_playurl_info(root: &Value, qn: i32) -> Result<PlayurlInfo, BiliError> {
     }
 
     if dash_videos.is_empty() || dash_audios.is_empty() {
-        return Err(BiliError::Api("no dash tracks (need login or permission?)".to_string()));
+        return Err(BiliError::Api(
+            "no dash tracks (need login or permission?)".to_string(),
+        ));
     }
 
     Ok(PlayurlInfo {
@@ -416,7 +458,10 @@ pub async fn fetch_playurl_dash(
 
     let merged_cookie = merge_cookie_header(Some(&buvid), cookie);
     let mut headers = header_map_with_cookie(merged_cookie.as_deref());
-    headers.insert(reqwest::header::REFERER, reqwest::header::HeaderValue::from_static("https://www.bilibili.com/"));
+    headers.insert(
+        reqwest::header::REFERER,
+        reqwest::header::HeaderValue::from_static("https://www.bilibili.com/"),
+    );
 
     let resp = client
         .http

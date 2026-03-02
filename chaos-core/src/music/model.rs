@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize};
 
 fn de_opt_string_loose<'de, D>(d: D) -> Result<Option<String>, D::Error>
 where
@@ -123,20 +123,40 @@ pub struct ProviderConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QqMusicCookie {
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub openid: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub refresh_token: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub access_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expired_at: Option<i64>,
 
     /// `musicid` in refs
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub musicid: Option<String>,
     /// `musickey` in refs (`authst`)
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub musickey: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,20 +164,40 @@ pub struct QqMusicCookie {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_login: Option<i64>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub refresh_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub login_type: Option<i64>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub str_musicid: Option<String>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub nick: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub logo: Option<String>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_string_loose")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_string_loose"
+    )]
     pub encrypt_uin: Option<String>,
 }
 
@@ -182,9 +222,17 @@ pub struct AuthState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MusicDownloadTarget {
-    Track { track: MusicTrack },
-    Album { service: MusicService, album_id: String },
-    ArtistAll { service: MusicService, artist_id: String },
+    Track {
+        track: MusicTrack,
+    },
+    Album {
+        service: MusicService,
+        album_id: String,
+    },
+    ArtistAll {
+        service: MusicService,
+        artist_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,5 +1,7 @@
+using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Models.Tts;
 using ChaosSeed.WinUI3.Services;
+using ChaosSeed.WinUI3.Services.TtsBackends;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Storage.Pickers;
@@ -9,7 +11,8 @@ namespace ChaosSeed.WinUI3.Pages;
 
 public sealed partial class TtsDebugPage : Page
 {
-    private readonly TtsService _tts = new(DaemonClient.Instance);
+    private TtsService? _tts;
+    private ITtsBackend? _backend;
 
     private CancellationTokenSource? _cts;
     private string? _sessionId;
@@ -28,6 +31,7 @@ public sealed partial class TtsDebugPage : Page
             var s = SettingsService.Instance.Current;
             ModelDirBox.Text = (s.TtsCosyVoicePackDir ?? "").Trim();
             SpkIdBox.Text = (s.TtsLastSpkId ?? "").Trim();
+            SetBackendBoxFromSettings(s.TtsBackendMode);
 
             // 一些常用默认值（对齐 docs/tts_cosyvoice3_sft.md 示例）。
             SpeedBox.Value = 1.1;
@@ -38,6 +42,29 @@ public sealed partial class TtsDebugPage : Page
             WinSizeBox.Value = 10;
             TauRBox.Value = 1.0;
             GuideSepBox.Text = "。 ";
+
+            // PyO3/PT 默认参数（对齐 uv run python tools/infer_sft.py 示例）。
+            if (string.IsNullOrWhiteSpace(PythonWorkdirBox.Text))
+            {
+                PythonWorkdirBox.Text = Path.Combine(AppContext.BaseDirectory, "voicelab", "workflows", "cosyvoice");
+            }
+            if (string.IsNullOrWhiteSpace(ModelDirBox.Text))
+            {
+                // infer_sft.py 的 --model_dir 允许相对 workdir（更方便打包）。
+                ModelDirBox.Text = "pretrained_models/Fun-CosyVoice3-0.5B-dream-sft";
+            }
+            if (string.IsNullOrWhiteSpace(LlmCkptBox.Text))
+            {
+                LlmCkptBox.Text = "exp/dream_sft/llm/torch_ddp/epoch_5_whole.pt";
+            }
+            if (string.IsNullOrWhiteSpace(FlowCkptBox.Text))
+            {
+                FlowCkptBox.Text = "exp/dream_sft/flow/torch_ddp/flow_avg.pt";
+            }
+            if (string.IsNullOrWhiteSpace(SpkIdBox.Text))
+            {
+                SpkIdBox.Text = "dream";
+            }
 
             if (string.IsNullOrWhiteSpace(InputTextBox.Text))
             {
@@ -52,6 +79,43 @@ public sealed partial class TtsDebugPage : Page
         {
             AppLog.Exception("TtsDebugPage.ApplyDefaultsFromSettings", ex);
         }
+    }
+
+    private void SetBackendBoxFromSettings(LiveBackendMode mode)
+    {
+        try
+        {
+            var want = mode switch
+            {
+                LiveBackendMode.Daemon => "daemon",
+                LiveBackendMode.Ffi => "ffi",
+                _ => "auto",
+            };
+
+            foreach (var it in BackendBox.Items)
+            {
+                if (it is ComboBoxItem cb && string.Equals(cb.Content?.ToString()?.Trim(), want, StringComparison.OrdinalIgnoreCase))
+                {
+                    BackendBox.SelectedItem = cb;
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private static LiveBackendMode GetBackendModeFromBox(ComboBox box)
+    {
+        var s = (box.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Trim()?.ToLowerInvariant();
+        return s switch
+        {
+            "daemon" => LiveBackendMode.Daemon,
+            "ffi" => LiveBackendMode.Ffi,
+            _ => LiveBackendMode.Auto,
+        };
     }
 
     private async void OnPickModelDirClicked(object sender, RoutedEventArgs e)
@@ -130,6 +194,10 @@ public sealed partial class TtsDebugPage : Page
             ModelDir = modelDir,
             SpkId = spkId,
             Text = text,
+            LlmCkpt = string.IsNullOrWhiteSpace(LlmCkptBox.Text) ? null : LlmCkptBox.Text.Trim(),
+            FlowCkpt = string.IsNullOrWhiteSpace(FlowCkptBox.Text) ? null : FlowCkptBox.Text.Trim(),
+            PythonWorkdir = string.IsNullOrWhiteSpace(PythonWorkdirBox.Text) ? null : PythonWorkdirBox.Text.Trim(),
+            PythonInferScript = string.IsNullOrWhiteSpace(PythonInferScriptBox.Text) ? null : PythonInferScriptBox.Text.Trim(),
             PromptText = (PromptTextBox.Text ?? "").Trim(),
             PromptStrategy = string.IsNullOrWhiteSpace(promptStrategy) ? null : promptStrategy,
             GuideSep = guideSep,
@@ -146,14 +214,26 @@ public sealed partial class TtsDebugPage : Page
         GenerateBtn.IsEnabled = false;
         CancelBtn.IsEnabled = true;
         StageText.Text = "stage: starting";
-        ShowInfo("开始生成", "已提交到 daemon（tts.sft.start），正在轮询状态…");
+        var backendMode = GetBackendModeFromBox(BackendBox);
+        SettingsService.Instance.Update(x => x.TtsBackendMode = backendMode);
+
+        _backend?.Dispose();
+        _backend = TtsBackendFactory.Create();
+        _tts = new TtsService(_backend);
+
+        if (!string.IsNullOrWhiteSpace(_backend.InitNotice))
+        {
+            ShowInfo("后端提示", _backend.InitNotice!);
+        }
+
+        ShowInfo("开始生成", $"已提交到 {_backend.Name}（tts.sft.start），正在轮询状态…");
 
         _cts = new CancellationTokenSource();
         _sessionId = null;
         try
         {
             var ct = _cts.Token;
-            var start = await _tts.StartSftAsync(p, ct);
+            var start = await (_tts ?? throw new InvalidOperationException("tts backend not initialized")).StartSftAsync(p, ct);
             var sid = (start.SessionId ?? "").Trim();
             if (string.IsNullOrWhiteSpace(sid))
             {
@@ -164,7 +244,7 @@ public sealed partial class TtsDebugPage : Page
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                var st = await _tts.StatusAsync(sid, ct);
+                var st = await (_tts ?? throw new InvalidOperationException("tts backend not initialized")).StatusAsync(sid, ct);
                 StageText.Text = $"stage: {st.Stage ?? "-"} ({st.State})";
                 if (!st.Done)
                 {
@@ -228,6 +308,9 @@ public sealed partial class TtsDebugPage : Page
             _cts?.Dispose();
             _cts = null;
             _sessionId = null;
+            try { _backend?.Dispose(); } catch { }
+            _backend = null;
+            _tts = null;
             GenerateBtn.IsEnabled = true;
             CancelBtn.IsEnabled = false;
             StageText.Text = "stage: -";
@@ -255,7 +338,7 @@ public sealed partial class TtsDebugPage : Page
 
         try
         {
-            await _tts.CancelAsync(sid, CancellationToken.None);
+            await (_tts ?? throw new InvalidOperationException("tts backend not initialized")).CancelAsync(sid, CancellationToken.None);
         }
         catch (Exception ex)
         {

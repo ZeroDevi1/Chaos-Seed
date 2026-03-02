@@ -12,7 +12,13 @@ async fn fetch_bytes_stream(
     http: &Client,
     url: &str,
     timeout: Duration,
-) -> Result<(u16, impl futures_util::Stream<Item = Result<Bytes, reqwest::Error>>), MusicError> {
+) -> Result<
+    (
+        u16,
+        impl futures_util::Stream<Item = Result<Bytes, reqwest::Error>>,
+    ),
+    MusicError,
+> {
     let resp = http.get(url).timeout(timeout).send().await?;
     let status = resp.status().as_u16();
     Ok((status, resp.bytes_stream()))
@@ -41,9 +47,7 @@ pub async fn download_url_to_file(
 
     let tmp = p.with_extension(format!(
         "{}.part",
-        p.extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
+        p.extension().and_then(|s| s.to_str()).unwrap_or_default()
     ));
 
     let mut last_err: Option<String> = None;
@@ -96,4 +100,3 @@ pub async fn download_url_to_file(
         last_err.unwrap_or_else(|| "download failed".to_string()),
     ))
 }
-

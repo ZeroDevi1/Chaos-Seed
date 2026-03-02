@@ -98,7 +98,7 @@ use chaos_proto::{
     VoiceChatStreamStartResult,
 };
 
-const API_VERSION: u32 = 10;
+const API_VERSION: u32 = 11;
 
 fn ensure_rustls_provider() {
     static ONCE: OnceLock<()> = OnceLock::new();
@@ -4454,7 +4454,6 @@ struct TtsSession {
 }
 
 struct TtsFfiState {
-    engines: HashMap<String, Arc<chaos_core::tts::CosyVoiceEngine>>,
     sessions: HashMap<String, TtsSession>,
     sem: Arc<tokio::sync::Semaphore>,
 }
@@ -4463,39 +4462,10 @@ fn tts_state() -> &'static Mutex<TtsFfiState> {
     static STATE: OnceLock<Mutex<TtsFfiState>> = OnceLock::new();
     STATE.get_or_init(|| {
         Mutex::new(TtsFfiState {
-            engines: HashMap::new(),
             sessions: HashMap::new(),
             sem: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     })
-}
-
-fn tts_get_engine(model_dir: &str) -> Result<Arc<chaos_core::tts::CosyVoiceEngine>, String> {
-    let key = model_dir.trim().to_string();
-    if key.is_empty() {
-        return Err("modelDir is empty".into());
-    }
-
-    {
-        let locked = tts_state()
-            .lock()
-            .map_err(|_| "tts state poisoned".to_string())?;
-        if let Some(e) = locked.engines.get(&key) {
-            return Ok(e.clone());
-        }
-    }
-
-    let engine = {
-        let pack = chaos_core::tts::CosyVoicePack::load(&key).map_err(|e| e.to_string())?;
-        let engine = chaos_core::tts::CosyVoiceEngine::load(pack).map_err(|e| e.to_string())?;
-        Arc::new(engine)
-    };
-
-    let mut locked = tts_state()
-        .lock()
-        .map_err(|_| "tts state poisoned".to_string())?;
-    locked.engines.entry(key).or_insert_with(|| engine.clone());
-    Ok(engine)
 }
 
 #[unsafe(no_mangle)]
@@ -5374,6 +5344,22 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
 
         let text = params.text.clone();
         let prompt_text = params.prompt_text.clone();
+        let llm_ckpt = params
+            .llm_ckpt
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let flow_ckpt = params
+            .flow_ckpt
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let python_workdir = params
+            .python_workdir
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let python_infer_script = params
+            .python_infer_script
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
 
         let handle = runtime().spawn(async move {
             let _permit = sem
@@ -5388,47 +5374,63 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
                 st.stage = Some("loading".to_string());
             }
 
-            let model_dir_for_engine = model_dir.clone();
-            let engine =
-                match tokio::task::spawn_blocking(move || tts_get_engine(&model_dir_for_engine))
-                    .await
-                {
-                    Ok(Ok(v)) => v,
-                    Ok(Err(e)) => {
-                        let mut st = status2.lock().await;
-                        st.done = true;
-                        st.state = TtsJobState::Failed;
-                        st.stage = Some("loading".to_string());
-                        st.error = Some(e);
-                        return;
-                    }
-                    Err(e) => {
-                        let mut st = status2.lock().await;
-                        st.done = true;
-                        st.state = TtsJobState::Failed;
-                        st.stage = Some("loading".to_string());
-                        st.error = Some(e.to_string());
-                        return;
-                    }
-                };
+            // 仅使用 Python(.pt) 后端：复刻 VoiceLab 的 infer_sft.py。
+            //
+            // - llmCkpt/flowCkpt 可由请求传入；也可通过环境变量提供默认值（便于 WinUI3 “解压即用”）。
+            // - pythonWorkdir/pythonInferScript 可选；若不传则由 python_infer 读取环境变量。
+            let llm_ckpt = llm_ckpt.or_else(|| {
+                std::env::var("CHAOS_TTS_PY_LLM_CKPT")
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+            });
+            let flow_ckpt = flow_ckpt.or_else(|| {
+                std::env::var("CHAOS_TTS_PY_FLOW_CKPT")
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+            });
 
-            {
+            let Some(llm_ckpt) = llm_ckpt else {
                 let mut st = status2.lock().await;
-                st.stage = Some("llm".to_string());
-            }
+                st.done = true;
+                st.state = TtsJobState::Failed;
+                st.stage = Some("python".to_string());
+                st.error = Some(
+                    "missing llmCkpt: set request.llmCkpt or env CHAOS_TTS_PY_LLM_CKPT"
+                        .to_string(),
+                );
+                return;
+            };
+            let Some(flow_ckpt) = flow_ckpt else {
+                let mut st = status2.lock().await;
+                st.done = true;
+                st.state = TtsJobState::Failed;
+                st.stage = Some("python".to_string());
+                st.error = Some(
+                    "missing flowCkpt: set request.flowCkpt or env CHAOS_TTS_PY_FLOW_CKPT"
+                        .to_string(),
+                );
+                return;
+            };
 
             let prompt_strategy2 = match prompt_strategy {
                 TtsPromptStrategy::Inject => chaos_core::tts::PromptStrategy::Inject,
                 TtsPromptStrategy::GuidePrefix => chaos_core::tts::PromptStrategy::GuidePrefix,
             };
 
-            let params2 = chaos_core::tts::TtsSftParams {
+            {
+                let mut st = status2.lock().await;
+                st.stage = Some("python".to_string());
+            }
+
+            let tts_params = chaos_core::tts::TtsSftParams {
                 model_dir: model_dir.clone(),
                 spk_id: spk_id.clone(),
-                text,
-                prompt_text,
+                text: text.clone(),
+                prompt_text: prompt_text.clone(),
                 prompt_strategy: prompt_strategy2,
-                guide_sep,
+                guide_sep: guide_sep.clone(),
                 speed: speed as f32,
                 seed,
                 sampling: chaos_core::tts::SamplingConfig {
@@ -5442,91 +5444,37 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
             };
 
             let cancel_for_run = cancel2.clone();
-
-            {
-                let mut st = status2.lock().await;
-                st.stage = Some("infer".to_string());
-            }
-
             let res = tokio::task::spawn_blocking(
                 move || -> Result<chaos_core::tts::TtsWavResult, String> {
-                    let pcm = engine
-                        .synthesize_pcm16_with_cancel(&params2, Some(cancel_for_run.as_ref()))
-                        .map_err(|e| e.to_string())?;
-
-                    // 1) guide_prefix：按 tokenizer token 估算前缀占比，把“情绪 prompt”读出来的那一段裁掉。
-                    // 2) 然后再做一次 VAD 裁剪，去掉首尾静音/多余 padding。
-                    let mut trim = chaos_core::tts::TrimConfig::default();
-                    trim.enable_vad_trim = true;
-
-                    if matches!(
-                        params2.prompt_strategy,
-                        chaos_core::tts::PromptStrategy::GuidePrefix
-                    ) {
-                        let add_special = engine.pack().cfg.tokenizer_add_special_tokens;
-                        let r = chaos_core::tts::compute_guide_prefix_ratio_tokens(
-                            &engine.pack().tokenizer,
-                            add_special,
-                            &params2.text,
-                            &params2.prompt_text,
-                            &params2.guide_sep,
-                            params2.text_frontend,
+                    #[cfg(feature = "tts-python")]
+                    {
+                        chaos_core::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(
+                            &tts_params,
+                            &llm_ckpt,
+                            &flow_ckpt,
+                            python_workdir.as_deref(),
+                            python_infer_script.as_deref(),
+                            Some(cancel_for_run.as_ref()),
                         )
-                        .map_err(|e| e.to_string())?;
-                        if let Some(r) = r {
-                            trim.enable_prompt_trim = true;
-                            trim.prompt_prefix_ratio = Some(r);
-                        }
+                        .map_err(|e| e.to_string())
                     }
-
-                    // 优先用 silero-vad-rs（需要 modelDir/silero_vad.onnx 存在），否则退化到能量 VAD。
-                    let silero_model =
-                        std::path::PathBuf::from(&params2.model_dir).join("silero_vad.onnx");
-                    let trimmed_pcm16 = if silero_model.exists() {
-                        trim.vad.threshold = 0.5;
-                        let vad = chaos_core::tts::SileroVad::new(&silero_model)
-                            .map_err(|e| e.to_string())?;
-                        chaos_core::tts::trim_output_pcm16_with_engine(
-                            &pcm.pcm16,
-                            pcm.sample_rate,
-                            &trim,
-                            &vad,
-                        )
-                        .map_err(|e| e.to_string())?
-                    } else {
-                        let vad = chaos_core::tts::EnergyVad::default();
-                        chaos_core::tts::trim_output_pcm16_with_engine(
-                            &pcm.pcm16,
-                            pcm.sample_rate,
-                            &trim,
-                            &vad,
-                        )
-                        .map_err(|e| e.to_string())?
-                    };
-
-                    let wav_bytes = chaos_core::tts::wav::encode_wav_pcm16_mono(
-                        pcm.sample_rate,
-                        &trimmed_pcm16,
-                    )
-                    .map_err(|e| e.to_string())?;
-                    let duration_ms =
-                        chaos_core::tts::wav::duration_ms(pcm.sample_rate, trimmed_pcm16.len());
-
-                    Ok(chaos_core::tts::TtsWavResult {
-                        sample_rate: pcm.sample_rate,
-                        channels: 1,
-                        duration_ms,
-                        wav_bytes,
-                    })
+                    #[cfg(not(feature = "tts-python"))]
+                    {
+                        let _ = tts_params;
+                        let _ = llm_ckpt;
+                        let _ = flow_ckpt;
+                        Err("python backend not enabled: build chaos-ffi with feature `tts-python`".to_string())
+                    }
                 },
             )
-            .await;
+            .await
+            .map_err(|e| e.to_string());
 
             match res {
-                Ok(Ok(r)) => {
-                    let wav_b64 = base64::Engine::encode(
+                Ok(Ok(wav)) => {
+                    let wav_base64 = base64::Engine::encode(
                         &base64::engine::general_purpose::STANDARD,
-                        &r.wav_bytes,
+                        &wav.wav_bytes,
                     );
                     let mut st = status2.lock().await;
                     st.done = true;
@@ -5534,15 +5482,15 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
                     st.stage = Some("done".to_string());
                     st.result = Some(TtsAudioResult {
                         mime: "audio/wav".to_string(),
-                        wav_base64: wav_b64,
-                        sample_rate: r.sample_rate,
-                        channels: r.channels,
-                        duration_ms: r.duration_ms,
+                        wav_base64,
+                        sample_rate: wav.sample_rate,
+                        channels: wav.channels,
+                        duration_ms: wav.duration_ms,
                     });
                 }
                 Ok(Err(e)) => {
-                    let canceled = cancel2.load(Ordering::Relaxed)
-                        || e.to_string().to_lowercase().contains("canceled");
+                    let canceled =
+                        cancel2.load(Ordering::Relaxed) || e.to_lowercase().contains("canceled");
                     let mut st = status2.lock().await;
                     st.done = true;
                     st.state = if canceled {
@@ -5551,14 +5499,14 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
                         TtsJobState::Failed
                     };
                     st.stage = Some(if canceled { "canceled" } else { "failed" }.to_string());
-                    st.error = Some(e.to_string());
+                    st.error = Some(e);
                 }
                 Err(e) => {
                     let mut st = status2.lock().await;
                     st.done = true;
                     st.state = TtsJobState::Failed;
                     st.stage = Some("failed".to_string());
-                    st.error = Some(e.to_string());
+                    st.error = Some(e);
                 }
             }
         });
@@ -5871,10 +5819,30 @@ pub extern "C" fn chaos_voice_chat_stream_start_json(
             return Err(());
         }
 
-        let engine = tts_get_engine(&model_dir).map_err(|e| {
-            set_last_error("tts engine load failed", Some(e));
-        })?;
-        let sample_rate = engine.pack().cfg.sample_rate;
+        // voice chat 依赖 TTS（当前仅支持 PyO3/Python 后端），因此必须有默认 ckpt。
+        let llm_ckpt = std::env::var("CHAOS_TTS_PY_LLM_CKPT")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                set_last_error(
+                    "missing env CHAOS_TTS_PY_LLM_CKPT (required for voice chat tts)",
+                    None,
+                );
+            })?;
+        let flow_ckpt = std::env::var("CHAOS_TTS_PY_FLOW_CKPT")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                set_last_error(
+                    "missing env CHAOS_TTS_PY_FLOW_CKPT (required for voice chat tts)",
+                    None,
+                );
+            })?;
+
+        // CosyVoice3 输出采样率一般为 24k；这里作为启动时的固定元信息返回。
+        let sample_rate = 24_000u32;
 
         let session_id = gen_session_id("voice_chat");
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -5883,8 +5851,9 @@ pub extern "C" fn chaos_voice_chat_stream_start_json(
 
         let sid2 = session_id.clone();
         let queue2 = queue.clone();
-        let engine2 = engine.clone();
         let cancel2 = cancel.clone();
+        let llm_ckpt2 = llm_ckpt.clone();
+        let flow_ckpt2 = flow_ckpt.clone();
 
         let handle = runtime().spawn(async move {
             use futures_util::StreamExt;
@@ -5945,18 +5914,18 @@ pub extern "C" fn chaos_voice_chat_stream_start_json(
                 spk_id: spk_id.clone(),
                 model_dir: model_dir.clone(),
                 tts: tts_params,
+                llm_ckpt: llm_ckpt2,
+                flow_ckpt: flow_ckpt2,
+                python_workdir: None,
+                python_infer_script: None,
                 cfg: chaos_core::voice_chat::VoiceChatConfig {
                     chunk_ms,
                     ..Default::default()
                 },
             };
 
-            let mut stream = chaos_core::voice_chat::realtime_chat_stream(
-                vc_req,
-                llm_client,
-                engine2,
-                cancel2.clone(),
-            );
+            let mut stream =
+                chaos_core::voice_chat::realtime_chat_stream(vc_req, llm_client, cancel2.clone());
             while let Some(item) = stream.next().await {
                 match item {
                     Ok(chunk) => {

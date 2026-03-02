@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
+    <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
@@ -58,14 +58,22 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <RustTargetDir>$(SolutionDir)..\target</RustTargetDir>
-    <RustProfile Condition="'$(Configuration)'=='Release'">release</RustProfile>
-    <RustProfile Condition="'$(Configuration)'!='Release'">debug</RustProfile>
-    <ChaosDaemonExe>$(RustTargetDir)\$(RustProfile)\chaos-daemon.exe</ChaosDaemonExe>
-    <ChaosFfiDll>$(RustTargetDir)\$(RustProfile)\chaos_ffi.dll</ChaosFfiDll>
-    <!-- 约定：将 CosyVoice ONNX pack 放在 repo 根目录 models/cosyvoice/pack（不进 git） -->
-    <CosyVoicePackSrcDir>$(SolutionDir)..\models\cosyvoice\pack\</CosyVoicePackSrcDir>
-  </PropertyGroup>
+    <!-- 兼容两种构建方式：
+         1) 从 .sln 构建：SolutionDir 通常可用
+         2) 直接 dotnet build .csproj：SolutionDir 可能为空 -->
+    <RepoRootDir Condition="'$(SolutionDir)' != ''">$(SolutionDir)..</RepoRootDir>
+    <RepoRootDir Condition="'$(RepoRootDir)' == ''">$(MSBuildProjectDirectory)\..\..</RepoRootDir>
+
+      <RustTargetDir>$(RepoRootDir)\target</RustTargetDir>
+      <RustProfile Condition="'$(Configuration)'=='Release'">release</RustProfile>
+      <RustProfile Condition="'$(Configuration)'!='Release'">debug</RustProfile>
+      <ChaosDaemonExe>$(RustTargetDir)\$(RustProfile)\chaos-daemon.exe</ChaosDaemonExe>
+      <ChaosFfiDll>$(RustTargetDir)\$(RustProfile)\chaos_ffi.dll</ChaosFfiDll>
+      <!-- 约定：VoiceLab 推理脚本与（可选）权重同步到 third_party/voicelab_embed（默认 gitignored）。 -->
+      <VoiceLabEmbedSrcDir>$(RepoRootDir)\third_party\voicelab_embed\workflows\cosyvoice\</VoiceLabEmbedSrcDir>
+      <!-- 约定：Python runtime + venv 同步到 third_party/voicelab_py_env（默认 gitignored）。 -->
+      <VoiceLabPyEnvSrcDir>$(RepoRootDir)\third_party\voicelab_py_env\</VoiceLabPyEnvSrcDir>
+    </PropertyGroup>
 
   <Target Name="CopyChaosDaemon" AfterTargets="Build">
     <Message Importance="high" Text="Copying chaos-daemon from $(ChaosDaemonExe) to $(OutDir)" />
@@ -90,22 +98,46 @@
     <Copy SourceFiles="@(OnnxRuntimeDlls)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="@(OnnxRuntimeDlls) != ''" />
   </Target>
 
-  <Target Name="CopyCosyVoicePacks" AfterTargets="Build">
+  <Target Name="CopyVoiceLabEmbed" AfterTargets="Build">
     <!--
-      将本地 CosyVoice pack（大文件，不参与 git）复制到 WinUI3 输出目录：
-      $(OutDir)\models\cosyvoice\pack\...
+      将仓库内嵌的 VoiceLab cosyvoice workflow 复制到 WinUI3 输出目录，便于 zip 分发“解压即用”：
+      $(OutDir)\voicelab\workflows\cosyvoice\...
 
-      说明：为避免 CI / 新环境报错，这里仅在源目录存在时执行。
+      说明：该目录默认 gitignored，需要先运行同步脚本（见 docs/tts_cosyvoice3_sft.md）。
     -->
     <ItemGroup>
-      <CosyVoicePackFiles Include="$(CosyVoicePackSrcDir)**\*" Condition="Exists('$(CosyVoicePackSrcDir)')" />
+      <VoiceLabEmbedFiles Include="$(VoiceLabEmbedSrcDir)**\*" Condition="Exists('$(VoiceLabEmbedSrcDir)')" />
     </ItemGroup>
-    <Message Importance="high" Text="Copying CosyVoice packs from $(CosyVoicePackSrcDir) to $(OutDir)models\\cosyvoice\\pack" Condition="@(CosyVoicePackFiles) != ''" />
+    <Message Importance="high" Text="Copying VoiceLab embed from $(VoiceLabEmbedSrcDir) to $(OutDir)voicelab\\workflows\\cosyvoice" Condition="@(VoiceLabEmbedFiles) != ''" />
     <Copy
-      SourceFiles="@(CosyVoicePackFiles)"
-      DestinationFiles="@(CosyVoicePackFiles->'$(OutDir)models\\cosyvoice\\pack\\%(RecursiveDir)%(Filename)%(Extension)')"
+      SourceFiles="@(VoiceLabEmbedFiles)"
+      DestinationFiles="@(VoiceLabEmbedFiles->'$(OutDir)voicelab\\workflows\\cosyvoice\\%(RecursiveDir)%(Filename)%(Extension)')"
       SkipUnchangedFiles="true"
-      Condition="@(CosyVoicePackFiles) != ''" />
+      Condition="@(VoiceLabEmbedFiles) != ''" />
+  </Target>
+
+  <Target Name="CopyVoiceLabPyEnv" AfterTargets="Build">
+    <!--
+      将 Python runtime + venv 复制到 WinUI3 输出目录（仅当本地已同步该目录）：
+      - $(OutDir)\python\...     (PYTHONHOME)
+      - $(OutDir)\.venv\...      (site-packages + Library/bin)
+    -->
+    <ItemGroup>
+      <VoiceLabPyRuntimeFiles Include="$(VoiceLabPyEnvSrcDir)python\**\*" Condition="Exists('$(VoiceLabPyEnvSrcDir)python')" />
+      <VoiceLabVenvFiles Include="$(VoiceLabPyEnvSrcDir).venv\**\*" Condition="Exists('$(VoiceLabPyEnvSrcDir).venv')" />
+    </ItemGroup>
+    <Message Importance="high" Text="Copying Python runtime from $(VoiceLabPyEnvSrcDir)python to $(OutDir)python" Condition="@(VoiceLabPyRuntimeFiles) != ''" />
+    <Copy
+      SourceFiles="@(VoiceLabPyRuntimeFiles)"
+      DestinationFiles="@(VoiceLabPyRuntimeFiles->'$(OutDir)python\\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      Condition="@(VoiceLabPyRuntimeFiles) != ''" />
+    <Message Importance="high" Text="Copying venv from $(VoiceLabPyEnvSrcDir).venv to $(OutDir).venv" Condition="@(VoiceLabVenvFiles) != ''" />
+    <Copy
+      SourceFiles="@(VoiceLabVenvFiles)"
+      DestinationFiles="@(VoiceLabVenvFiles->'$(OutDir).venv\\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true"
+      Condition="@(VoiceLabVenvFiles) != ''" />
   </Target>
 
   <Target Name="WriteChaosVersion" AfterTargets="Build">

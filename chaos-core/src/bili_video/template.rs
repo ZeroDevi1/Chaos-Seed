@@ -73,7 +73,11 @@ pub fn build_output_path(
     ext: &str,
 ) -> PathBuf {
     let use_multi = total_pages > 1;
-    let ptn = if use_multi { multi_file_pattern } else { file_pattern };
+    let ptn = if use_multi {
+        multi_file_pattern
+    } else {
+        file_pattern
+    };
     let rendered = render_bbdown_pattern(ptn, vars);
     let mut rel = sanitize_rel_path(&rendered);
 
@@ -91,7 +95,10 @@ pub fn build_output_path(
     };
     if !ext.trim().is_empty() {
         let e = ext.trim().trim_start_matches('.');
-        if !e.is_empty() && !name.to_ascii_lowercase().ends_with(&format!(".{e}").to_ascii_lowercase())
+        if !e.is_empty()
+            && !name
+                .to_ascii_lowercase()
+                .ends_with(&format!(".{e}").to_ascii_lowercase())
         {
             name.push('.');
             name.push_str(e);
@@ -104,4 +111,3 @@ pub fn build_output_path(
 
     out_dir.join(rel)
 }
-

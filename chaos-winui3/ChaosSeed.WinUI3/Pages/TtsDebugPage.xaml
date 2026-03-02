@@ -29,7 +29,7 @@
                 <StackPanel Grid.Row="0" Spacing="6">
                     <TextBlock Text="TTS（CosyVoice）调试" FontSize="28" FontWeight="SemiBold" />
                     <TextBlock
-                        Text="通过 daemon 的 tts.sft.start/status/cancel 生成 WAV（只保存在内存里；选择保存后才落盘）。"
+                        Text="通过 daemon / FFI 的 tts.sft.start/status/cancel 生成 WAV（只保存在内存里；选择保存后才落盘）。"
                         Opacity="0.8"
                         TextWrapping="Wrap" />
                 </StackPanel>
@@ -42,16 +42,22 @@
                         <TextBlock Text="模型与基础参数" FontSize="18" FontWeight="SemiBold" />
 
                         <TextBlock
-                            Text="建议将导出的 pack 放在程序目录下：models/cosyvoice/pack（默认值）。如需更好的裁剪效果，请把 silero_vad.onnx 放到同一目录。"
+                            Text="默认会使用打包内置的 VoiceLab cosyvoice workflow + dream_sft 权重（解压即用）。modelDir 对应 infer_sft.py 的 --model_dir，可为绝对路径，也可相对 pythonWorkdir。"
                             Opacity="0.75"
                             TextWrapping="Wrap" />
 
-                        <TextBox x:Name="ModelDirBox" PlaceholderText="modelDir（CosyVoice pack 目录）" TextWrapping="Wrap" />
+                        <TextBox x:Name="ModelDirBox" PlaceholderText="modelDir（infer_sft.py --model_dir，可相对 pythonWorkdir）" TextWrapping="Wrap" />
 
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <TextBox x:Name="SpkIdBox" Width="220" PlaceholderText="spkId（如 dream）" />
-                            <Button Content="选择模型目录" Click="OnPickModelDirClicked" />
+                            <Button Content="选择 modelDir 目录" Click="OnPickModelDirClicked" />
                         </StackPanel>
+
+                        <ComboBox x:Name="BackendBox" Header="TTS 后端（Auto=优先 daemon，失败回落 FFI）">
+                            <ComboBoxItem Content="auto" IsSelected="True" />
+                            <ComboBoxItem Content="daemon" />
+                            <ComboBoxItem Content="ffi" />
+                        </ComboBox>
 
                         <StackPanel Orientation="Horizontal" Spacing="16">
                             <CheckBox x:Name="AutoPlayToggle" Content="生成完成自动播放" IsChecked="True" />
@@ -81,6 +87,12 @@
 
                         <muxc:Expander Header="高级参数" IsExpanded="False">
                             <StackPanel Spacing="10" Margin="0,10,0,0">
+                                <TextBlock Text="Python(.pt) 兼容后端（可选）" Opacity="0.75" TextWrapping="Wrap" />
+                                <TextBox x:Name="LlmCkptBox" Header="llmCkpt（.pt，可选）" PlaceholderText="exp/.../epoch_xxx.pt" TextWrapping="Wrap" />
+                                <TextBox x:Name="FlowCkptBox" Header="flowCkpt（.pt，可选）" PlaceholderText="exp/.../flow_avg.pt" TextWrapping="Wrap" />
+                                <TextBox x:Name="PythonWorkdirBox" Header="pythonWorkdir（可选，未填则用 env CHAOS_TTS_PY_WORKDIR）" PlaceholderText=".../VoiceLab/workflows/cosyvoice" TextWrapping="Wrap" />
+                                <TextBox x:Name="PythonInferScriptBox" Header="pythonInferScript（可选，默认 tools/infer_sft.py）" PlaceholderText="tools/infer_sft.py" TextWrapping="Wrap" />
+
                                 <ComboBox x:Name="PromptStrategyBox" Header="promptStrategy">
                                     <ComboBoxItem Content="inject" />
                                     <ComboBoxItem Content="guide_prefix" IsSelected="True" />

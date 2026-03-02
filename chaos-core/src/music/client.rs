@@ -39,10 +39,34 @@ impl MusicClient {
         page_size: u32,
     ) -> Result<Vec<MusicTrack>, MusicError> {
         match service {
-            MusicService::Qq => qq::search_tracks(&self.http, keyword, page, page_size, self.timeout).await,
-            MusicService::Kuwo => kuwo::search_tracks(&self.http, keyword, page, page_size, self.timeout).await,
-            MusicService::Kugou => kugou::search_tracks(&self.http, &self.cfg, keyword, page, page_size, self.timeout).await,
-            MusicService::Netease => netease::search_tracks(&self.http, &self.cfg, keyword, page, page_size, self.timeout).await,
+            MusicService::Qq => {
+                qq::search_tracks(&self.http, keyword, page, page_size, self.timeout).await
+            }
+            MusicService::Kuwo => {
+                kuwo::search_tracks(&self.http, keyword, page, page_size, self.timeout).await
+            }
+            MusicService::Kugou => {
+                kugou::search_tracks(
+                    &self.http,
+                    &self.cfg,
+                    keyword,
+                    page,
+                    page_size,
+                    self.timeout,
+                )
+                .await
+            }
+            MusicService::Netease => {
+                netease::search_tracks(
+                    &self.http,
+                    &self.cfg,
+                    keyword,
+                    page,
+                    page_size,
+                    self.timeout,
+                )
+                .await
+            }
         }
     }
 
@@ -54,10 +78,34 @@ impl MusicClient {
         page_size: u32,
     ) -> Result<Vec<MusicAlbum>, MusicError> {
         match service {
-            MusicService::Qq => qq::search_albums(&self.http, keyword, page, page_size, self.timeout).await,
-            MusicService::Kuwo => kuwo::search_albums(&self.http, keyword, page, page_size, self.timeout).await,
-            MusicService::Kugou => kugou::search_albums(&self.http, &self.cfg, keyword, page, page_size, self.timeout).await,
-            MusicService::Netease => netease::search_albums(&self.http, &self.cfg, keyword, page, page_size, self.timeout).await,
+            MusicService::Qq => {
+                qq::search_albums(&self.http, keyword, page, page_size, self.timeout).await
+            }
+            MusicService::Kuwo => {
+                kuwo::search_albums(&self.http, keyword, page, page_size, self.timeout).await
+            }
+            MusicService::Kugou => {
+                kugou::search_albums(
+                    &self.http,
+                    &self.cfg,
+                    keyword,
+                    page,
+                    page_size,
+                    self.timeout,
+                )
+                .await
+            }
+            MusicService::Netease => {
+                netease::search_albums(
+                    &self.http,
+                    &self.cfg,
+                    keyword,
+                    page,
+                    page_size,
+                    self.timeout,
+                )
+                .await
+            }
         }
     }
 
@@ -69,10 +117,34 @@ impl MusicClient {
         page_size: u32,
     ) -> Result<Vec<MusicArtist>, MusicError> {
         match service {
-            MusicService::Qq => qq::search_artists(&self.http, keyword, page, page_size, self.timeout).await,
-            MusicService::Kuwo => kuwo::search_artists(&self.http, keyword, page, page_size, self.timeout).await,
-            MusicService::Kugou => kugou::search_artists(&self.http, &self.cfg, keyword, page, page_size, self.timeout).await,
-            MusicService::Netease => netease::search_artists(&self.http, &self.cfg, keyword, page, page_size, self.timeout).await,
+            MusicService::Qq => {
+                qq::search_artists(&self.http, keyword, page, page_size, self.timeout).await
+            }
+            MusicService::Kuwo => {
+                kuwo::search_artists(&self.http, keyword, page, page_size, self.timeout).await
+            }
+            MusicService::Kugou => {
+                kugou::search_artists(
+                    &self.http,
+                    &self.cfg,
+                    keyword,
+                    page,
+                    page_size,
+                    self.timeout,
+                )
+                .await
+            }
+            MusicService::Netease => {
+                netease::search_artists(
+                    &self.http,
+                    &self.cfg,
+                    keyword,
+                    page,
+                    page_size,
+                    self.timeout,
+                )
+                .await
+            }
         }
     }
 
@@ -84,8 +156,12 @@ impl MusicClient {
         match service {
             MusicService::Qq => qq::album_tracks(&self.http, album_id, self.timeout).await,
             MusicService::Kuwo => kuwo::album_tracks(&self.http, album_id, self.timeout).await,
-            MusicService::Kugou => kugou::album_tracks(&self.http, &self.cfg, album_id, self.timeout).await,
-            MusicService::Netease => netease::album_tracks(&self.http, &self.cfg, album_id, self.timeout).await,
+            MusicService::Kugou => {
+                kugou::album_tracks(&self.http, &self.cfg, album_id, self.timeout).await
+            }
+            MusicService::Netease => {
+                netease::album_tracks(&self.http, &self.cfg, album_id, self.timeout).await
+            }
         }
     }
 
@@ -97,8 +173,12 @@ impl MusicClient {
         match service {
             MusicService::Qq => qq::artist_albums(&self.http, artist_id, self.timeout).await,
             MusicService::Kuwo => kuwo::artist_albums(&self.http, artist_id, self.timeout).await,
-            MusicService::Kugou => kugou::artist_albums(&self.http, &self.cfg, artist_id, self.timeout).await,
-            MusicService::Netease => netease::artist_albums(&self.http, &self.cfg, artist_id, self.timeout).await,
+            MusicService::Kugou => {
+                kugou::artist_albums(&self.http, &self.cfg, artist_id, self.timeout).await
+            }
+            MusicService::Netease => {
+                netease::artist_albums(&self.http, &self.cfg, artist_id, self.timeout).await
+            }
         }
     }
 
@@ -111,11 +191,34 @@ impl MusicClient {
     ) -> Result<(String, String), MusicError> {
         // returns (url, file_ext)
         match service {
-            MusicService::Qq => qq::track_download_url(&self.http, track_id, quality_id, auth, self.timeout).await,
-            MusicService::Kuwo => kuwo::track_download_url(&self.http, track_id, quality_id, self.timeout).await,
-            MusicService::Kugou => kugou::track_download_url(&self.http, &self.cfg, track_id, quality_id, auth, self.timeout).await,
-            MusicService::Netease => netease::track_download_url(&self.http, &self.cfg, track_id, quality_id, auth, self.timeout).await,
+            MusicService::Qq => {
+                qq::track_download_url(&self.http, track_id, quality_id, auth, self.timeout).await
+            }
+            MusicService::Kuwo => {
+                kuwo::track_download_url(&self.http, track_id, quality_id, self.timeout).await
+            }
+            MusicService::Kugou => {
+                kugou::track_download_url(
+                    &self.http,
+                    &self.cfg,
+                    track_id,
+                    quality_id,
+                    auth,
+                    self.timeout,
+                )
+                .await
+            }
+            MusicService::Netease => {
+                netease::track_download_url(
+                    &self.http,
+                    &self.cfg,
+                    track_id,
+                    quality_id,
+                    auth,
+                    self.timeout,
+                )
+                .await
+            }
         }
     }
 }
-

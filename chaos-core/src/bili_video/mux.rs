@@ -21,8 +21,13 @@ pub async fn mux_ffmpeg(
     if bin.is_empty() {
         return Err(BiliError::InvalidInput("ffmpegPath is empty".to_string()));
     }
-    if video_path.as_os_str().is_empty() || audio_path.as_os_str().is_empty() || out_path.as_os_str().is_empty() {
-        return Err(BiliError::InvalidInput("empty input/output path".to_string()));
+    if video_path.as_os_str().is_empty()
+        || audio_path.as_os_str().is_empty()
+        || out_path.as_os_str().is_empty()
+    {
+        return Err(BiliError::InvalidInput(
+            "empty input/output path".to_string(),
+        ));
     }
 
     if let Some(parent) = out_path.parent() {
@@ -68,7 +73,10 @@ pub async fn mux_ffmpeg(
             }
         }
     } else {
-        let st = child.wait().await.map_err(|e| BiliError::Mux(e.to_string()))?;
+        let st = child
+            .wait()
+            .await
+            .map_err(|e| BiliError::Mux(e.to_string()))?;
         if st.success() {
             Ok(())
         } else {
@@ -76,4 +84,3 @@ pub async fn mux_ffmpeg(
         }
     }
 }
-

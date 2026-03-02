@@ -97,12 +97,13 @@ public sealed class SettingsService
             changed = true;
         }
 
-        // TTS: 默认从程序目录下读取模型 pack（便于 zip 分发）。
+        // TTS: 默认使用打包内的 dream_sft 相对路径（便于 zip 分发）。
         if (string.IsNullOrWhiteSpace(Current.TtsCosyVoicePackDir))
         {
             try
             {
-                Current.TtsCosyVoicePackDir = Path.Combine(AppContext.BaseDirectory, "models", "cosyvoice", "pack");
+                // infer_sft.py 的 --model_dir 支持相对 pythonWorkdir（更适合分发）。
+                Current.TtsCosyVoicePackDir = "pretrained_models/Fun-CosyVoice3-0.5B-dream-sft";
                 changed = true;
             }
             catch

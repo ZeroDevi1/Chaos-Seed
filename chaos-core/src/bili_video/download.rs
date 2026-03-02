@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use reqwest::header::HeaderMap;
 use reqwest::Client;
+use reqwest::header::HeaderMap;
 use tokio::io::AsyncWriteExt;
 
 use super::BiliError;
@@ -38,7 +38,11 @@ fn parse_total_from_content_range(v: &str) -> Option<u64> {
     total.trim().parse::<u64>().ok()
 }
 
-pub async fn probe_size(http: &Client, url: &str, headers: &HeaderMap) -> Result<(Option<u64>, bool), BiliError> {
+pub async fn probe_size(
+    http: &Client,
+    url: &str,
+    headers: &HeaderMap,
+) -> Result<(Option<u64>, bool), BiliError> {
     const DL_TIMEOUT: Duration = Duration::from_secs(60 * 5);
     let resp = http
         .get(url)
@@ -72,7 +76,7 @@ pub async fn download_to_file_single(
     overwrite: bool,
     cancel: Option<&Arc<AtomicBool>>,
     progress: Option<ProgressCb>,
-    ) -> Result<u64, BiliError> {
+) -> Result<u64, BiliError> {
     if out_path.exists() && !overwrite {
         return Err(BiliError::Io("target exists".to_string()));
     }
@@ -180,7 +184,8 @@ async fn download_range_part(
             }
             let chunk: Bytes = chunk.map_err(|e| BiliError::Http(e.to_string()))?;
             f.write_all(&chunk).await?;
-            let total_now = progress_total.fetch_add(chunk.len() as u64, Ordering::Relaxed)
+            let total_now = progress_total
+                .fetch_add(chunk.len() as u64, Ordering::Relaxed)
                 .saturating_add(chunk.len() as u64);
             if let Some(cb) = progress.as_ref() {
                 cb(total_now, total_opt);
@@ -219,7 +224,10 @@ pub async fn download_to_file_ranged(
     }
     let conc = concurrency.clamp(1, 16);
     if !can_range || total_opt.unwrap_or(0) < 2 * 1024 * 1024 || conc <= 1 {
-        return download_to_file_single(http, url, headers, out_path, retries, overwrite, cancel, progress).await;
+        return download_to_file_single(
+            http, url, headers, out_path, retries, overwrite, cancel, progress,
+        )
+        .await;
     }
     let total = total_opt.unwrap();
 

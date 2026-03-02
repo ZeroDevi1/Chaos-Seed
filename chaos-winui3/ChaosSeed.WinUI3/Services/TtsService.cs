@@ -2,26 +2,33 @@ using ChaosSeed.WinUI3.Models.Tts;
 
 namespace ChaosSeed.WinUI3.Services;
 
+using ChaosSeed.WinUI3.Services.TtsBackends;
+
 public sealed class TtsService
 {
-    private readonly DaemonClient _daemon;
+    private readonly ITtsBackend _backend;
+
+    public TtsService(ITtsBackend backend)
+    {
+        _backend = backend ?? throw new ArgumentNullException(nameof(backend));
+    }
 
     public TtsService(DaemonClient daemon)
+        : this(new DaemonTtsBackend(daemon))
     {
-        _daemon = daemon ?? throw new ArgumentNullException(nameof(daemon));
     }
 
     public Task<TtsSftStartResult> StartSftAsync(TtsSftStartParams p, CancellationToken ct = default)
     {
         if (p is null) throw new ArgumentNullException(nameof(p));
-        return _daemon.TtsSftStartAsync(p, ct);
+        return _backend.StartSftAsync(p, ct);
     }
 
     public Task<TtsSftStatus> StatusAsync(string sessionId, CancellationToken ct = default) =>
-        _daemon.TtsSftStatusAsync(sessionId, ct);
+        _backend.StatusAsync(sessionId, ct);
 
     public Task CancelAsync(string sessionId, CancellationToken ct = default) =>
-        _daemon.TtsSftCancelAsync(sessionId, ct);
+        _backend.CancelAsync(sessionId, ct);
 
     public async Task<(string SessionId, TtsAudioResult Meta, byte[] WavBytes)> SynthesizeSftToWavBytesAsync(
         TtsSftStartParams p,
@@ -32,7 +39,7 @@ public sealed class TtsService
     {
         if (p is null) throw new ArgumentNullException(nameof(p));
 
-        var start = await _daemon.TtsSftStartAsync(p, ct);
+        var start = await _backend.StartSftAsync(p, ct);
         var sid = (start.SessionId ?? "").Trim();
         if (string.IsNullOrWhiteSpace(sid))
         {
@@ -43,7 +50,7 @@ public sealed class TtsService
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var st = await _daemon.TtsSftStatusAsync(sid, ct);
+            var st = await _backend.StatusAsync(sid, ct);
             progress?.Report(st);
             if (!st.Done)
             {

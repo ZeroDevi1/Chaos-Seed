@@ -229,11 +229,20 @@ char* chaos_subtitle_search_json(
 
 输入：`TtsSftStartParams` JSON（camelCase），示例：
 
+备注：
+- 当前仅支持 Python(.pt) 后端：通过嵌入式 Python 执行 `infer_sft.py`。
+- `modelDir` 对应 python 的 `--model_dir`（常见为 `pretrained_models/...`，可为绝对路径或相对 `pythonWorkdir`）。
+- `llmCkpt/flowCkpt` 可在请求中显式传入；若不传，则会尝试读取环境变量 `CHAOS_TTS_PY_LLM_CKPT/CHAOS_TTS_PY_FLOW_CKPT`（便于 WinUI3 “解压即用”）。
+
 ```json
 {
-  "modelDir": "D:/models/Fun-CosyVoice3-0.5B-dream-sft-pack",
+  "modelDir": "pretrained_models/Fun-CosyVoice3-0.5B-dream-sft",
   "spkId": "dream",
   "text": "你好",
+  "llmCkpt": "exp/dream_sft/llm/torch_ddp/epoch_5_whole.pt",
+  "flowCkpt": "exp/dream_sft/flow/torch_ddp/flow_avg.pt",
+  "pythonWorkdir": null,
+  "pythonInferScript": null,
   "promptText": "<|endofprompt|>",
   "promptStrategy": "inject",
   "guideSep": "。 ",
@@ -262,7 +271,7 @@ char* chaos_subtitle_search_json(
 {
   "done": false,
   "state": "running",
-  "stage": "llm",
+  "stage": "python",
   "error": null,
   "result": null
 }
@@ -344,7 +353,7 @@ char* chaos_subtitle_search_json(
 
 ```json
 {
-  "modelDir": "D:/models/Fun-CosyVoice3-0.5B-dream-sft-pack",
+  "modelDir": "pretrained_models/Fun-CosyVoice3-0.5B-dream-sft",
   "spkId": "dream",
   "messages": [
     { "role": "user", "content": "你好" }

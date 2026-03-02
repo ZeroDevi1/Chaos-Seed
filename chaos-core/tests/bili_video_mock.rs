@@ -1,12 +1,9 @@
-use chaos_core::bili_video::auth::{AuthState, refresh_cookie_if_needed_with};
 use chaos_core::bili_video::auth::login_qr_poll;
+use chaos_core::bili_video::auth::{AuthState, refresh_cookie_if_needed_with};
 use chaos_core::bili_video::parse::{ParsedInput, fetch_view_info, parse_input, parse_video_id};
 use chaos_core::bili_video::pgc::{fetch_pgc_season_by_ep_id, fetch_pgc_season_by_season_id};
 use chaos_core::bili_video::playurl::{
-    choose_qn_by_dfn_priority,
-    fetch_playurl_dash,
-    fetch_playurl_dash_pgc_web,
-    pick_dash_tracks,
+    choose_qn_by_dfn_priority, fetch_playurl_dash, fetch_playurl_dash_pgc_web, pick_dash_tracks,
 };
 use chaos_core::bili_video::select_page::select_page_indices;
 use chaos_core::bili_video::subtitle::bcc_json_to_srt;
@@ -40,7 +37,8 @@ async fn parse_input_follows_redirect_and_detects_bv_or_ep() {
 
     server.mock(|when, then| {
         when.method(GET).path("/short_bv");
-        then.status(302).header("location", format!("{base}/video/BV1AB411c7mD"));
+        then.status(302)
+            .header("location", format!("{base}/video/BV1AB411c7mD"));
     });
     server.mock(|when, then| {
         when.method(GET).path("/video/BV1AB411c7mD");
@@ -49,7 +47,8 @@ async fn parse_input_follows_redirect_and_detects_bv_or_ep() {
 
     server.mock(|when, then| {
         when.method(GET).path("/short_ep");
-        then.status(302).header("location", format!("{base}/bangumi/play/ep12345"));
+        then.status(302)
+            .header("location", format!("{base}/bangumi/play/ep12345"));
     });
     server.mock(|when, then| {
         when.method(GET).path("/bangumi/play/ep12345");
@@ -57,13 +56,17 @@ async fn parse_input_follows_redirect_and_detects_bv_or_ep() {
     });
 
     let client = mk_client(&base);
-    let p = parse_input(&client, &format!("{base}/short_bv")).await.expect("parse");
+    let p = parse_input(&client, &format!("{base}/short_bv"))
+        .await
+        .expect("parse");
     match p {
         ParsedInput::Video(v) => assert_eq!(v.bvid.as_deref(), Some("BV1AB411c7mD")),
         _ => panic!("expect video"),
     }
 
-    let p = parse_input(&client, &format!("{base}/short_ep")).await.expect("parse");
+    let p = parse_input(&client, &format!("{base}/short_ep"))
+        .await
+        .expect("parse");
     assert!(matches!(p, ParsedInput::BangumiEpisode { ep_id } if ep_id == "12345"));
 }
 
@@ -152,10 +155,17 @@ async fn view_and_playurl_dash_pick_codec_and_quality() {
     let view = fetch_view_info(&client, &id, None).await.expect("view");
     assert_eq!(view.pages.len(), 1);
 
-    let qn = choose_qn_by_dfn_priority(&[127, 80], &["8K 超高清".to_string(), "1080P 高码率".to_string()], "1080P 高码率,8K 超高清").unwrap();
+    let qn = choose_qn_by_dfn_priority(
+        &[127, 80],
+        &["8K 超高清".to_string(), "1080P 高码率".to_string()],
+        "1080P 高码率,8K 超高清",
+    )
+    .unwrap();
     assert_eq!(qn, 80);
 
-    let p = fetch_playurl_dash(&client, &view.bvid, &view.aid, &view.pages[0].cid, qn, None).await.expect("playurl");
+    let p = fetch_playurl_dash(&client, &view.bvid, &view.aid, &view.pages[0].cid, qn, None)
+        .await
+        .expect("playurl");
     let (v, _a) = pick_dash_tracks(&p, "hevc,avc").expect("pick");
     assert_eq!(v.base_url, "http://v_hevc");
 }
@@ -210,10 +220,14 @@ async fn pgc_fetch_season_and_playurl_web_mocked_ok() {
     });
 
     let client = mk_client(&base);
-    let season = fetch_pgc_season_by_ep_id(&client, "12345", None).await.expect("season");
+    let season = fetch_pgc_season_by_ep_id(&client, "12345", None)
+        .await
+        .expect("season");
     assert_eq!(season.title, "S");
     assert_eq!(season.episodes.len(), 2);
-    let season2 = fetch_pgc_season_by_season_id(&client, "999", None).await.expect("season");
+    let season2 = fetch_pgc_season_by_season_id(&client, "999", None)
+        .await
+        .expect("season");
     assert_eq!(season2.episodes[0].ep_id, "12345");
 
     let ep = &season.episodes[0];
@@ -244,7 +258,8 @@ async fn refresh_cookie_flow_mocked_ok() {
 
     server.mock(|when, then| {
         when.method(GET).path("/x/frontend/finger/spi");
-        then.status(200).json_body(serde_json::json!({"code":0,"data":{"b_3":"b3","b_4":"b4"}}));
+        then.status(200)
+            .json_body(serde_json::json!({"code":0,"data":{"b_3":"b3","b_4":"b4"}}));
     });
 
     server.mock(|when, then| {
@@ -261,7 +276,8 @@ async fn refresh_cookie_flow_mocked_ok() {
     });
 
     server.mock(|when, then| {
-        when.method(POST).path("/x/passport-login/web/cookie/refresh");
+        when.method(POST)
+            .path("/x/passport-login/web/cookie/refresh");
         then.status(200)
             .header("set-cookie", "SESSDATA=newsess; Path=/; HttpOnly")
             .header("set-cookie", "bili_jct=newcsrf; Path=/")
@@ -272,8 +288,10 @@ async fn refresh_cookie_flow_mocked_ok() {
     });
 
     server.mock(|when, then| {
-        when.method(POST).path("/x/passport-login/web/confirm/refresh");
-        then.status(200).json_body(serde_json::json!({ "code": 0, "data": {} }));
+        when.method(POST)
+            .path("/x/passport-login/web/confirm/refresh");
+        then.status(200)
+            .json_body(serde_json::json!({ "code": 0, "data": {} }));
     });
 
     let client = mk_client(&base);
@@ -298,7 +316,8 @@ async fn refresh_cookie_merge_preserves_old_cookie_fields() {
 
     server.mock(|when, then| {
         when.method(GET).path("/x/frontend/finger/spi");
-        then.status(200).json_body(serde_json::json!({"code":0,"data":{"b_3":"b3","b_4":"b4"}}));
+        then.status(200)
+            .json_body(serde_json::json!({"code":0,"data":{"b_3":"b3","b_4":"b4"}}));
     });
 
     server.mock(|when, then| {
@@ -316,7 +335,8 @@ async fn refresh_cookie_merge_preserves_old_cookie_fields() {
 
     // Refresh response does NOT include DedeUserID, but we should not drop it.
     server.mock(|when, then| {
-        when.method(POST).path("/x/passport-login/web/cookie/refresh");
+        when.method(POST)
+            .path("/x/passport-login/web/cookie/refresh");
         then.status(200)
             .header("set-cookie", "SESSDATA=newsess; Path=/; HttpOnly")
             .header("set-cookie", "bili_jct=newcsrf; Path=/")
@@ -327,8 +347,10 @@ async fn refresh_cookie_merge_preserves_old_cookie_fields() {
     });
 
     server.mock(|when, then| {
-        when.method(POST).path("/x/passport-login/web/confirm/refresh");
-        then.status(200).json_body(serde_json::json!({ "code": 0, "data": {} }));
+        when.method(POST)
+            .path("/x/passport-login/web/confirm/refresh");
+        then.status(200)
+            .json_body(serde_json::json!({ "code": 0, "data": {} }));
     });
 
     let client = mk_client(&base);

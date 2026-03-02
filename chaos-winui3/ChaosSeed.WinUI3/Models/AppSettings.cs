@@ -31,6 +31,7 @@ public sealed class AppSettings
     public LiveBackendMode LyricsBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode DanmakuBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode MusicBackendMode { get; set; } = LiveBackendMode.Auto;
+    public LiveBackendMode TtsBackendMode { get; set; } = LiveBackendMode.Auto;
 
     public bool LyricsAutoDetect { get; set; } = false;
     public string[] LyricsProviders { get; set; } = new[] { "qq", "netease", "lrclib" };
@@ -85,7 +86,8 @@ public sealed class AppSettings
 
     // ----- tts (CosyVoice) -----
 
-    // CosyVoice pack 目录（默认读取程序目录下的 models/cosyvoice/pack，方便打包分发）。
+    // infer_sft.py 的 --model_dir（可为绝对路径；也可相对 pythonWorkdir）。
+    // 备注：字段名为历史遗留（早期用于 CosyVoice3 candle / ONNX pack），此处保留以兼容旧 settings 文件。
     public string? TtsCosyVoicePackDir { get; set; }
     public string TtsLastSpkId { get; set; } = "dream";
 

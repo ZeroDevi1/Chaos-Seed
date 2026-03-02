@@ -14,4 +14,3 @@ fn qq_cookie_allows_numeric_musicid() {
     assert_eq!(c.musicid.as_deref(), Some("553740271"));
     assert_eq!(c.musickey.as_deref(), Some("abc"));
 }
-

@@ -33,10 +33,10 @@ async fn track_download_url_falls_back_when_song_download_url_is_empty() {
     };
     let auth = AuthState::default();
 
-    let (url, ext) = netease::track_download_url(&http, &cfg, "1", "flac", &auth, Duration::from_secs(2))
-        .await
-        .expect("download url");
+    let (url, ext) =
+        netease::track_download_url(&http, &cfg, "1", "flac", &auth, Duration::from_secs(2))
+            .await
+            .expect("download url");
     assert_eq!(url, "http://example.com/audio.flac");
     assert_eq!(ext, "flac");
 }
-

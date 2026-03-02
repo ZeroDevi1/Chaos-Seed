@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 
 use crate::music::error::MusicError;
@@ -136,8 +136,16 @@ impl<'a> KugouClient<'a> {
         };
         let token = u.token.trim();
         let userid = u.userid.trim();
-        let token = if token.is_empty() { None } else { Some(token.to_string()) };
-        let userid = if userid.is_empty() { None } else { Some(userid.to_string()) };
+        let token = if token.is_empty() {
+            None
+        } else {
+            Some(token.to_string())
+        };
+        let userid = if userid.is_empty() {
+            None
+        } else {
+            Some(userid.to_string())
+        };
         (token, userid)
     }
 
@@ -164,27 +172,56 @@ impl<'a> KugouClient<'a> {
         params
     }
 
-    fn build_headers(router: Option<&str>, kg_tid: Option<&str>, clienttime: &str) -> Result<HeaderMap, MusicError> {
+    fn build_headers(
+        router: Option<&str>,
+        kg_tid: Option<&str>,
+        clienttime: &str,
+    ) -> Result<HeaderMap, MusicError> {
         let dev = device();
         let mut h = HeaderMap::new();
-        h.insert(reqwest::header::USER_AGENT, HeaderValue::from_static(DEFAULT_UA));
-        h.insert("dfid", HeaderValue::from_str(&dev.dfid).map_err(|e| MusicError::Other(e.to_string()))?);
-        h.insert("mid", HeaderValue::from_str(&dev.mid).map_err(|e| MusicError::Other(e.to_string()))?);
-        h.insert("clienttime", HeaderValue::from_str(clienttime).map_err(|e| MusicError::Other(e.to_string()))?);
+        h.insert(
+            reqwest::header::USER_AGENT,
+            HeaderValue::from_static(DEFAULT_UA),
+        );
+        h.insert(
+            "dfid",
+            HeaderValue::from_str(&dev.dfid).map_err(|e| MusicError::Other(e.to_string()))?,
+        );
+        h.insert(
+            "mid",
+            HeaderValue::from_str(&dev.mid).map_err(|e| MusicError::Other(e.to_string()))?,
+        );
+        h.insert(
+            "clienttime",
+            HeaderValue::from_str(clienttime).map_err(|e| MusicError::Other(e.to_string()))?,
+        );
         h.insert("kg-rc", HeaderValue::from_static("1"));
         h.insert("kg-thash", HeaderValue::from_static("5d816a0"));
         h.insert("kg-rec", HeaderValue::from_static("1"));
-        h.insert("kg-rf", HeaderValue::from_static("B9EDA08A64250DEFFBCADDEE00F8F25F"));
+        h.insert(
+            "kg-rf",
+            HeaderValue::from_static("B9EDA08A64250DEFFBCADDEE00F8F25F"),
+        );
         if let Some(r) = router.map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            h.insert("x-router", HeaderValue::from_str(r).map_err(|e| MusicError::Other(e.to_string()))?);
+            h.insert(
+                "x-router",
+                HeaderValue::from_str(r).map_err(|e| MusicError::Other(e.to_string()))?,
+            );
         }
         if let Some(t) = kg_tid.map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            h.insert("kg-tid", HeaderValue::from_str(t).map_err(|e| MusicError::Other(e.to_string()))?);
+            h.insert(
+                "kg-tid",
+                HeaderValue::from_str(t).map_err(|e| MusicError::Other(e.to_string()))?,
+            );
         }
         Ok(h)
     }
 
-    fn sign_params(params: &BTreeMap<String, String>, data: Option<&str>, encrypt: EncryptType) -> String {
+    fn sign_params(
+        params: &BTreeMap<String, String>,
+        data: Option<&str>,
+        encrypt: EncryptType,
+    ) -> String {
         match encrypt {
             EncryptType::Android => signatures::signature_android_params(params, data),
             EncryptType::Web => signatures::signature_web_params(params),
@@ -267,8 +304,17 @@ impl<'a> KugouClient<'a> {
         auth: Option<&AuthState>,
         timeout: Duration,
     ) -> Result<Value, MusicError> {
-        self.request_get(&self.endpoints.gateway_base, path, Some(router), None, params, EncryptType::Android, auth, timeout)
-            .await
+        self.request_get(
+            &self.endpoints.gateway_base,
+            path,
+            Some(router),
+            None,
+            params,
+            EncryptType::Android,
+            auth,
+            timeout,
+        )
+        .await
     }
 
     pub async fn gateway_post(
@@ -300,8 +346,17 @@ impl<'a> KugouClient<'a> {
         params: BTreeMap<String, String>,
         timeout: Duration,
     ) -> Result<Value, MusicError> {
-        self.request_get(&self.endpoints.login_base, path, None, None, params, EncryptType::Web, None, timeout)
-            .await
+        self.request_get(
+            &self.endpoints.login_base,
+            path,
+            None,
+            None,
+            params,
+            EncryptType::Web,
+            None,
+            timeout,
+        )
+        .await
     }
 
     pub async fn tracker_post(

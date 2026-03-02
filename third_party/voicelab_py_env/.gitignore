@@ -1,0 +1,5 @@
+# 默认不提交 Python runtime / venv（体积巨大，只用于本地分发 / 离线运行）。
+*
+!.gitignore
+!README.md
+
