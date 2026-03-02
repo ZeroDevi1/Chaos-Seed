@@ -69,8 +69,12 @@
       <RustProfile Condition="'$(Configuration)'!='Release'">debug</RustProfile>
       <ChaosDaemonExe>$(RustTargetDir)\$(RustProfile)\chaos-daemon.exe</ChaosDaemonExe>
       <ChaosFfiDll>$(RustTargetDir)\$(RustProfile)\chaos_ffi.dll</ChaosFfiDll>
-      <!-- 约定：VoiceLab 推理脚本与（可选）权重同步到 third_party/voicelab_embed（默认 gitignored）。 -->
-      <VoiceLabEmbedSrcDir>$(RepoRootDir)\third_party\voicelab_embed\workflows\cosyvoice\</VoiceLabEmbedSrcDir>
+      <!--
+        约定：VoiceLab 推理脚本/源码与（可选）权重同步到 third_party/voicelab_embed（默认 gitignored）。
+        注意：infer_sft.py 依赖 vendor/CosyVoice 下的 `cosyvoice` 源码，因此这里需要复制整个 voicelab_embed 根目录，
+        而不能只复制 workflows/cosyvoice。
+      -->
+      <VoiceLabEmbedSrcDir>$(RepoRootDir)\third_party\voicelab_embed\</VoiceLabEmbedSrcDir>
       <!-- 约定：Python runtime + venv 同步到 third_party/voicelab_py_env（默认 gitignored）。 -->
       <VoiceLabPyEnvSrcDir>$(RepoRootDir)\third_party\voicelab_py_env\</VoiceLabPyEnvSrcDir>
     </PropertyGroup>
@@ -100,18 +104,18 @@
 
   <Target Name="CopyVoiceLabEmbed" AfterTargets="Build">
     <!--
-      将仓库内嵌的 VoiceLab cosyvoice workflow 复制到 WinUI3 输出目录，便于 zip 分发“解压即用”：
-      $(OutDir)\voicelab\workflows\cosyvoice\...
+      将仓库内嵌的 VoiceLab cosyvoice workflow + vendor 源码复制到 WinUI3 输出目录，便于 zip 分发“解压即用”：
+      $(OutDir)\voicelab\...
 
       说明：该目录默认 gitignored，需要先运行同步脚本（见 docs/tts_cosyvoice3_sft.md）。
     -->
     <ItemGroup>
       <VoiceLabEmbedFiles Include="$(VoiceLabEmbedSrcDir)**\*" Condition="Exists('$(VoiceLabEmbedSrcDir)')" />
     </ItemGroup>
-    <Message Importance="high" Text="Copying VoiceLab embed from $(VoiceLabEmbedSrcDir) to $(OutDir)voicelab\\workflows\\cosyvoice" Condition="@(VoiceLabEmbedFiles) != ''" />
+    <Message Importance="high" Text="Copying VoiceLab embed from $(VoiceLabEmbedSrcDir) to $(OutDir)voicelab\\" Condition="@(VoiceLabEmbedFiles) != ''" />
     <Copy
       SourceFiles="@(VoiceLabEmbedFiles)"
-      DestinationFiles="@(VoiceLabEmbedFiles->'$(OutDir)voicelab\\workflows\\cosyvoice\\%(RecursiveDir)%(Filename)%(Extension)')"
+      DestinationFiles="@(VoiceLabEmbedFiles->'$(OutDir)voicelab\\%(RecursiveDir)%(Filename)%(Extension)')"
       SkipUnchangedFiles="true"
       Condition="@(VoiceLabEmbedFiles) != ''" />
   </Target>
