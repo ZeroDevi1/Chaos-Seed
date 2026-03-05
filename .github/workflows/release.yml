@@ -282,7 +282,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build chaos-ffi (release)
-        run: cargo build -p chaos-ffi --release
+        run: cargo build -p chaos-ffi --release --no-default-features
 
       - name: Package chaos-ffi
         run: |
@@ -317,10 +317,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build chaos-ffi (release, aarch64)
-        run: cargo build -p chaos-ffi --release --target aarch64-apple-darwin
+        run: cargo build -p chaos-ffi --release --target aarch64-apple-darwin --no-default-features
 
       - name: Build chaos-ffi (release, x86_64)
-        run: cargo build -p chaos-ffi --release --target x86_64-apple-darwin
+        run: cargo build -p chaos-ffi --release --target x86_64-apple-darwin --no-default-features
 
       - name: Package chaos-ffi (universal2)
         run: |
@@ -385,13 +385,13 @@ jobs:
           tool: cargo-ndk
 
       - name: Build chaos-ffi (release, arm64-v8a)
-        run: cargo ndk -t arm64-v8a build -p chaos-ffi --release
+        run: cargo ndk -t arm64-v8a build -p chaos-ffi --release --no-default-features
 
       - name: Build chaos-ffi (release, x86_64)
-        run: cargo ndk -t x86_64 build -p chaos-ffi --release
+        run: cargo ndk -t x86_64 build -p chaos-ffi --release --no-default-features
 
       - name: Build chaos-ffi (release, armeabi-v7a)
-        run: cargo ndk -t armeabi-v7a build -p chaos-ffi --release
+        run: cargo ndk -t armeabi-v7a build -p chaos-ffi --release --no-default-features
 
       - name: Package chaos-ffi (Android)
         run: |
