@@ -1,11 +1,18 @@
 use serde_json::Value;
-use tracing::warn;
+use tracing::{debug, warn};
+
+use reqwest::header::{COOKIE, ORIGIN, REFERER, USER_AGENT};
+use std::sync::{Mutex, OnceLock};
 
 use crate::danmaku::model::Site;
 
 use super::super::client::{LivestreamConfig, LivestreamError};
 use super::super::model::{LiveInfo, LiveManifest, PlaybackHints, ResolveOptions, StreamVariant};
 use super::super::util::mbga;
+
+const BILI_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0";
+const BILI_REFERER: &str = "https://live.bilibili.com/";
+const BILI_ORIGIN: &str = "https://live.bilibili.com";
 
 fn get_i64(v: &Value, ptr: &str) -> Option<i64> {
     v.pointer(ptr).and_then(|v| v.as_i64())
@@ -25,13 +32,88 @@ fn make_variant_id(qn: i32, label: &str) -> String {
     format!("bili_live:{qn}:{label}")
 }
 
+fn buvid_cookie_cache() -> &'static Mutex<Option<String>> {
+    static CACHE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+async fn ensure_buvid_cookie(http: &reqwest::Client) -> Option<String> {
+    // Cache semantics:
+    // - None: never tried
+    // - Some(""): tried but failed (do not retry to avoid excessive requests)
+    // - Some(cookie): ok
+    if let Ok(g) = buvid_cookie_cache().lock() {
+        if let Some(cached) = g.clone() {
+            return if cached.trim().is_empty() {
+                None
+            } else {
+                Some(cached)
+            };
+        }
+    }
+
+    // Note: buvid endpoint lives on api.bilibili.com, not api.live.bilibili.com.
+    let url = "https://api.bilibili.com/x/frontend/finger/spi";
+    let json = http
+        .get(url)
+        .header(USER_AGENT, BILI_UA)
+        .header(REFERER, BILI_REFERER)
+        .header(ORIGIN, BILI_ORIGIN)
+        .send()
+        .await
+        .ok()?
+        .json::<Value>()
+        .await
+        .ok()?;
+
+    if json.pointer("/code").and_then(|v| v.as_i64()).unwrap_or(-1) != 0 {
+        let _ = buvid_cookie_cache().lock().map(|mut g| *g = Some(String::new()));
+        return None;
+    }
+
+    let b3 = json
+        .pointer("/data/b_3")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let b4 = json
+        .pointer("/data/b_4")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if b3.is_empty() || b4.is_empty() {
+        let _ = buvid_cookie_cache().lock().map(|mut g| *g = Some(String::new()));
+        return None;
+    }
+
+    let cookie = format!("buvid3={b3}; buvid4={b4};");
+    let _ = buvid_cookie_cache().lock().map(|mut g| *g = Some(cookie.clone()));
+    Some(cookie)
+}
+
 async fn get_json(http: &reqwest::Client, url: &str) -> Result<Value, LivestreamError> {
-    let resp = http.get(url).send().await?.error_for_status()?;
+    let mut req = http
+        .get(url)
+        .header(USER_AGENT, BILI_UA)
+        .header(REFERER, BILI_REFERER)
+        .header(ORIGIN, BILI_ORIGIN);
+    if let Some(cookie) = ensure_buvid_cookie(http).await {
+        req = req.header(COOKIE, cookie);
+    }
+    let resp = req.send().await?.error_for_status()?;
     Ok(resp.json::<Value>().await?)
 }
 
 async fn get_text(http: &reqwest::Client, url: &str) -> Result<String, LivestreamError> {
-    let resp = http.get(url).send().await?.error_for_status()?;
+    let mut req = http
+        .get(url)
+        .header(USER_AGENT, BILI_UA)
+        .header(REFERER, BILI_REFERER)
+        .header(ORIGIN, BILI_ORIGIN);
+    if let Some(cookie) = ensure_buvid_cookie(http).await {
+        req = req.header(COOKIE, cookie);
+    }
+    let resp = req.send().await?.error_for_status()?;
     Ok(resp.text().await?)
 }
 
@@ -55,9 +137,12 @@ fn parse_room_playinfo_value(
         .and_then(|v| v.as_array())
         .ok_or_else(|| LivestreamError::Parse("missing stream".to_string()))?;
 
-    // Find codec in priority order: http_stream/flv/avc, else http_hls/fmp4/avc.
-    let codec = find_codec(streams, "http_stream", "flv", "avc")
-        .or_else(|| find_codec(streams, "http_hls", "fmp4", "avc"))
+    // Choose the best codec branch for quality enumeration + URL binding.
+    //
+    // Background: some rooms return incomplete accept_qn on certain codec branches; scanning
+    // all codec entries and choosing the best one helps avoid "only low quality available"
+    // (blurry playback).
+    let codec = pick_best_codec(streams)
         .ok_or_else(|| LivestreamError::Parse("no suitable codec".to_string()))?;
 
     let current_qn = codec
@@ -147,27 +232,94 @@ fn parse_room_playinfo_value(
     Ok(out)
 }
 
-fn find_codec<'a>(
-    streams: &'a [Value],
-    protocol: &str,
-    format_name: &str,
-    codec_name: &str,
-) -> Option<&'a Value> {
-    streams
-        .iter()
-        .find(|s| s.get("protocol_name").and_then(|v| v.as_str()) == Some(protocol))
-        .and_then(|s| s.get("format")?.as_array())
-        .and_then(|formats| {
-            formats
-                .iter()
-                .find(|f| f.get("format_name").and_then(|v| v.as_str()) == Some(format_name))
-        })
-        .and_then(|f| f.get("codec")?.as_array())
-        .and_then(|codecs| {
-            codecs
-                .iter()
-                .find(|c| c.get("codec_name").and_then(|v| v.as_str()) == Some(codec_name))
-        })
+fn codec_accept_qn_max(codec: &Value) -> i32 {
+    codec
+        .get("accept_qn")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_i64().map(|n| n as i32))
+        .max()
+        .unwrap_or(-1)
+}
+
+fn pick_best_codec<'a>(streams: &'a [Value]) -> Option<&'a Value> {
+    // Ranking rules (higher priority first):
+    // 1) protocol: http_stream (flv) > http_hls (fmp4) > others
+    // 2) format: flv/fmp4 preferred over others
+    // 3) accept_qn max: higher is better
+    // 4) codec_name: prefer avc for compatibility when quality ties
+    let mut best: Option<(&Value, (u8, u8, i32, u8))> = None;
+
+    for s in streams {
+        let protocol = s
+            .get("protocol_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let protocol_rank: u8 = match protocol {
+            "http_stream" => 0,
+            "http_hls" => 1,
+            _ => 2,
+        };
+
+        let Some(formats) = s.get("format").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for f in formats {
+            let format_name = f
+                .get("format_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let format_rank: u8 = match format_name {
+                "flv" | "fmp4" => 0,
+                _ => 1,
+            };
+
+            let Some(codecs) = f.get("codec").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for c in codecs {
+                let base_url = c.get("base_url").and_then(|v| v.as_str()).unwrap_or("").trim();
+                let url_info_len = c
+                    .get("url_info")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                if base_url.is_empty() || url_info_len == 0 {
+                    continue;
+                }
+
+                let max_accept = codec_accept_qn_max(c);
+                let codec_name = c.get("codec_name").and_then(|v| v.as_str()).unwrap_or("");
+                let codec_rank: u8 = match codec_name {
+                    "avc" => 0,
+                    _ => 1,
+                };
+
+                let key = (protocol_rank, format_rank, max_accept, codec_rank);
+                let better = match best.as_ref() {
+                    None => true,
+                    Some((_, bk)) => {
+                        if key.0 != bk.0 {
+                            key.0 < bk.0
+                        } else if key.1 != bk.1 {
+                            key.1 < bk.1
+                        } else if key.2 != bk.2 {
+                            key.2 > bk.2
+                        } else {
+                            key.3 < bk.3
+                        }
+                    }
+                };
+
+                if better {
+                    best = Some((c, key));
+                }
+            }
+        }
+    }
+
+    best.map(|(c, _)| c)
 }
 
 fn extract_v2_codec_current_qn_and_urls(v: &Value) -> Result<(i32, Vec<String>), LivestreamError> {
@@ -176,9 +328,12 @@ fn extract_v2_codec_current_qn_and_urls(v: &Value) -> Result<(i32, Vec<String>),
         .and_then(|v| v.as_array())
         .ok_or_else(|| LivestreamError::Parse("missing stream".to_string()))?;
 
-    // Find codec in priority order: http_stream/flv/avc, else http_hls/fmp4/avc.
-    let codec = find_codec(streams, "http_stream", "flv", "avc")
-        .or_else(|| find_codec(streams, "http_hls", "fmp4", "avc"))
+    // Choose the best codec branch for quality enumeration + URL binding.
+    //
+    // Background: some rooms return incomplete accept_qn on certain codec branches; scanning
+    // all codec entries and choosing the best one helps avoid "only low quality available"
+    // (blurry playback).
+    let codec = pick_best_codec(streams)
         .ok_or_else(|| LivestreamError::Parse("no suitable codec".to_string()))?;
 
     let current_qn = codec
@@ -534,6 +689,14 @@ pub async fn decode_manifest(
 
     let mut vars = apply_drop_inaccessible(vars, opt);
     vars.sort_by(|a, b| b.quality.cmp(&a.quality));
+
+    let max_qn = vars.iter().map(|v| v.quality).max().unwrap_or(-1);
+    let resolved_qn = vars
+        .iter()
+        .filter(|v| v.url.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false))
+        .map(|v| v.quality)
+        .max();
+    debug!("bili_live: decode_manifest rid={} max_qn={} resolved_qn={:?}", rid, max_qn, resolved_qn);
 
     Ok(LiveManifest {
         site: Site::BiliLive,
