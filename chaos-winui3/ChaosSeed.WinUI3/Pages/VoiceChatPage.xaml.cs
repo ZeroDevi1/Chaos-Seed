@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using ChaosSeed.WinUI3.Models;
 using ChaosSeed.WinUI3.Models.Llm;
 using ChaosSeed.WinUI3.Models.Voice;
 using ChaosSeed.WinUI3.Services;
 using ChaosSeed.WinUI3.Services.Audio;
+using ChaosSeed.WinUI3.Services.VoiceChatBackends;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Controls;
 
@@ -14,6 +16,8 @@ namespace ChaosSeed.WinUI3.Pages;
 public sealed partial class VoiceChatPage : Page
 {
     private readonly DispatcherQueue _dq = DispatcherQueue.GetForCurrentThread();
+
+    private IVoiceChatBackend? _backend;
 
     private CancellationTokenSource? _cts;
     private string? _sessionId;
@@ -32,6 +36,7 @@ public sealed partial class VoiceChatPage : Page
         try
         {
             var s = SettingsService.Instance.Current;
+            SetBackendBoxFromSettings(s.VoiceChatBackendMode);
             if (string.IsNullOrWhiteSpace(ModelDirBox.Text))
             {
                 ModelDirBox.Text = (s.TtsCosyVoicePackDir ?? "").Trim();
@@ -49,11 +54,35 @@ public sealed partial class VoiceChatPage : Page
         {
             AppLog.Exception("VoiceChatPage.OnLoaded", ex);
         }
+    }
 
+    private async Task OnUnloadedAsync()
+    {
+        await CancelInternalAsync("page_unloaded");
+
+        try { _backend?.Dispose(); } catch { }
+        _backend = null;
+    }
+
+    private void SetBackendBoxFromSettings(LiveBackendMode mode)
+    {
         try
         {
-            DaemonClient.Instance.VoiceChatChunkReceived -= OnVoiceChatChunk;
-            DaemonClient.Instance.VoiceChatChunkReceived += OnVoiceChatChunk;
+            var want = mode switch
+            {
+                LiveBackendMode.Daemon => "daemon",
+                LiveBackendMode.Ffi => "ffi",
+                _ => "auto",
+            };
+
+            foreach (var it in BackendBox.Items)
+            {
+                if (it is ComboBoxItem cb && string.Equals(cb.Content?.ToString()?.Trim(), want, StringComparison.OrdinalIgnoreCase))
+                {
+                    BackendBox.SelectedItem = cb;
+                    return;
+                }
+            }
         }
         catch
         {
@@ -61,18 +90,15 @@ public sealed partial class VoiceChatPage : Page
         }
     }
 
-    private async Task OnUnloadedAsync()
+    private static LiveBackendMode GetBackendModeFromBox(ComboBox box)
     {
-        try
+        var s = (box.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Trim()?.ToLowerInvariant();
+        return s switch
         {
-            DaemonClient.Instance.VoiceChatChunkReceived -= OnVoiceChatChunk;
-        }
-        catch
-        {
-            // ignore
-        }
-
-        await CancelInternalAsync("page_unloaded");
+            "daemon" => LiveBackendMode.Daemon,
+            "ffi" => LiveBackendMode.Ffi,
+            _ => LiveBackendMode.Auto,
+        };
     }
 
     private void OnVoiceChatChunk(object? sender, VoiceChatChunkNotif msg)
@@ -197,16 +223,29 @@ public sealed partial class VoiceChatPage : Page
                 ChunkMs = 100,
             };
 
-            var res = await DaemonClient.Instance.VoiceChatStreamStartAsync(p, ct);
+            var backendMode = GetBackendModeFromBox(BackendBox);
+            try { SettingsService.Instance.Update(x => x.VoiceChatBackendMode = backendMode); } catch { }
+
+            _backend?.Dispose();
+            _backend = VoiceChatBackendFactory.Create();
+            _backend.VoiceChatChunkReceived -= OnVoiceChatChunk;
+            _backend.VoiceChatChunkReceived += OnVoiceChatChunk;
+
+            if (!string.IsNullOrWhiteSpace(_backend.InitNotice))
+            {
+                StatusText.Text = $"status: backend notice: {_backend.InitNotice}";
+            }
+
+            var res = await (_backend ?? throw new InvalidOperationException("voice chat backend not initialized")).StartAsync(p, ct);
             ct.ThrowIfCancellationRequested();
 
             _sessionId = (res.SessionId ?? "").Trim();
             if (string.IsNullOrWhiteSpace(_sessionId))
             {
-                throw new InvalidOperationException("daemon returned empty sessionId");
+                throw new InvalidOperationException("backend returned empty sessionId");
             }
 
-            SessionText.Text = $"session: {_sessionId}  sr={res.SampleRate}  ch={res.Channels}  fmt={res.Format}";
+            SessionText.Text = $"session: {_sessionId}  sr={res.SampleRate}  ch={res.Channels}  fmt={res.Format}  backend={_backend.Name}";
             StatusText.Text = "status: connected, waiting chunks...";
 
             await Pcm16StreamPlayerService.Instance.StartAsync(res.SampleRate, res.Channels, ct);
@@ -254,7 +293,15 @@ public sealed partial class VoiceChatPage : Page
         {
             if (!string.IsNullOrWhiteSpace(sid))
             {
-                await DaemonClient.Instance.VoiceChatStreamCancelAsync(sid);
+                if (_backend is not null)
+                {
+                    await _backend.CancelAsync(sid, CancellationToken.None);
+                }
+                else
+                {
+                    // best-effort fallback (should be rare)
+                    await DaemonClient.Instance.VoiceChatStreamCancelAsync(sid);
+                }
             }
         }
         catch

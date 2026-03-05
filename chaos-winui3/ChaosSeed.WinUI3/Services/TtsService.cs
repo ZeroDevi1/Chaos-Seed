@@ -25,6 +25,9 @@ public sealed class TtsService
     {
     }
 
+    public static TtsService CreateWithDaemon(ITtsBackend backend, DaemonClient daemon) =>
+        new(backend, daemon);
+
     public Task<TtsSftStartResult> StartSftAsync(TtsSftStartParams p, CancellationToken ct = default)
     {
         if (p is null) throw new ArgumentNullException(nameof(p));
@@ -43,6 +46,15 @@ public sealed class TtsService
         TimeSpan? pollInterval = null,
         CancellationToken ct = default
     )
+        => await SynthesizeSftToWavBytesAsync(p, progress, pollInterval, onSessionId: null, ct);
+
+    public async Task<(string SessionId, TtsAudioResult Meta, byte[] WavBytes)> SynthesizeSftToWavBytesAsync(
+        TtsSftStartParams p,
+        IProgress<TtsSftStatus>? progress,
+        TimeSpan? pollInterval,
+        Action<string>? onSessionId,
+        CancellationToken ct = default
+    )
     {
         if (p is null) throw new ArgumentNullException(nameof(p));
 
@@ -52,6 +64,8 @@ public sealed class TtsService
         {
             throw new InvalidOperationException("tts.sft.start returned empty sessionId");
         }
+
+        try { onSessionId?.Invoke(sid); } catch { }
 
         var interval = pollInterval ?? TimeSpan.FromMilliseconds(250);
         // 优先：daemon 推送回调（减少轮询压力）。若 daemon 版本不支持该通知，则自动回退到轮询。

@@ -145,6 +145,17 @@ internal static partial class ChaosFfi
     [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial IntPtr chaos_tts_sft_cancel_json(string session_id_utf8);
 
+    // ----- voice chat (stream, poll-based) -----
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_voice_chat_stream_start_json(string params_json_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_voice_chat_stream_poll_json(string session_id_utf8);
+
+    [LibraryImport(Dll, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial IntPtr chaos_voice_chat_stream_cancel_json(string session_id_utf8);
+
     // ----- bilibili (video download) -----
 
     [LibraryImport(Dll)]

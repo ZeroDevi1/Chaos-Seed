@@ -32,6 +32,7 @@ public sealed class AppSettings
     public LiveBackendMode DanmakuBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode MusicBackendMode { get; set; } = LiveBackendMode.Auto;
     public LiveBackendMode TtsBackendMode { get; set; } = LiveBackendMode.Auto;
+    public LiveBackendMode VoiceChatBackendMode { get; set; } = LiveBackendMode.Auto;
 
     public bool LyricsAutoDetect { get; set; } = false;
     public string[] LyricsProviders { get; set; } = new[] { "qq", "netease", "lrclib" };

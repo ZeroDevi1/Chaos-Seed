@@ -219,80 +219,50 @@ public sealed partial class TtsDebugPage : Page
 
         _backend?.Dispose();
         _backend = TtsBackendFactory.Create();
-        _tts = new TtsService(_backend);
+        _tts = TtsService.CreateWithDaemon(_backend, DaemonClient.Instance);
 
         if (!string.IsNullOrWhiteSpace(_backend.InitNotice))
         {
             ShowInfo("后端提示", _backend.InitNotice!);
         }
 
-        ShowInfo("开始生成", $"已提交到 {_backend.Name}（tts.sft.start），正在轮询状态…");
+        ShowInfo("开始生成", $"已提交到 {_backend.Name}（tts.sft.start），正在等待状态推送/轮询…");
 
         _cts = new CancellationTokenSource();
         _sessionId = null;
         try
         {
             var ct = _cts.Token;
-            var start = await (_tts ?? throw new InvalidOperationException("tts backend not initialized")).StartSftAsync(p, ct);
-            var sid = (start.SessionId ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(sid))
+
+            // 优先使用 daemon 的 tts.sft.statusChanged 通知；若 daemon 不支持则自动回退到轮询。
+            var progress = new Progress<TtsSftStatus>(st =>
             {
-                throw new InvalidOperationException("tts.sft.start returned empty sessionId");
-            }
-            _sessionId = sid;
+                try { StageText.Text = $"stage: {st.Stage ?? "-"} ({st.State})"; } catch { }
+            });
 
-            while (true)
+            var (sid, meta, wav) = await (_tts ?? throw new InvalidOperationException("tts backend not initialized"))
+                .SynthesizeSftToWavBytesAsync(
+                    p,
+                    progress,
+                    pollInterval: TimeSpan.FromMilliseconds(250),
+                    onSessionId: id => _sessionId = id,
+                    ct
+                );
+
+            var clip = new TtsClip
             {
-                ct.ThrowIfCancellationRequested();
-                var st = await (_tts ?? throw new InvalidOperationException("tts backend not initialized")).StatusAsync(sid, ct);
-                StageText.Text = $"stage: {st.Stage ?? "-"} ({st.State})";
-                if (!st.Done)
-                {
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), ct);
-                    continue;
-                }
+                SessionId = sid,
+                Text = text,
+                Mime = meta.Mime,
+                WavBytes = wav,
+                SampleRate = meta.SampleRate,
+                Channels = meta.Channels,
+                DurationMs = meta.DurationMs,
+            };
 
-                if (!string.Equals(st.State, "done", StringComparison.OrdinalIgnoreCase))
-                {
-                    var err = (st.Error ?? "").Trim();
-                    if (string.IsNullOrWhiteSpace(err))
-                    {
-                        err = $"tts job finished in state={st.State}";
-                    }
-                    throw new InvalidOperationException(err);
-                }
-
-                if (st.Result is null || string.IsNullOrWhiteSpace(st.Result.WavBase64))
-                {
-                    throw new InvalidOperationException("tts.sft.status returned done but result.wavBase64 is empty");
-                }
-
-                byte[] wav;
-                try
-                {
-                    wav = Convert.FromBase64String(st.Result.WavBase64);
-                }
-                catch (FormatException ex)
-                {
-                    throw new InvalidOperationException("invalid base64 wav payload", ex);
-                }
-
-                var clip = new TtsClip
-                {
-                    SessionId = sid,
-                    Text = text,
-                    Mime = st.Result.Mime,
-                    WavBytes = wav,
-                    SampleRate = st.Result.SampleRate,
-                    Channels = st.Result.Channels,
-                    DurationMs = st.Result.DurationMs,
-                };
-
-                var autoPlay = AutoPlayToggle.IsChecked ?? true;
-                await TtsPlayerService.Instance.OpenAsync(clip, autoPlay, ct);
-                ShowInfo("生成完成", $"已缓存到内存（{wav.Length} bytes），可在底栏播放器中播放/保存。");
-                break;
-            }
+            var autoPlay = AutoPlayToggle.IsChecked ?? true;
+            await TtsPlayerService.Instance.OpenAsync(clip, autoPlay, ct);
+            ShowInfo("生成完成", $"已缓存到内存（{wav.Length} bytes），可在底栏播放器中播放/保存。");
         }
         catch (OperationCanceledException)
         {
