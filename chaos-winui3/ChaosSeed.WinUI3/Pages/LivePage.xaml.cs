@@ -191,6 +191,9 @@ public sealed partial class LivePage : Page
                 DanmakuOverlayOpacitySlider.Value = Math.Clamp(s.DanmakuOverlayOpacity, 0.0, 1.0) * 100.0;
                 DanmakuOverlayFontScaleSlider.Value = Math.Clamp(s.DanmakuOverlayFontScale, 0.5, 2.0) * 100.0;
                 DanmakuOverlayDensitySlider.Value = Math.Clamp(s.DanmakuOverlayDensity, 0.0, 1.0) * 100.0;
+                DanmakuOverlayWindowOpacitySlider.Value = Math.Clamp(s.DanmakuOverlayWindowOpacity, 0.0, 1.0) * 100.0;
+                DanmakuOverlayWindowFontScaleSlider.Value = Math.Clamp(s.DanmakuOverlayWindowFontScale, 0.5, 2.0) * 100.0;
+                DanmakuOverlayWindowDensitySlider.Value = Math.Clamp(s.DanmakuOverlayWindowDensity, 0.0, 1.0) * 100.0;
 
                 DanmakuOverlayAreaRadio.SelectedIndex = s.DanmakuOverlayArea switch
                 {
@@ -199,8 +202,16 @@ public sealed partial class LivePage : Page
                     DanmakuOverlayAreaMode.ThreeQuarter => 2,
                     _ => 3, // Full
                 };
+                DanmakuOverlayWindowAreaRadio.SelectedIndex = s.DanmakuOverlayWindowArea switch
+                {
+                    DanmakuOverlayAreaMode.Quarter => 0,
+                    DanmakuOverlayAreaMode.Half => 1,
+                    DanmakuOverlayAreaMode.ThreeQuarter => 2,
+                    _ => 3, // Full
+                };
 
                 UpdateDanmakuOverlaySettingLabels();
+                UpdateDanmakuOverlayWindowSettingLabels();
             }
             finally
             {
@@ -238,6 +249,26 @@ public sealed partial class LivePage : Page
         }
     }
 
+    private void ApplyDanmakuOverlayWindowPreviewFromUi()
+    {
+        try
+        {
+            var tmp = new AppSettings
+            {
+                DanmakuOverlayWindowOpacity = Math.Clamp(DanmakuOverlayWindowOpacitySlider.Value / 100.0, 0.0, 1.0),
+                DanmakuOverlayWindowFontScale = Math.Clamp(DanmakuOverlayWindowFontScaleSlider.Value / 100.0, 0.5, 2.0),
+                DanmakuOverlayWindowDensity = Math.Clamp(DanmakuOverlayWindowDensitySlider.Value / 100.0, 0.0, 1.0),
+                DanmakuOverlayWindowArea = GetDanmakuOverlayWindowAreaFromUi(),
+            };
+
+            AuxWindowService.Instance.PreviewOverlaySettings(tmp);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private void EnsureDanmakuOverlayPersistTimer()
     {
         if (_danmakuOverlayPersistTimer is not null)
@@ -253,6 +284,7 @@ public sealed partial class LivePage : Page
             try
             {
                 PersistDanmakuOverlaySettingsFromUi();
+                PersistDanmakuOverlayWindowSettingsFromUi();
             }
             catch
             {
@@ -292,6 +324,56 @@ public sealed partial class LivePage : Page
         });
     }
 
+    private void PersistDanmakuOverlayWindowSettingsFromUi()
+    {
+        if (_danmakuOverlayUiInit)
+        {
+            return;
+        }
+
+        var opacity = Math.Clamp(DanmakuOverlayWindowOpacitySlider.Value / 100.0, 0.0, 1.0);
+        var fontScale = Math.Clamp(DanmakuOverlayWindowFontScaleSlider.Value / 100.0, 0.5, 2.0);
+        var density = Math.Clamp(DanmakuOverlayWindowDensitySlider.Value / 100.0, 0.0, 1.0);
+        var area = GetDanmakuOverlayWindowAreaFromUi();
+
+        SettingsService.Instance.Update(s =>
+        {
+            s.DanmakuOverlayWindowOpacity = opacity;
+            s.DanmakuOverlayWindowFontScale = fontScale;
+            s.DanmakuOverlayWindowDensity = density;
+            s.DanmakuOverlayWindowArea = area;
+        });
+    }
+
+    private DanmakuOverlayAreaMode GetDanmakuOverlayWindowAreaFromUi()
+    {
+        try
+        {
+            if (DanmakuOverlayWindowAreaRadio.SelectedItem is RadioButton rb && rb.Tag is string tag)
+            {
+                return tag switch
+                {
+                    "Quarter" => DanmakuOverlayAreaMode.Quarter,
+                    "Half" => DanmakuOverlayAreaMode.Half,
+                    "ThreeQuarter" => DanmakuOverlayAreaMode.ThreeQuarter,
+                    _ => DanmakuOverlayAreaMode.Full,
+                };
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return DanmakuOverlayWindowAreaRadio.SelectedIndex switch
+        {
+            0 => DanmakuOverlayAreaMode.Quarter,
+            1 => DanmakuOverlayAreaMode.Half,
+            2 => DanmakuOverlayAreaMode.ThreeQuarter,
+            _ => DanmakuOverlayAreaMode.Full,
+        };
+    }
+
     private DanmakuOverlayAreaMode GetDanmakuOverlayAreaFromUi()
     {
         try
@@ -328,6 +410,13 @@ public sealed partial class LivePage : Page
         try { DanmakuOverlayDensityLabel.Text = $"{(int)Math.Round(DanmakuOverlayDensitySlider.Value)}%"; } catch { }
     }
 
+    private void UpdateDanmakuOverlayWindowSettingLabels()
+    {
+        try { DanmakuOverlayWindowOpacityLabel.Text = $"{(int)Math.Round(DanmakuOverlayWindowOpacitySlider.Value)}%"; } catch { }
+        try { DanmakuOverlayWindowFontScaleLabel.Text = $"{(int)Math.Round(DanmakuOverlayWindowFontScaleSlider.Value)}%"; } catch { }
+        try { DanmakuOverlayWindowDensityLabel.Text = $"{(int)Math.Round(DanmakuOverlayWindowDensitySlider.Value)}%"; } catch { }
+    }
+
     private void OnDanmakuOverlayClicked(SplitButton sender, SplitButtonClickEventArgs args)
     {
         _ = sender;
@@ -359,6 +448,21 @@ public sealed partial class LivePage : Page
         SchedulePersistDanmakuOverlaySettings();
     }
 
+    private void OnDanmakuOverlayWindowSettingChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (_danmakuOverlayUiInit)
+        {
+            return;
+        }
+
+        UpdateDanmakuOverlayWindowSettingLabels();
+        ApplyDanmakuOverlayWindowPreviewFromUi();
+        SchedulePersistDanmakuOverlaySettings();
+    }
+
     private void OnDanmakuOverlayAreaChanged(object sender, SelectionChangedEventArgs e)
     {
         _ = sender;
@@ -370,6 +474,20 @@ public sealed partial class LivePage : Page
         }
 
         ApplyDanmakuOverlayPreviewFromUi();
+        SchedulePersistDanmakuOverlaySettings();
+    }
+
+    private void OnDanmakuOverlayWindowAreaChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        if (_danmakuOverlayUiInit)
+        {
+            return;
+        }
+
+        ApplyDanmakuOverlayWindowPreviewFromUi();
         SchedulePersistDanmakuOverlaySettings();
     }
 

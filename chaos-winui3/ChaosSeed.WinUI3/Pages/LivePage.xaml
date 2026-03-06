@@ -224,7 +224,7 @@
 		                                                        <StackPanel Padding="12" Spacing="12" Width="320">
 		                                                            <TextBlock Text="弹幕" FontSize="16" FontWeight="SemiBold" />
                                                             <TextBlock
-                                                                Text="这些设置同时作用于播放器内 Overlay 与透明悬浮窗"
+                                                                Text="这些设置仅作用于播放器内 Overlay"
                                                                 TextWrapping="WrapWholeWords"
                                                                 Opacity="0.72"
                                                                 FontSize="12" />
@@ -289,6 +289,76 @@
 		                                                                    <RadioButton Content="全屏" Tag="Full" />
 		                                                                </muxc:RadioButtons>
 		                                                            </StackPanel>
+
+			                                                            <Border Height="1" Margin="0,4,0,0" Opacity="0.18" Background="White" />
+
+			                                                            <TextBlock Text="悬浮窗 Overlay" FontSize="16" FontWeight="SemiBold" />
+                                                            <TextBlock
+                                                                Text="这些设置仅作用于透明悬浮窗，默认与播放器内 Overlay 保持一致"
+                                                                TextWrapping="WrapWholeWords"
+                                                                Opacity="0.72"
+                                                                FontSize="12" />
+
+			                                                            <StackPanel Spacing="6">
+			                                                                <Grid>
+			                                                                    <Grid.ColumnDefinitions>
+			                                                                        <ColumnDefinition Width="*" />
+			                                                                        <ColumnDefinition Width="Auto" />
+			                                                                    </Grid.ColumnDefinitions>
+			                                                                    <TextBlock Text="不透明度" />
+			                                                                    <TextBlock Grid.Column="1" x:Name="DanmakuOverlayWindowOpacityLabel" Text="100%" Opacity="0.8" />
+			                                                                </Grid>
+			                                                                <Slider
+			                                                                    x:Name="DanmakuOverlayWindowOpacitySlider"
+			                                                                    Minimum="0"
+			                                                                    Maximum="100"
+			                                                                    ValueChanged="OnDanmakuOverlayWindowSettingChanged" />
+			                                                            </StackPanel>
+
+			                                                            <StackPanel Spacing="6">
+			                                                                <Grid>
+			                                                                    <Grid.ColumnDefinitions>
+			                                                                        <ColumnDefinition Width="*" />
+			                                                                        <ColumnDefinition Width="Auto" />
+			                                                                    </Grid.ColumnDefinitions>
+			                                                                    <TextBlock Text="字号缩放" />
+			                                                                    <TextBlock Grid.Column="1" x:Name="DanmakuOverlayWindowFontScaleLabel" Text="100%" Opacity="0.8" />
+			                                                                </Grid>
+			                                                                <Slider
+			                                                                    x:Name="DanmakuOverlayWindowFontScaleSlider"
+			                                                                    Minimum="50"
+			                                                                    Maximum="200"
+			                                                                    ValueChanged="OnDanmakuOverlayWindowSettingChanged" />
+			                                                            </StackPanel>
+
+			                                                            <StackPanel Spacing="6">
+			                                                                <Grid>
+			                                                                    <Grid.ColumnDefinitions>
+			                                                                        <ColumnDefinition Width="*" />
+			                                                                        <ColumnDefinition Width="Auto" />
+			                                                                    </Grid.ColumnDefinitions>
+			                                                                    <TextBlock Text="同屏密度" />
+			                                                                    <TextBlock Grid.Column="1" x:Name="DanmakuOverlayWindowDensityLabel" Text="100%" Opacity="0.8" />
+			                                                                </Grid>
+			                                                                <Slider
+			                                                                    x:Name="DanmakuOverlayWindowDensitySlider"
+			                                                                    Minimum="0"
+			                                                                    Maximum="100"
+			                                                                    ValueChanged="OnDanmakuOverlayWindowSettingChanged" />
+			                                                            </StackPanel>
+
+			                                                            <StackPanel Spacing="6">
+			                                                                <TextBlock Text="显示区域" />
+			                                                                <muxc:RadioButtons
+			                                                                    x:Name="DanmakuOverlayWindowAreaRadio"
+			                                                                    MaxColumns="4"
+			                                                                    SelectionChanged="OnDanmakuOverlayWindowAreaChanged">
+			                                                                    <RadioButton Content="1/4" Tag="Quarter" />
+			                                                                    <RadioButton Content="1/2" Tag="Half" />
+			                                                                    <RadioButton Content="3/4" Tag="ThreeQuarter" />
+			                                                                    <RadioButton Content="全屏" Tag="Full" />
+			                                                                </muxc:RadioButtons>
+			                                                            </StackPanel>
 		                                                        </StackPanel>
 		                                                    </Flyout>
 		                                                </muxc:ToggleSplitButton.Flyout>

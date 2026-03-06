@@ -58,6 +58,12 @@ public sealed class AppSettings
     public double DanmakuOverlayDensity { get; set; } = 1.0; // 0..1
     public DanmakuOverlayAreaMode DanmakuOverlayArea { get; set; } = DanmakuOverlayAreaMode.Full;
 
+    // Native transparent overlay window settings. Defaults intentionally match player overlay.
+    public double DanmakuOverlayWindowOpacity { get; set; } = 1.0; // 0..1
+    public double DanmakuOverlayWindowFontScale { get; set; } = 1.0; // 0.5..2
+    public double DanmakuOverlayWindowDensity { get; set; } = 1.0; // 0..1
+    public DanmakuOverlayAreaMode DanmakuOverlayWindowArea { get; set; } = DanmakuOverlayAreaMode.Full;
+
     public bool LiveDefaultFullscreen { get; set; } = false;
     public double LiveFullscreenAnimRate { get; set; } = 1.0;
     public bool DebugPlayerOverlay { get; set; } = false;

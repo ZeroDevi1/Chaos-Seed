@@ -45,7 +45,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
     private Font? _uiFont;
     private int _laneCursor;
 
-    private bool _enabled = true;
     private float _opacity = 1f;
     private float _fontScale = 1f;
     private double _density = 1.0;
@@ -187,24 +186,40 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         }
     }
 
+    public void PreviewSettings(AppSettings settings)
+    {
+        if (_dq.HasThreadAccess)
+        {
+            ApplySettings(settings);
+            return;
+        }
+
+        try
+        {
+            _dq.TryEnqueue(() => ApplySettings(settings));
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private void ApplySettings(AppSettings settings)
     {
-        var nextEnabled = settings?.DanmakuOverlayEnabled ?? true;
-        var nextOpacity = (float)Clamp01(settings?.DanmakuOverlayOpacity ?? 1.0);
+        var nextOpacity = (float)Clamp01(settings?.DanmakuOverlayWindowOpacity ?? 1.0);
         var nextFontScale = Math.Clamp(
-            (float)(settings?.DanmakuOverlayFontScale ?? 1.0),
+            (float)(settings?.DanmakuOverlayWindowFontScale ?? 1.0),
             NativeOverlayMetricsCalculator.MinFontScale,
             NativeOverlayMetricsCalculator.MaxFontScale
         );
-        var nextDensity = Clamp01(settings?.DanmakuOverlayDensity ?? 1.0);
-        var nextArea = settings?.DanmakuOverlayArea ?? DanmakuOverlayAreaMode.Full;
+        var nextDensity = Clamp01(settings?.DanmakuOverlayWindowDensity ?? 1.0);
+        var nextArea = settings?.DanmakuOverlayWindowArea ?? DanmakuOverlayAreaMode.Full;
 
-        var needClear = !nextEnabled
+        var needClear = Math.Abs(nextOpacity - _opacity) > 0.001f
             || Math.Abs(nextFontScale - _fontScale) > 0.001f
             || Math.Abs(nextDensity - _density) > 0.001
             || nextArea != _area;
 
-        _enabled = nextEnabled;
         _opacity = nextOpacity;
         _fontScale = nextFontScale;
         _density = nextDensity;
@@ -309,17 +324,14 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         _lastTickTs = now;
 
         MoveSprites(dt);
-        if (_enabled)
-        {
-            SpawnSprites();
-        }
+        SpawnSprites();
         RenderFrame();
     }
 
     private void OnMsg(object? sender, DanmakuMessage msg)
     {
         _ = sender;
-        if (msg is null || !_enabled)
+        if (msg is null)
         {
             return;
         }
@@ -408,6 +420,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             BottomPadPx
         );
         var laneTail = new double[laneCount];
+        var laneLastSprite = new DanmakuLaneSpriteState?[laneCount];
         for (var i = 0; i < laneTail.Length; i++)
         {
             laneTail[i] = double.NegativeInfinity;
@@ -425,6 +438,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             if (tail > laneTail[sprite.Lane])
             {
                 laneTail[sprite.Lane] = tail;
+                laneLastSprite[sprite.Lane] = new DanmakuLaneSpriteState(sprite.X, sprite.Width, sprite.SpeedPxPerSec);
             }
         }
 
@@ -457,18 +471,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
                 msg = _queue.Peek();
             }
 
-            var lane = NativeOverlayLaneScheduler.FindAvailableLane(
-                laneTail,
-                spawnRightEdge - metrics.GapPx,
-                _laneCursor,
-                out var nextLaneCursor
-            );
-            if (lane < 0)
-            {
-                return;
-            }
-
-            if (!TryCreateSprite(msg!, lane, metrics, out var sprite))
+            if (!TryCreateSpriteSpec(msg!, metrics, out var spec))
             {
                 lock (_queueGate)
                 {
@@ -480,6 +483,15 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
                 continue;
             }
 
+            var lane = FindAvailableLaneForSpec(laneTail, laneLastSprite, spawnRightEdge, metrics.GapPx, spec!.SpeedPxPerSec, out var nextLaneCursor);
+            if (lane < 0)
+            {
+                DisposeSpriteSpec(spec);
+                return;
+            }
+
+            var sprite = CreateSprite(spec, lane, metrics.LaneHeightPx, spawnRightEdge);
+
             lock (_queueGate)
             {
                 if (_queue.Count > 0)
@@ -489,14 +501,15 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             }
 
             _laneCursor = nextLaneCursor;
-            _sprites.Add(sprite!);
-            laneTail[lane] = spawnRightEdge + sprite!.Width;
+            _sprites.Add(sprite);
+            laneTail[lane] = spawnRightEdge + sprite.Width;
+            laneLastSprite[lane] = new DanmakuLaneSpriteState(sprite.X, sprite.Width, sprite.SpeedPxPerSec);
         }
     }
 
-    private bool TryCreateSprite(DanmakuMessage msg, int lane, NativeOverlayMetrics metrics, out Sprite? sprite)
+    private bool TryCreateSpriteSpec(DanmakuMessage msg, NativeOverlayMetrics metrics, out SpriteSpec? spec)
     {
-        sprite = null;
+        spec = null;
 
         var text = (msg.Text ?? string.Empty).Trim();
         var imageUrl = (msg.ImageUrl ?? string.Empty).Trim();
@@ -528,7 +541,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         var spacing = textWidth > 0f && imageSize > 0f ? ContentSpacingPx : 0f;
         var contentHeight = Math.Max(textHeight, imageSize);
         var width = Math.Max(60f, textWidth + imageSize + spacing);
-        var laneTop = TopPadPx + (float)(lane * metrics.LaneHeightPx);
         var textTopOffset = textWidth > 0f ? (contentHeight - textHeight) / 2f : 0f;
         var imageTopOffset = imageSize > 0f ? (contentHeight - imageSize) / 2f : 0f;
         var speed = (_wPx + width + 60f) / Math.Max(1.0, 8.0 + _rand.NextDouble() * 2.0);
@@ -536,17 +548,13 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
 
         TryEnsureImageLoadingBestEffort(sessionId, imageUrl);
 
-        sprite = new Sprite(
+        spec = new SpriteSpec(
             sessionId,
             imageUrl,
             layout,
             textBitmap,
-            lane,
-            _wPx + 10.0,
-            laneTop,
             width,
             speed,
-            metrics.LaneHeightPx,
             contentHeight,
             imageSize,
             textTopOffset,
@@ -555,6 +563,64 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             metrics.FontSizePx
         );
         return true;
+    }
+
+    private int FindAvailableLaneForSpec(
+        double[] laneTail,
+        DanmakuLaneSpriteState?[] laneLastSprite,
+        double spawnRightEdge,
+        double gapPx,
+        double newSpeedPxPerSec,
+        out int nextLaneCursor
+    )
+    {
+        nextLaneCursor = _laneCursor;
+        if (laneTail.Length == 0)
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < laneTail.Length; i++)
+        {
+            var lane = (_laneCursor + i) % laneTail.Length;
+            if (laneTail[lane] >= spawnRightEdge - gapPx)
+            {
+                continue;
+            }
+
+            if (!DanmakuOverlaySpawnGuard.CanSpawnAfter(laneLastSprite[lane], spawnRightEdge, gapPx, newSpeedPxPerSec))
+            {
+                continue;
+            }
+
+            nextLaneCursor = (lane + 1) % laneTail.Length;
+            return lane;
+        }
+
+        return -1;
+    }
+
+    private Sprite CreateSprite(SpriteSpec spec, int lane, float laneHeight, double spawnRightEdge)
+    {
+        var laneTop = TopPadPx + (float)(lane * laneHeight);
+        return new Sprite(
+            spec.SessionId,
+            spec.ImageUrl,
+            spec.TextLayout,
+            spec.TextBitmap,
+            lane,
+            spawnRightEdge,
+            laneTop,
+            spec!.Width,
+            spec!.SpeedPxPerSec,
+            laneHeight,
+            spec.ContentHeight,
+            spec.ImageSize,
+            spec.TextTopOffset,
+            spec.ImageTopOffset,
+            spec.SpacingAfterImage,
+            spec.FontSizePx
+        );
     }
 
     private void TryEnsureImageLoadingBestEffort(string sessionId, string url)
@@ -892,6 +958,11 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         try { sprite.TextBitmap?.Dispose(); } catch { }
     }
 
+    private static void DisposeSpriteSpec(SpriteSpec? spec)
+    {
+        try { spec?.TextBitmap?.Dispose(); } catch { }
+    }
+
     private Font GetUiFont()
     {
         return _uiFont ??= new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -947,6 +1018,51 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             s.DanmakuOverlayWidth = width;
             s.DanmakuOverlayHeight = height;
         });
+    }
+
+    private sealed class SpriteSpec
+    {
+        public SpriteSpec(
+            string sessionId,
+            string imageUrl,
+            NativeOverlayTextLayout.Layout? textLayout,
+            Bitmap? textBitmap,
+            float width,
+            double speedPxPerSec,
+            float contentHeight,
+            float imageSize,
+            float textTopOffset,
+            float imageTopOffset,
+            float spacingAfterImage,
+            float fontSizePx
+        )
+        {
+            SessionId = sessionId;
+            ImageUrl = imageUrl;
+            TextLayout = textLayout;
+            TextBitmap = textBitmap;
+            Width = width;
+            SpeedPxPerSec = speedPxPerSec;
+            ContentHeight = contentHeight;
+            ImageSize = imageSize;
+            TextTopOffset = textTopOffset;
+            ImageTopOffset = imageTopOffset;
+            SpacingAfterImage = spacingAfterImage;
+            FontSizePx = fontSizePx;
+        }
+
+        public string SessionId { get; }
+        public string ImageUrl { get; }
+        public NativeOverlayTextLayout.Layout? TextLayout { get; }
+        public Bitmap? TextBitmap { get; }
+        public float Width { get; }
+        public double SpeedPxPerSec { get; }
+        public float ContentHeight { get; }
+        public float ImageSize { get; }
+        public float TextTopOffset { get; }
+        public float ImageTopOffset { get; }
+        public float SpacingAfterImage { get; }
+        public float FontSizePx { get; }
     }
 
     private sealed class Sprite

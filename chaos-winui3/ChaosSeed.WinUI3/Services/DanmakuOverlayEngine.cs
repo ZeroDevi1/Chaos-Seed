@@ -15,6 +15,26 @@ namespace ChaosSeed.WinUI3.Services;
 
 public sealed class DanmakuOverlayEngine : IDisposable
 {
+    private sealed class SpriteSpec
+    {
+        public SpriteSpec(string sessionId, string imageUrl, FrameworkElement element, Image? image, double width, double speedPxPerSec)
+        {
+            SessionId = sessionId;
+            ImageUrl = imageUrl;
+            Element = element;
+            Image = image;
+            Width = width;
+            SpeedPxPerSec = speedPxPerSec;
+        }
+
+        public string SessionId { get; }
+        public string ImageUrl { get; }
+        public FrameworkElement Element { get; }
+        public Image? Image { get; }
+        public double Width { get; }
+        public double SpeedPxPerSec { get; }
+    }
+
     private sealed class Sprite
     {
         public FrameworkElement Element { get; }
@@ -335,6 +355,7 @@ public sealed class DanmakuOverlayEngine : IDisposable
 
         // Compute current lane tails (max right edge per lane) from existing sprites.
         var laneTail = new double[laneCount];
+        var laneLastSprite = new DanmakuLaneSpriteState?[laneCount];
         for (var i = 0; i < laneCount; i++)
         {
             laneTail[i] = double.NegativeInfinity;
@@ -352,6 +373,7 @@ public sealed class DanmakuOverlayEngine : IDisposable
             if (tail > laneTail[lane])
             {
                 laneTail[lane] = tail;
+                laneLastSprite[lane] = new DanmakuLaneSpriteState(sp.X, sp.Width, sp.SpeedPxPerSec);
             }
         }
 
@@ -377,21 +399,35 @@ public sealed class DanmakuOverlayEngine : IDisposable
                 return;
             }
 
-            var lane = FindAvailableLane(laneTail, spawnRightEdge - gapPx);
+            var msg = _queue.Peek();
+            if (!TryCreateSpriteSpec(msg, fontSize, stageW, out var spec))
+            {
+                _queue.Dequeue();
+                continue;
+            }
+
+            var lane = FindAvailableLane(laneTail, laneLastSprite, spawnRightEdge, gapPx, spec!.SpeedPxPerSec);
             if (lane < 0)
             {
                 return;
             }
 
-            var msg = _queue.Dequeue();
-            SpawnOne(msg, lane, TopPad + lane * laneHeight, fontSize, stageW, out var spriteWidth, out var spriteSpeed);
+            _queue.Dequeue();
+            SpawnOne(spec, lane, TopPad + lane * laneHeight, stageW);
 
             // Update lane tail for subsequent spawns in this tick.
-            laneTail[lane] = spawnRightEdge + spriteWidth;
+            laneTail[lane] = spawnRightEdge + spec!.Width;
+            laneLastSprite[lane] = new DanmakuLaneSpriteState(spawnRightEdge, spec!.Width, spec!.SpeedPxPerSec);
         }
     }
 
-    private int FindAvailableLane(double[] laneTail, double maxTail)
+    private int FindAvailableLane(
+        double[] laneTail,
+        DanmakuLaneSpriteState?[] laneLastSprite,
+        double spawnRightEdge,
+        double gapPx,
+        double newSpeedPxPerSec
+    )
     {
         if (laneTail.Length == 0)
         {
@@ -402,26 +438,27 @@ public sealed class DanmakuOverlayEngine : IDisposable
         for (var i = 0; i < laneCount; i++)
         {
             var lane = (_laneCursor + i) % laneCount;
-            if (laneTail[lane] < maxTail)
+            if (laneTail[lane] >= spawnRightEdge - gapPx)
             {
-                _laneCursor = (lane + 1) % laneCount;
-                return lane;
+                continue;
             }
+
+            if (!DanmakuOverlaySpawnGuard.CanSpawnAfter(laneLastSprite[lane], spawnRightEdge, gapPx, newSpeedPxPerSec))
+            {
+                continue;
+            }
+
+            _laneCursor = (lane + 1) % laneCount;
+            return lane;
         }
 
         return -1;
     }
 
-    private void SpawnOne(
-        DanmakuMessage msg,
-        int lane,
-        double y,
-        double fontSize,
-        double stageWidth,
-        out double spriteWidth,
-        out double spriteSpeed
-    )
+    private bool TryCreateSpriteSpec(DanmakuMessage msg, double fontSize, double stageWidth, out SpriteSpec? spec)
     {
+        spec = null;
+
         var text = (msg.Text ?? "").Trim();
         var imageUrl = (msg.ImageUrl ?? "").Trim();
 
@@ -469,23 +506,27 @@ public sealed class DanmakuOverlayEngine : IDisposable
         // Measure before adding to canvas so we can remove it when off-screen.
         sp.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var width = Math.Max(60, sp.DesiredSize.Width);
-        spriteWidth = width;
-
-        var x = stageWidth + 10;
-        Canvas.SetLeft(sp, x);
-        Canvas.SetTop(sp, y);
-        _stage.Children.Add(sp);
 
         // Use a near-constant on-screen duration so longer messages move faster and won't catch up easily.
         var durationSec = 8.0 + _rand.NextDouble() * 2.0; // 8~10s
         var speed = (stageWidth + width + 60) / Math.Max(1.0, durationSec);
-        spriteSpeed = speed;
 
-        _sprites.Add(new Sprite(sp, lane, x, y, width, speed));
+        spec = new SpriteSpec((msg.SessionId ?? "").Trim(), imageUrl, sp, img, width, speed);
+        return true;
+    }
 
-        if (img is not null && _imgCts is not null)
+    private void SpawnOne(SpriteSpec spec, int lane, double y, double stageWidth)
+    {
+        var x = stageWidth + 10;
+        Canvas.SetLeft(spec.Element, x);
+        Canvas.SetTop(spec.Element, y);
+        _stage.Children.Add(spec.Element);
+
+        _sprites.Add(new Sprite(spec.Element, lane, x, y, spec!.Width, spec!.SpeedPxPerSec));
+
+        if (spec.Image is not null && _imgCts is not null)
         {
-            _ = TryLoadImageAsync(msg.SessionId, imageUrl, img, _imgCts.Token);
+            _ = TryLoadImageAsync(spec.SessionId, spec.ImageUrl, spec.Image, _imgCts.Token);
         }
     }
 

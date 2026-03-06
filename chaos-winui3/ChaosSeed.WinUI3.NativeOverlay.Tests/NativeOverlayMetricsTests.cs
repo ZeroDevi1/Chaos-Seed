@@ -19,6 +19,24 @@ public sealed class NativeOverlayMetricsTests
         Assert.Equal(6, metrics.MaxSpawn);
     }
 
+
+    [Fact]
+    public void FromOverlayWindowSettings_UsesOverlaySpecificFields()
+    {
+        var settings = new AppSettings
+        {
+            DanmakuOverlayWindowFontScale = 1.5,
+            DanmakuOverlayWindowDensity = 0.5,
+            DanmakuOverlayWindowArea = DanmakuOverlayAreaMode.Half,
+        };
+
+        var metrics = NativeOverlayMetricsCalculator.FromOverlayWindowSettings(settings);
+
+        Assert.Equal(30f, metrics.FontSizePx);
+        Assert.Equal(3, metrics.MaxSpawn);
+        Assert.Equal(0.5, metrics.AreaRatio, 3);
+    }
+
     [Fact]
     public void ComputeLaneCount_AndDensityFollowSharedSettings()
     {

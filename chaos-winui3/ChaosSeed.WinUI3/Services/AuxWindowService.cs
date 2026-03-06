@@ -60,6 +60,18 @@ public sealed class AuxWindowService
         w.Show();
     }
 
+    public void PreviewOverlaySettings(AppSettings settings)
+    {
+        try
+        {
+            _overlay?.PreviewSettings(settings);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private void ApplyStyleToOpenWindows()
     {
         if (_chat is not null)

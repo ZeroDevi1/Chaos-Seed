@@ -33,6 +33,16 @@ internal static class NativeOverlayMetricsCalculator
         return FromValues(fontScale, density, area);
     }
 
+    public static NativeOverlayMetrics FromOverlayWindowSettings(AppSettings settings)
+    {
+        var fontScale = settings is null
+            ? 1f
+            : Math.Clamp((float)settings.DanmakuOverlayWindowFontScale, MinFontScale, MaxFontScale);
+        var density = settings is null ? 1.0 : Clamp01(settings.DanmakuOverlayWindowDensity);
+        var area = settings?.DanmakuOverlayWindowArea ?? DanmakuOverlayAreaMode.Full;
+        return FromValues(fontScale, density, area);
+    }
+
     public static NativeOverlayMetrics FromValues(float fontScale, double density, DanmakuOverlayAreaMode area)
     {
         fontScale = Math.Clamp(fontScale, MinFontScale, MaxFontScale);
