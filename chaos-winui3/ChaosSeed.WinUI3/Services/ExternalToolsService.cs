@@ -97,7 +97,7 @@ public sealed class ExternalToolsService
             var zipPath = Path.Combine(downloadDir, zipName);
 
             progress?.Report(new ExternalToolProgress { Phase = "sha256", Message = "下载 sha256…" });
-            var expectedSha = await DownloadSha256Async(shaUrl, ct).ConfigureAwait(false);
+            var expectedSha = await DownloadSha256Async(shaUrl, zipName, ct).ConfigureAwait(false);
 
             progress?.Report(new ExternalToolProgress { Phase = "download", Message = "下载 ffmpeg 压缩包…" });
             await DownloadFileWithHashAsync(zipUrl, zipPath, expectedSha, progress, ct).ConfigureAwait(false);
@@ -139,13 +139,11 @@ public sealed class ExternalToolsService
             return false;
         }
 
-        // Prefer BtbN standard naming.
-        var preferred = "ffmpeg-master-latest-win64-gpl.zip";
-        var preferredSha = preferred + ".sha256";
-
         string? bestZipUrl = null;
         string? bestZipName = null;
         string? bestShaUrl = null;
+        string? checksumsUrl = null;
+        var bestPriority = int.MaxValue;
 
         foreach (var a in assetsEl.EnumerateArray())
         {
@@ -156,24 +154,20 @@ public sealed class ExternalToolsService
                 continue;
             }
 
-            if (string.Equals(name, preferred, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(name, "checksums.sha256", StringComparison.OrdinalIgnoreCase))
             {
-                bestZipUrl = url;
-                bestZipName = name;
-            }
-            else if (bestZipUrl is null
-                     && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-                     && name.Contains("win64", StringComparison.OrdinalIgnoreCase)
-                     && name.Contains("gpl", StringComparison.OrdinalIgnoreCase))
-            {
-                bestZipUrl = url;
-                bestZipName = name;
+                checksumsUrl = url;
             }
 
-            if (string.Equals(name, preferredSha, StringComparison.OrdinalIgnoreCase))
+            var priority = GetPreferredFfmpegZipPriority(name);
+            if (priority is null || priority.Value >= bestPriority)
             {
-                bestShaUrl = url;
+                continue;
             }
+
+            bestPriority = priority.Value;
+            bestZipUrl = url;
+            bestZipName = name;
         }
 
         if (bestZipUrl is null || bestZipName is null)
@@ -182,7 +176,6 @@ public sealed class ExternalToolsService
             return false;
         }
 
-        // Find sha256 matching the chosen zip.
         var wantedShaName = bestZipName + ".sha256";
         foreach (var a in assetsEl.EnumerateArray())
         {
@@ -197,7 +190,12 @@ public sealed class ExternalToolsService
 
         if (bestShaUrl is null)
         {
-            err = $"Latest ffmpeg release missing sha256 asset: {wantedShaName}";
+            bestShaUrl = checksumsUrl;
+        }
+
+        if (bestShaUrl is null)
+        {
+            err = $"Latest ffmpeg release missing checksum asset for {bestZipName}";
             return false;
         }
 
@@ -207,21 +205,88 @@ public sealed class ExternalToolsService
         return true;
     }
 
-    private async Task<string> DownloadSha256Async(string url, CancellationToken ct)
+    private static int? GetPreferredFfmpegZipPriority(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)
+            || !name.StartsWith("ffmpeg-", StringComparison.OrdinalIgnoreCase)
+            || !name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            || !name.Contains("win64", StringComparison.OrdinalIgnoreCase)
+            || !name.Contains("gpl", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (name.StartsWith("ffmpeg-master-latest-", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("ffmpeg-N-", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (name.StartsWith("ffmpeg-n8.", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("-8.0.zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return 10;
+        }
+
+        if (name.StartsWith("ffmpeg-n7.", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("-7.1.zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return 20;
+        }
+
+        return 50;
+    }
+
+    private async Task<string> DownloadSha256Async(string url, string zipName, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
 
         var txt = (await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false)).Trim();
-        // Expected format: "<sha256>  <filename>"
-        var sha = txt.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
-        sha = sha.Trim();
-        if (sha.Length != 64)
+        var singleSha = "";
+        foreach (var rawLine in txt.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
         {
-            throw new Exception($"Invalid sha256 file contents: '{txt}'");
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                continue;
+            }
+
+            var sha = parts[0].Trim();
+            if (sha.Length != 64)
+            {
+                continue;
+            }
+
+            if (parts.Length == 1)
+            {
+                if (string.IsNullOrEmpty(singleSha))
+                {
+                    singleSha = sha;
+                }
+                continue;
+            }
+
+            var fileName = parts[^1].Trim().TrimStart('*');
+            if (string.Equals(fileName, zipName, StringComparison.OrdinalIgnoreCase))
+            {
+                return sha;
+            }
         }
-        return sha;
+
+        if (!string.IsNullOrEmpty(singleSha))
+        {
+            return singleSha;
+        }
+
+        throw new Exception($"Unable to find sha256 for {zipName} in checksum file: '{url}'");
     }
 
     private async Task DownloadFileWithHashAsync(

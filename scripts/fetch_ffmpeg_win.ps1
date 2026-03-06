@@ -20,6 +20,23 @@ function Has-FFmpegDlls([string]$Dir) {
   return $null -ne $dll
 }
 
+function Test-TrackMatch([string]$AssetName, [string]$TrackName) {
+  switch ($TrackName) {
+    'master' {
+      return $AssetName -match '^ffmpeg-master-latest-' -or $AssetName -match '^ffmpeg-N-'
+    }
+    'n8.0' {
+      return $AssetName -match '^ffmpeg-n8\.0' -or $AssetName -match '-8\.0\.zip$'
+    }
+    'n7.1' {
+      return $AssetName -match '^ffmpeg-n7\.1' -or $AssetName -match '-7\.1\.zip$'
+    }
+    default {
+      return $AssetName -match [regex]::Escape($TrackName)
+    }
+  }
+}
+
 $proj = Resolve-Path -LiteralPath $ProjectDir
 $outDir = Join-Path $proj 'FFmpeg'
 
@@ -40,17 +57,20 @@ $headers = @{
 Write-Host "[ffmpeg] Fetching latest win64 LGPL shared build info (track=$Track)..."
 $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest' -Headers $headers
 
-$asset = $rel.assets | Where-Object {
-  $_.name -match '^ffmpeg-' -and
-  $_.name -match $Track -and
-  $_.name -match 'win64' -and
-  $_.name -match 'lgpl' -and
-  $_.name -match 'shared' -and
-  $_.name -match 'latest'
-} | Select-Object -First 1
+$asset = $rel.assets |
+  Where-Object {
+    $_.name -match '^ffmpeg-' -and
+    (Test-TrackMatch $_.name $Track) -and
+    $_.name -match 'win64' -and
+    $_.name -match 'lgpl' -and
+    $_.name -match 'shared' -and
+    $_.name -match '\.zip$'
+  } |
+  Sort-Object -Property name |
+  Select-Object -First 1
 
 if (-not $asset) {
-  throw "No matching asset found in latest release (track=$Track, win64 + lgpl + shared + latest)."
+  throw "No matching asset found in latest release (track=$Track, win64 + lgpl + shared + zip)."
 }
 
 $zipUrl = $asset.browser_download_url
