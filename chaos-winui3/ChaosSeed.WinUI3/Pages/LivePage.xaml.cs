@@ -113,6 +113,36 @@ public sealed partial class LivePage : Page
     public string OverviewStatus => $"状态：{(_manifest?.Info?.IsLiving == true ? "直播中" : "未开播/离线")}";
     public string OverviewRoom => _manifest is null ? "" : $"房间：{_manifest.Site}:{_manifest.RoomId}";
 
+    private static string BuildDanmakuInputHint(string? site, string? roomId)
+    {
+        var siteText = (site ?? string.Empty).Trim();
+        var roomText = (roomId ?? string.Empty).Trim();
+        if (siteText.Length == 0 || roomText.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        return $"{siteText}:{roomText}";
+    }
+
+    private static void PublishDanmakuInputHint(string? site, string? roomId)
+    {
+        var next = BuildDanmakuInputHint(site, roomId);
+        if (next.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            LiveDanmakuInputService.Instance.Publish(next);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     public LivePage()
     {
         InitializeComponent();
@@ -1079,6 +1109,11 @@ public sealed partial class LivePage : Page
             {
                 return;
             }
+
+            PublishDanmakuInputHint(
+                string.IsNullOrWhiteSpace(res.Site) ? _manifest?.Site : res.Site,
+                string.IsNullOrWhiteSpace(res.RoomId) ? _manifest?.RoomId : res.RoomId
+            );
 
             SetPlayUiState(PlayUiState.Playing, null);
             SyncAudioUiFromPlayer();

@@ -51,7 +51,9 @@ public sealed partial class DanmakuPage : Page
 
         DanmakuService.Instance.Message += OnMsg;
         DanmakuService.Instance.StatusChanged += OnStatusChanged;
+        LiveDanmakuInputService.Instance.InputChanged += OnLiveDanmakuInputChanged;
 
+        ApplySuggestedInputFromLiveRoom();
         UpdateUiFromService();
     }
 
@@ -64,6 +66,7 @@ public sealed partial class DanmakuPage : Page
 
         DanmakuService.Instance.Message -= OnMsg;
         DanmakuService.Instance.StatusChanged -= OnStatusChanged;
+        LiveDanmakuInputService.Instance.InputChanged -= OnLiveDanmakuInputChanged;
 
         try
         {
@@ -98,6 +101,36 @@ public sealed partial class DanmakuPage : Page
             // ignore
         }
         _store = null;
+    }
+
+
+    private void OnLiveDanmakuInputChanged(object? sender, string input)
+    {
+        _ = sender;
+        ApplySuggestedInputFromLiveRoom(input);
+    }
+
+    private void ApplySuggestedInputFromLiveRoom(string? input = null)
+    {
+        var next = string.IsNullOrWhiteSpace(input)
+            ? LiveDanmakuInputService.Instance.CurrentInput
+            : input.Trim();
+        if (string.IsNullOrWhiteSpace(next))
+        {
+            return;
+        }
+
+        _dq.TryEnqueue(() =>
+        {
+            try
+            {
+                InputBox.Text = next;
+            }
+            catch
+            {
+                // ignore
+            }
+        });
     }
 
     private void OnMsg(object? sender, DanmakuMessage msg)
