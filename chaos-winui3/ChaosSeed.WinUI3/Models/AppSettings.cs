@@ -60,7 +60,7 @@ public sealed class AppSettings
 
     // Native transparent overlay window settings. Defaults intentionally match player overlay.
     public double DanmakuOverlayWindowOpacity { get; set; } = 1.0; // 0..1
-    public double DanmakuOverlayWindowFontScale { get; set; } = 1.0; // 0.5..2
+    public double DanmakuOverlayWindowFontScale { get; set; } = 2.0; // 0.5..2
     public double DanmakuOverlayWindowDensity { get; set; } = 1.0; // 0..1
     public DanmakuOverlayAreaMode DanmakuOverlayWindowArea { get; set; } = DanmakuOverlayAreaMode.Full;
 
@@ -130,3 +130,4 @@ public sealed class AppSettings
     public long? AutoUpdateLastCheckUnixMs { get; set; }
     public string? AutoUpdateIgnoredVersion { get; set; }
 }
+

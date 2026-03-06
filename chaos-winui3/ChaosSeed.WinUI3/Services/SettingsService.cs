@@ -112,6 +112,14 @@ public sealed class SettingsService
             }
         }
 
+        // 透明悬浮窗字号曾默认跟随 1.0；现在调大为 2.0。
+        // 对于历史配置里仍保留旧默认值 1.0 的场景，这里做一次迁移，避免用户从弹幕页打开悬浮窗时仍看到过小字号。
+        if (Math.Abs(Current.DanmakuOverlayWindowFontScale - 1.0) < 0.001)
+        {
+            Current.DanmakuOverlayWindowFontScale = 2.0;
+            changed = true;
+        }
+
         return changed;
     }
 
