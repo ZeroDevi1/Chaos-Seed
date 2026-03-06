@@ -19,11 +19,20 @@ cd "$ROOT_DIR"
 # 默认只构建真机最常用的 arm64-v8a。
 # 如需支持模拟器（通常是 x86_64），可这样调用：
 #   CHAOS_ANDROID_ABIS="arm64-v8a x86_64" bash tools/build_android_ffi.sh
+#   CHAOS_ANDROID_FFI_FEATURES="tts-python" bash tools/build_android_ffi.sh
 if [ -n "${CHAOS_ANDROID_ABIS:-}" ]; then
   # shellcheck disable=SC2206
   TARGETS=(${CHAOS_ANDROID_ABIS})
 else
   TARGETS=("arm64-v8a")
+fi
+
+CHAOS_ANDROID_FFI_FEATURES_RAW="${CHAOS_ANDROID_FFI_FEATURES:-}"
+if [ -n "$CHAOS_ANDROID_FFI_FEATURES_RAW" ]; then
+  # shellcheck disable=SC2206
+  FFI_FEATURES=(${CHAOS_ANDROID_FFI_FEATURES_RAW})
+else
+  FFI_FEATURES=()
 fi
 
 OUT_DIR="$FLUTTER_DIR/android/app/src/main/jniLibs"
@@ -75,7 +84,11 @@ for ABI in "${TARGETS[@]}"; do
   fi
 
   echo "==> Building chaos-ffi for $ABI"
-  cargo ndk -t "$ABI" -o "$OUT_DIR" build -p chaos-ffi --release
+  build_args=(-p chaos-ffi --no-default-features)
+  if [ ${#FFI_FEATURES[@]} -gt 0 ]; then
+    build_args+=(--features "${FFI_FEATURES[*]}")
+  fi
+  cargo ndk -t "$ABI" -o "$OUT_DIR" build --release "${build_args[@]}"
 done
 
 echo "==> Done. Output under: $OUT_DIR"

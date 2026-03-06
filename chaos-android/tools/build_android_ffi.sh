@@ -13,6 +13,7 @@ set -euo pipefail
 # Optional env vars:
 # - CHAOS_ANDROID_ABIS="arm64-v8a x86_64"   (default: "arm64-v8a x86_64")
 # - CHAOS_ANDROID_PROFILE=release|debug    (default: release)
+# - CHAOS_ANDROID_FFI_FEATURES="feat1 feat2"   (default: none; Android strips desktop-only deps)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANDROID_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -25,6 +26,14 @@ if [ -n "${CHAOS_ANDROID_ABIS:-}" ]; then
   TARGETS=(${CHAOS_ANDROID_ABIS})
 else
   TARGETS=("arm64-v8a" "x86_64")
+fi
+
+CHAOS_ANDROID_FFI_FEATURES_RAW="${CHAOS_ANDROID_FFI_FEATURES:-}"
+if [ -n "$CHAOS_ANDROID_FFI_FEATURES_RAW" ]; then
+  # shellcheck disable=SC2206
+  FFI_FEATURES=(${CHAOS_ANDROID_FFI_FEATURES_RAW})
+else
+  FFI_FEATURES=()
 fi
 
 PROFILE="${CHAOS_ANDROID_PROFILE:-release}"
@@ -93,10 +102,15 @@ for ABI in "${TARGETS[@]}"; do
   # -C link-arg=-Wl,-z,max-page-size=16384 : 告诉链接器将最大页大小设为 16KB
   export RUSTFLAGS="${ORIG_RUSTFLAGS} -C link-arg=-Wl,-z,max-page-size=16384"
 
+  build_args=(-p chaos-ffi --no-default-features)
+  if [ ${#FFI_FEATURES[@]} -gt 0 ]; then
+    build_args+=(--features "${FFI_FEATURES[*]}")
+  fi
+
   if [ "$PROFILE" = "release" ]; then
-    cargo ndk -t "$ABI" -o "$OUT_DIR" build -p chaos-ffi --release
+    cargo ndk -t "$ABI" -o "$OUT_DIR" build --release "${build_args[@]}"
   else
-    cargo ndk -t "$ABI" -o "$OUT_DIR" build -p chaos-ffi
+    cargo ndk -t "$ABI" -o "$OUT_DIR" build "${build_args[@]}"
   fi
 done
 
