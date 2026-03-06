@@ -1,7 +1,8 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Imaging;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using ChaosSeed.WinUI3.Models;
@@ -13,8 +14,6 @@ using Windows.Storage.Streams;
 
 namespace ChaosSeed.WinUI3.Windows;
 
-// A Win32 layered window overlay for "true" transparency on Windows 11.
-// This avoids WinUI3's limitations where XAML-level Transparent can still render as black.
 public sealed class NativeDanmakuOverlayWindow : IDisposable
 {
     private static readonly NativeOverlayHitTest.Config _hitCfg = new(
@@ -23,48 +22,53 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         CloseBtnPadPx: CloseBtnPadPx,
         ResizeGripPx: ResizeGripPx
     );
-    private readonly DispatcherQueue _dq = DispatcherQueue.GetForCurrentThread();
 
+    private readonly DispatcherQueue _dq = DispatcherQueue.GetForCurrentThread();
     private readonly object _queueGate = new();
     private readonly Queue<DanmakuMessage> _queue = new();
     private readonly List<Sprite> _sprites = new();
     private readonly Random _rand = new();
+    private readonly Dictionary<string, Image> _imageCache = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _imageLoading = new(StringComparer.Ordinal);
+    private readonly NativeOverlayTextLayout _textLayout = new();
+    private readonly NativeOverlayColorTextRenderer _colorTextRenderer = new();
+    private readonly Win32Native.WndProc _wndProc;
 
     private DispatcherQueueTimer? _timer;
     private long _lastTickTs;
-
     private IntPtr _hwnd;
-    private bool _locked = true; // locked == click-through except top grip; F2 toggles
+    private bool _locked = true;
     private bool _closed;
-
     private NativeLayeredSurface? _surface;
     private int _wPx;
     private int _hPx;
-
-    private readonly Dictionary<string, Image> _imageCache = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _imageLoading = new(StringComparer.Ordinal);
-    private Font? _font;
     private Font? _uiFont;
+    private int _laneCursor;
 
-    // Increase grip width to make resizing easier to hit with the mouse.
-    // User request: enlarge 2~4x so the resize cursor is easier to trigger.
+    private bool _enabled = true;
+    private float _opacity = 1f;
+    private float _fontScale = 1f;
+    private double _density = 1.0;
+    private DanmakuOverlayAreaMode _area = DanmakuOverlayAreaMode.Full;
+
     private const int ResizeGripPx = 32;
     private const int TopBarHeightPx = 32;
     private const int CloseBtnSizePx = 18;
     private const int CloseBtnPadPx = 8;
     private const int BorderThicknessPx = 6;
     private const int CornerRadiusPx = 12;
-
-    // Danmaku font size (px). User request: 2x larger than the previous 20px.
-    private const int DanmakuFontSizePx = 40;
-    private const double LaneHeight = DanmakuFontSizePx + 24;
-    private const double TopPad = 10;
-    private const double BottomPad = 10;
+    private const float TopPadPx = 10f;
+    private const float BottomPadPx = 10f;
+    private const float ContentSpacingPx = 6f;
+    private const int MaxQueuedMessages = 1000;
+    private const int QueuedTrimTo = 200;
 
     public NativeDanmakuOverlayWindow()
     {
         _wndProc = WndProcImpl;
         DanmakuService.Instance.Message += OnMsg;
+        SettingsService.Instance.SettingsChanged += OnSettingsChanged;
+        ApplySettings(SettingsService.Instance.Current);
     }
 
     public event EventHandler? Closed;
@@ -82,6 +86,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             {
                 Win32Native.ShowWindow(_hwnd, Win32Native.SW_SHOWNOACTIVATE);
                 Win32OverlayInterop.SetTopmost(_hwnd, true);
+                RenderFrame();
             }
             catch
             {
@@ -107,6 +112,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
 
     public void Dispose()
     {
+        SettingsService.Instance.SettingsChanged -= OnSettingsChanged;
         DanmakuService.Instance.Message -= OnMsg;
 
         try { _timer?.Stop(); } catch { }
@@ -132,12 +138,14 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         _wPx = 0;
         _hPx = 0;
 
-        try { _font?.Dispose(); } catch { }
-        _font = null;
         try { _uiFont?.Dispose(); } catch { }
         _uiFont = null;
+        try { _textLayout.Dispose(); } catch { }
+        try { _colorTextRenderer.Dispose(); } catch { }
 
-        try
+        ClearDanmakuState();
+
+        lock (_imageCache)
         {
             foreach (var kv in _imageCache)
             {
@@ -145,10 +153,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             }
             _imageCache.Clear();
             _imageLoading.Clear();
-        }
-        catch
-        {
-            // ignore
         }
 
         try
@@ -159,6 +163,59 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         {
             // ignore
         }
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+
+        var settings = SettingsService.Instance.Current;
+        if (_dq.HasThreadAccess)
+        {
+            ApplySettings(settings);
+            return;
+        }
+
+        try
+        {
+            _dq.TryEnqueue(() => ApplySettings(settings));
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private void ApplySettings(AppSettings settings)
+    {
+        var nextEnabled = settings?.DanmakuOverlayEnabled ?? true;
+        var nextOpacity = (float)Clamp01(settings?.DanmakuOverlayOpacity ?? 1.0);
+        var nextFontScale = Math.Clamp(
+            (float)(settings?.DanmakuOverlayFontScale ?? 1.0),
+            NativeOverlayMetricsCalculator.MinFontScale,
+            NativeOverlayMetricsCalculator.MaxFontScale
+        );
+        var nextDensity = Clamp01(settings?.DanmakuOverlayDensity ?? 1.0);
+        var nextArea = settings?.DanmakuOverlayArea ?? DanmakuOverlayAreaMode.Full;
+
+        var needClear = !nextEnabled
+            || Math.Abs(nextFontScale - _fontScale) > 0.001f
+            || Math.Abs(nextDensity - _density) > 0.001
+            || nextArea != _area;
+
+        _enabled = nextEnabled;
+        _opacity = nextOpacity;
+        _fontScale = nextFontScale;
+        _density = nextDensity;
+        _area = nextArea;
+
+        if (needClear)
+        {
+            ClearDanmakuState();
+        }
+
+        RenderFrame();
     }
 
     private void CreateWindow()
@@ -181,12 +238,10 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             hIconSm = IntPtr.Zero,
         };
 
-        // Best-effort: if already registered, RegisterClassEx returns 0; ignore.
         _ = Win32Native.RegisterClassExW(ref wc);
 
         LoadBoundsOrDefault(out var x, out var y, out var w, out var h);
 
-        // Show in taskbar so users can find/close it even if main window is hidden.
         var exStyle = Win32Native.WS_EX_LAYERED | Win32Native.WS_EX_APPWINDOW;
         var style = Win32Native.WS_POPUP;
 
@@ -216,7 +271,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         Win32Native.ShowWindow(_hwnd, Win32Native.SW_SHOWNOACTIVATE);
         Win32Native.UpdateWindow(_hwnd);
 
-        // Initialize surface.
         _surface = new NativeLayeredSurface(_hwnd);
         _surface.Resize(w, h);
         _wPx = w;
@@ -255,14 +309,24 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         _lastTickTs = now;
 
         MoveSprites(dt);
-        SpawnSprites(maxSpawn: 6);
+        if (_enabled)
+        {
+            SpawnSprites();
+        }
         RenderFrame();
     }
 
     private void OnMsg(object? sender, DanmakuMessage msg)
     {
         _ = sender;
-        if (msg is null)
+        if (msg is null || !_enabled)
+        {
+            return;
+        }
+
+        var text = (msg.Text ?? string.Empty).Trim();
+        var url = (msg.ImageUrl ?? string.Empty).Trim();
+        if (text.Length == 0 && url.Length == 0)
         {
             return;
         }
@@ -270,14 +334,30 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         lock (_queueGate)
         {
             _queue.Enqueue(msg);
-            if (_queue.Count > 1000)
+            if (_queue.Count > MaxQueuedMessages)
             {
-                while (_queue.Count > 200)
+                while (_queue.Count > QueuedTrimTo)
                 {
                     _queue.Dequeue();
                 }
             }
         }
+    }
+
+    private void ClearDanmakuState()
+    {
+        lock (_queueGate)
+        {
+            _queue.Clear();
+        }
+
+        foreach (var sprite in _sprites)
+        {
+            DisposeSprite(sprite);
+        }
+
+        _sprites.Clear();
+        _laneCursor = 0;
     }
 
     private void MoveSprites(double dt)
@@ -289,175 +369,228 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
 
         for (var i = _sprites.Count - 1; i >= 0; i--)
         {
-            var s = _sprites[i];
-            s.X -= s.SpeedPxPerSec * dt;
-            if (s.X + s.Width < -10)
+            var sprite = _sprites[i];
+            sprite.X -= sprite.SpeedPxPerSec * dt;
+            if (sprite.X + sprite.Width < -10)
             {
+                DisposeSprite(sprite);
                 _sprites.RemoveAt(i);
             }
         }
     }
 
-    private void SpawnSprites(int maxSpawn)
+    private void SpawnSprites()
     {
         if (_wPx <= 1 || _hPx <= 1)
         {
             return;
         }
 
-        List<DanmakuMessage>? batch = null;
+        var metrics = GetMetrics();
+        if (metrics.MaxSpawn <= 0)
+        {
+            return;
+        }
+
         lock (_queueGate)
         {
             if (_queue.Count == 0)
             {
                 return;
             }
+        }
 
-            var n = Math.Min(maxSpawn, _queue.Count);
-            batch = new List<DanmakuMessage>(n);
-            for (var i = 0; i < n; i++)
+        var laneCount = NativeOverlayLaneScheduler.ComputeLaneCount(
+            _hPx,
+            metrics.AreaRatio,
+            metrics.LaneHeightPx,
+            TopPadPx,
+            BottomPadPx
+        );
+        var laneTail = new double[laneCount];
+        for (var i = 0; i < laneTail.Length; i++)
+        {
+            laneTail[i] = double.NegativeInfinity;
+        }
+
+        for (var i = 0; i < _sprites.Count; i++)
+        {
+            var sprite = _sprites[i];
+            if ((uint)sprite.Lane >= (uint)laneTail.Length)
             {
-                batch.Add(_queue.Dequeue());
+                continue;
+            }
+
+            var tail = sprite.X + sprite.Width;
+            if (tail > laneTail[sprite.Lane])
+            {
+                laneTail[sprite.Lane] = tail;
             }
         }
 
-        if (batch is null || batch.Count == 0)
+        var spawnRightEdge = _wPx + 10.0;
+        var canSpawnInAnyLane = false;
+        for (var i = 0; i < laneTail.Length; i++)
+        {
+            if (laneTail[i] < spawnRightEdge - metrics.GapPx)
+            {
+                canSpawnInAnyLane = true;
+                break;
+            }
+        }
+
+        if (!canSpawnInAnyLane)
         {
             return;
         }
 
-        var availableHeight = _hPx - TopPad - BottomPad;
-        var laneCount = Math.Max(1, (int)Math.Floor(availableHeight / LaneHeight));
-
-        foreach (var msg in batch)
+        for (var n = 0; n < metrics.MaxSpawn; n++)
         {
-            var lane = _laneCursor++ % laneCount;
-            var y = TopPad + lane * LaneHeight;
-            SpawnOne(msg, y);
+            DanmakuMessage? msg;
+            lock (_queueGate)
+            {
+                if (_queue.Count == 0)
+                {
+                    return;
+                }
+
+                msg = _queue.Peek();
+            }
+
+            var lane = NativeOverlayLaneScheduler.FindAvailableLane(
+                laneTail,
+                spawnRightEdge - metrics.GapPx,
+                _laneCursor,
+                out var nextLaneCursor
+            );
+            if (lane < 0)
+            {
+                return;
+            }
+
+            if (!TryCreateSprite(msg!, lane, metrics, out var sprite))
+            {
+                lock (_queueGate)
+                {
+                    if (_queue.Count > 0)
+                    {
+                        _queue.Dequeue();
+                    }
+                }
+                continue;
+            }
+
+            lock (_queueGate)
+            {
+                if (_queue.Count > 0)
+                {
+                    _queue.Dequeue();
+                }
+            }
+
+            _laneCursor = nextLaneCursor;
+            _sprites.Add(sprite!);
+            laneTail[lane] = spawnRightEdge + sprite!.Width;
         }
     }
 
-    private int _laneCursor;
-
-    private void SpawnOne(DanmakuMessage msg, double y)
+    private bool TryCreateSprite(DanmakuMessage msg, int lane, NativeOverlayMetrics metrics, out Sprite? sprite)
     {
-        var text = (msg.Text ?? "").Trim();
-        var url = (msg.ImageUrl ?? "").Trim();
-        if (text.Length == 0 && url.Length > 0)
+        sprite = null;
+
+        var text = (msg.Text ?? string.Empty).Trim();
+        var imageUrl = (msg.ImageUrl ?? string.Empty).Trim();
+        var hasImage = !string.IsNullOrWhiteSpace(imageUrl);
+        if (hasImage && DanmakuRowVm.IsImagePlaceholderText(text))
         {
-            text = "[图片]";
+            text = string.Empty;
         }
 
-        if (text.Length == 0 && url.Length == 0)
+        if (text.Length == 0 && imageUrl.Length == 0)
         {
-            return;
+            return false;
         }
 
-        var font = GetFont();
-        var sid = (msg.SessionId ?? "").Trim();
-        TryEnsureImageLoadingBestEffort(sid, url);
-
-        var spacing = url.Length > 0 ? 6 : 0;
-        var imgW = url.Length > 0 ? 28 : 0;
-        var textSize = MeasureTextBestEffort(text, font);
-        var width = Math.Max(60, imgW + spacing + textSize.Width);
-
-        var x = _wPx + 10;
-        var speed = 160 + _rand.NextDouble() * 80;
-
-        _sprites.Add(new Sprite(sid, text, url, x, y, width, speed));
-    }
-
-    private Font GetFont()
-    {
-        // Keep it simple; can be made configurable later.
-        return _font ??= new Font("Segoe UI", DanmakuFontSizePx, FontStyle.Regular, GraphicsUnit.Pixel);
-    }
-
-    private Font GetUiFont()
-    {
-        return _uiFont ??= new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Pixel);
-    }
-
-    private static SizeF MeasureTextBestEffort(string text, Font font)
-    {
-        try
+        NativeOverlayTextLayout.Layout? layout = null;
+        Bitmap? textBitmap = null;
+        if (text.Length > 0)
         {
-            using var bmp = new Bitmap(1, 1, PixelFormat.Format32bppPArgb);
-            using var g = Graphics.FromImage(bmp);
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            using var fmt = new StringFormat(StringFormat.GenericTypographic);
-            fmt.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
-            return g.MeasureString(text, font, int.MaxValue, fmt);
+            textBitmap = _colorTextRenderer.TryRender(text, metrics.FontSizePx);
+            if (textBitmap is null)
+            {
+                layout = _textLayout.CreateLayout(text, metrics.FontSizePx);
+            }
         }
-        catch
-        {
-            return new SizeF(Math.Max(60, text.Length * 10), (float)font.Size);
-        }
+
+        var textWidth = textBitmap?.Width ?? layout?.Size.Width ?? 0f;
+        var textHeight = textBitmap?.Height ?? layout?.Size.Height ?? 0f;
+        var imageSize = hasImage ? metrics.ImageSizePx : 0f;
+        var spacing = textWidth > 0f && imageSize > 0f ? ContentSpacingPx : 0f;
+        var contentHeight = Math.Max(textHeight, imageSize);
+        var width = Math.Max(60f, textWidth + imageSize + spacing);
+        var laneTop = TopPadPx + (float)(lane * metrics.LaneHeightPx);
+        var textTopOffset = textWidth > 0f ? (contentHeight - textHeight) / 2f : 0f;
+        var imageTopOffset = imageSize > 0f ? (contentHeight - imageSize) / 2f : 0f;
+        var speed = (_wPx + width + 60f) / Math.Max(1.0, 8.0 + _rand.NextDouble() * 2.0);
+        var sessionId = (msg.SessionId ?? string.Empty).Trim();
+
+        TryEnsureImageLoadingBestEffort(sessionId, imageUrl);
+
+        sprite = new Sprite(
+            sessionId,
+            imageUrl,
+            layout,
+            textBitmap,
+            lane,
+            _wPx + 10.0,
+            laneTop,
+            width,
+            speed,
+            metrics.LaneHeightPx,
+            contentHeight,
+            imageSize,
+            textTopOffset,
+            imageTopOffset,
+            spacing,
+            metrics.FontSizePx
+        );
+        return true;
     }
 
     private void TryEnsureImageLoadingBestEffort(string sessionId, string url)
     {
-        try
-        {
-            if (url.Length == 0)
-            {
-                return;
-            }
-            var sid = (sessionId ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(sid))
-            {
-                return;
-            }
-
-            // Cache by URL (good enough; backend returns stable URLs for emotes).
-            lock (_imageCache)
-            {
-                if (_imageCache.TryGetValue(url, out var cached))
-                {
-                    _ = cached;
-                    return;
-                }
-
-                if (_imageLoading.Contains(url))
-                {
-                    return;
-                }
-
-                _imageLoading.Add(url);
-            }
-
-            // Fire-and-forget async load; meanwhile render placeholder (text only).
-            _ = TryLoadImageAsync(sid, url);
-            return;
-        }
-        catch
+        if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(url))
         {
             return;
         }
+
+        lock (_imageCache)
+        {
+            if (_imageCache.ContainsKey(url) || _imageLoading.Contains(url))
+            {
+                return;
+            }
+
+            _imageLoading.Add(url);
+        }
+
+        _ = TryLoadImageAsync(sessionId, url);
     }
 
     private async Task TryLoadImageAsync(string sessionId, string url)
     {
         try
         {
-            var sid = (sessionId ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(sid))
+            var sid = (sessionId ?? string.Empty).Trim();
+            var targetUrl = (url ?? string.Empty).Trim();
+            if (sid.Length == 0 || targetUrl.Length == 0)
             {
-                lock (_imageCache)
-                {
-                    _imageLoading.Remove(url);
-                }
                 return;
             }
 
-            var res = await DanmakuService.Instance.FetchImageAsync(sid, url, CancellationToken.None);
+            var res = await DanmakuService.Instance.FetchImageAsync(sid, targetUrl, CancellationToken.None);
             if (string.IsNullOrWhiteSpace(res.Base64))
             {
-                lock (_imageCache)
-                {
-                    _imageLoading.Remove(url);
-                }
                 return;
             }
 
@@ -465,24 +598,18 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             var img = await DecodeImageBestEffortAsync(bytes);
             if (img is null)
             {
-                lock (_imageCache)
-                {
-                    _imageLoading.Remove(url);
-                }
                 return;
             }
 
             lock (_imageCache)
             {
-                _imageLoading.Remove(url);
-                if (_imageCache.ContainsKey(url))
+                if (_imageCache.ContainsKey(targetUrl))
                 {
                     img.Dispose();
                     return;
                 }
-                _imageCache[url] = img;
 
-                // Best-effort bound: emote URLs are effectively unbounded; keep memory usage in check.
+                _imageCache[targetUrl] = img;
                 if (_imageCache.Count > 512)
                 {
                     foreach (var kv in _imageCache)
@@ -497,6 +624,9 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         catch
         {
             // ignore
+        }
+        finally
+        {
             lock (_imageCache)
             {
                 _imageLoading.Remove(url);
@@ -511,7 +641,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             return null;
         }
 
-        // Prefer WIC via WinRT BitmapDecoder so we can decode WebP on Win11 (System.Drawing can't).
         try
         {
             using var ms = new InMemoryRandomAccessStream();
@@ -524,16 +653,15 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
                 return null;
             }
 
-            // Scale down to reduce memory; we draw emotes as 28x28 anyway.
-            const uint targetMax = 64;
-            var w = decoder.PixelWidth;
-            var h = decoder.PixelHeight;
-            var max = Math.Max(w, h);
+            const uint targetMax = 192;
+            var width = decoder.PixelWidth;
+            var height = decoder.PixelHeight;
+            var max = Math.Max(width, height);
             var scale = max > targetMax ? (double)targetMax / max : 1.0;
-            var sw = (uint)Math.Max(1, Math.Round(w * scale));
-            var sh = (uint)Math.Max(1, Math.Round(h * scale));
+            var scaledWidth = (uint)Math.Max(1, Math.Round(width * scale));
+            var scaledHeight = (uint)Math.Max(1, Math.Round(height * scale));
 
-            var transform = new BitmapTransform { ScaledWidth = sw, ScaledHeight = sh };
+            var transform = new BitmapTransform { ScaledWidth = scaledWidth, ScaledHeight = scaledHeight };
             var pixelData = await decoder.GetPixelDataAsync(
                 BitmapPixelFormat.Bgra8,
                 BitmapAlphaMode.Premultiplied,
@@ -548,7 +676,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
                 return null;
             }
 
-            var bmp = new Bitmap((int)sw, (int)sh, PixelFormat.Format32bppPArgb);
+            var bmp = new Bitmap((int)scaledWidth, (int)scaledHeight, PixelFormat.Format32bppPArgb);
             var rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
             var data = bmp.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
             try
@@ -564,7 +692,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         }
         catch
         {
-            // Fall back to System.Drawing for formats it can decode.
+            // ignore and fall back to System.Drawing
         }
 
         try
@@ -590,16 +718,14 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         try
         {
             using var g = Graphics.FromImage(bmp);
-            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
-            g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighSpeed;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighSpeed;
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            g.CompositingMode = CompositingMode.SourceOver;
+            g.CompositingQuality = CompositingQuality.HighSpeed;
+            g.SmoothingMode = SmoothingMode.HighSpeed;
+            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-
             g.Clear(Color.Transparent);
 
-            using var brush = new SolidBrush(Color.White);
-            using var shadow = new SolidBrush(Color.FromArgb(140, 0, 0, 0));
+            using var frameBrush = new SolidBrush(Color.White);
             using var topBarBg = new SolidBrush(Color.FromArgb(0x88, 0, 0, 0));
             using var borderPen = new Pen(
                 Color.FromArgb(_locked ? 0xC0 : 0xE0, 255, 255, 255),
@@ -608,12 +734,9 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             borderPen.Alignment = PenAlignment.Inset;
             using var closePen = new Pen(Color.FromArgb(0xD0, 255, 255, 255), 2);
             closePen.Alignment = PenAlignment.Inset;
+            using var stringFormat = new StringFormat(StringFormat.GenericTypographic);
+            stringFormat.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
 
-            var font = GetFont();
-            using var fmt = new StringFormat(StringFormat.GenericTypographic);
-
-            // Border + top bar (always visible so user can manage the window).
-            // Rounded corners look closer to Win11.
             var oldSmooth = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var outer = CreateRoundRectPath(0, 0, _wPx - 1, _hPx - 1, CornerRadiusPx))
@@ -626,40 +749,59 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             var uiFont = GetUiFont();
             var mode = _locked ? "LOCK" : "EDIT";
             var hint = $"Overlay ({mode})  F2 Toggle  Esc Close";
-            g.DrawString(hint, uiFont, brush, 10, 8, fmt);
+            g.DrawString(hint, uiFont, frameBrush, 10, 8, stringFormat);
 
-            // Close button (top-right).
             var closeX = _wPx - CloseBtnPadPx - CloseBtnSizePx;
             var closeY = CloseBtnPadPx;
             g.DrawRectangle(borderPen, closeX, closeY, CloseBtnSizePx, CloseBtnSizePx);
             g.DrawLine(closePen, closeX + 4, closeY + 4, closeX + CloseBtnSizePx - 4, closeY + CloseBtnSizePx - 4);
             g.DrawLine(closePen, closeX + CloseBtnSizePx - 4, closeY + 4, closeX + 4, closeY + CloseBtnSizePx - 4);
 
-            foreach (var s in _sprites)
+            var alpha = Math.Clamp((int)Math.Round(_opacity * 255f), 0, 255);
+            if (alpha <= 0)
             {
-                var x = (float)s.X;
-                var y = (float)s.Y;
+                _surface?.Present();
+                return;
+            }
 
-                Image? img = null;
-                if (!string.IsNullOrWhiteSpace(s.ImageUrl))
+            using var textBrush = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255));
+            using var shadowBrush = new SolidBrush(Color.FromArgb(Math.Min(255, (int)Math.Round(alpha * 0.55f)), 0, 0, 0));
+            using var imageAttributes = CreateContentImageAttributes(_opacity);
+
+            foreach (var sprite in _sprites)
+            {
+                var drawX = (float)sprite.X;
+                var contentTop = (float)(sprite.Y + Math.Max(0f, (sprite.LaneHeight - sprite.ContentHeight) / 2f));
+
+                if (sprite.ImageSize > 0f && !string.IsNullOrWhiteSpace(sprite.ImageUrl))
                 {
-                    // Best-effort: ensure loading continues even if cache got cleared.
-                    if (!string.IsNullOrWhiteSpace(s.SessionId))
+                    if (!TryGetCachedImage(sprite.ImageUrl, out var img) && sprite.SessionId.Length > 0)
                     {
-                        TryEnsureImageLoadingBestEffort(s.SessionId, s.ImageUrl);
-                    }
-
-                    lock (_imageCache)
-                    {
-                        _ = _imageCache.TryGetValue(s.ImageUrl, out img);
+                        TryEnsureImageLoadingBestEffort(sprite.SessionId, sprite.ImageUrl);
+                        _ = TryGetCachedImage(sprite.ImageUrl, out img);
                     }
 
                     if (img is not null)
                     {
                         try
                         {
-                            g.DrawImage(img, x, y - 2, 28, 28);
-                            x += 28 + 6;
+                            var dest = new RectangleF(
+                                drawX,
+                                contentTop + sprite.ImageTopOffset,
+                                sprite.ImageSize,
+                                sprite.ImageSize
+                            );
+                            g.DrawImage(
+                                img,
+                                Rectangle.Round(dest),
+                                0,
+                                0,
+                                img.Width,
+                                img.Height,
+                                GraphicsUnit.Pixel,
+                                imageAttributes
+                            );
+                            drawX += sprite.ImageSize + sprite.SpacingAfterImage;
                         }
                         catch
                         {
@@ -668,16 +810,44 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
                     }
                 }
 
-                // Cheap "shadow" for readability over bright backgrounds.
-                var drawText = s.Text;
-                if (img is not null && DanmakuRowVm.IsImagePlaceholderText(drawText))
+                if (sprite.TextBitmap is not null)
                 {
-                    drawText = "";
+                    try
+                    {
+                        var dest = new RectangleF(
+                            drawX,
+                            contentTop + sprite.TextTopOffset,
+                            sprite.TextBitmap.Width,
+                            sprite.TextBitmap.Height
+                        );
+                        g.DrawImage(
+                            sprite.TextBitmap,
+                            Rectangle.Round(dest),
+                            0,
+                            0,
+                            sprite.TextBitmap.Width,
+                            sprite.TextBitmap.Height,
+                            GraphicsUnit.Pixel,
+                            imageAttributes
+                        );
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
                 }
-                if (!string.IsNullOrEmpty(drawText))
+                else if (sprite.TextLayout is not null)
                 {
-                    g.DrawString(drawText, font, shadow, x + 1, y + 1, fmt);
-                    g.DrawString(drawText, font, brush, x, y, fmt);
+                    _textLayout.DrawLayout(
+                        g,
+                        sprite.TextLayout,
+                        shadowBrush,
+                        textBrush,
+                        stringFormat,
+                        drawX,
+                        contentTop + sprite.TextTopOffset,
+                        sprite.FontSizePx
+                    );
                 }
             }
 
@@ -689,35 +859,71 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         }
     }
 
+    private NativeOverlayMetrics GetMetrics()
+    {
+        return NativeOverlayMetricsCalculator.FromValues(_fontScale, _density, _area);
+    }
+
+    private bool TryGetCachedImage(string imageUrl, out Image? image)
+    {
+        lock (_imageCache)
+        {
+            return _imageCache.TryGetValue(imageUrl, out image);
+        }
+    }
+
+    private static ImageAttributes CreateContentImageAttributes(float opacity)
+    {
+        var imageAttributes = new ImageAttributes();
+        var matrix = new ColorMatrix
+        {
+            Matrix00 = 1f,
+            Matrix11 = 1f,
+            Matrix22 = 1f,
+            Matrix33 = Math.Clamp(opacity, 0f, 1f),
+            Matrix44 = 1f,
+        };
+        imageAttributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+        return imageAttributes;
+    }
+
+    private static void DisposeSprite(Sprite sprite)
+    {
+        try { sprite.TextBitmap?.Dispose(); } catch { }
+    }
+
+    private Font GetUiFont()
+    {
+        return _uiFont ??= new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Pixel);
+    }
+
     private static GraphicsPath CreateRoundRectPath(int x, int y, int w, int h, int r)
     {
-        var rr = Math.Max(0, Math.Min(r, Math.Min(w, h) / 2));
-        var d = rr * 2;
+        var radius = Math.Max(0, Math.Min(r, Math.Min(w, h) / 2));
+        var diameter = radius * 2;
         var path = new GraphicsPath();
-        if (rr == 0)
+        if (radius == 0)
         {
             path.AddRectangle(new Rectangle(x, y, w, h));
             path.CloseFigure();
             return path;
         }
 
-        path.AddArc(x, y, d, d, 180, 90);
-        path.AddArc(x + w - d, y, d, d, 270, 90);
-        path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
-        path.AddArc(x, y + h - d, d, d, 90, 90);
+        path.AddArc(x, y, diameter, diameter, 180, 90);
+        path.AddArc(x + w - diameter, y, diameter, diameter, 270, 90);
+        path.AddArc(x + w - diameter, y + h - diameter, diameter, diameter, 0, 90);
+        path.AddArc(x, y + h - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
     }
 
     private void LoadBoundsOrDefault(out int x, out int y, out int w, out int h)
     {
-        var s = SettingsService.Instance.Current;
-
-        w = s.DanmakuOverlayWidth is > 100 and < 10_000 ? s.DanmakuOverlayWidth.Value : 960;
-        h = s.DanmakuOverlayHeight is > 100 and < 10_000 ? s.DanmakuOverlayHeight.Value : 540;
-
-        x = s.DanmakuOverlayX is > -50_000 and < 50_000 ? s.DanmakuOverlayX.Value : 100;
-        y = s.DanmakuOverlayY is > -50_000 and < 50_000 ? s.DanmakuOverlayY.Value : 100;
+        var settings = SettingsService.Instance.Current;
+        w = settings.DanmakuOverlayWidth is > 100 and < 10_000 ? settings.DanmakuOverlayWidth.Value : 960;
+        h = settings.DanmakuOverlayHeight is > 100 and < 10_000 ? settings.DanmakuOverlayHeight.Value : 540;
+        x = settings.DanmakuOverlayX is > -50_000 and < 50_000 ? settings.DanmakuOverlayX.Value : 100;
+        y = settings.DanmakuOverlayY is > -50_000 and < 50_000 ? settings.DanmakuOverlayY.Value : 100;
     }
 
     private void SaveBoundsBestEffort()
@@ -732,15 +938,14 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
             return;
         }
 
-        var w = Math.Max(100, rc.Right - rc.Left);
-        var h = Math.Max(100, rc.Bottom - rc.Top);
-
+        var width = Math.Max(100, rc.Right - rc.Left);
+        var height = Math.Max(100, rc.Bottom - rc.Top);
         SettingsService.Instance.Update(s =>
         {
             s.DanmakuOverlayX = rc.Left;
             s.DanmakuOverlayY = rc.Top;
-            s.DanmakuOverlayWidth = w;
-            s.DanmakuOverlayHeight = h;
+            s.DanmakuOverlayWidth = width;
+            s.DanmakuOverlayHeight = height;
         });
     }
 
@@ -748,34 +953,58 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
     {
         public Sprite(
             string sessionId,
-            string text,
             string imageUrl,
+            NativeOverlayTextLayout.Layout? textLayout,
+            Bitmap? textBitmap,
+            int lane,
             double x,
-            double y,
-            double width,
-            double speedPxPerSec
+            float y,
+            float width,
+            double speedPxPerSec,
+            float laneHeight,
+            float contentHeight,
+            float imageSize,
+            float textTopOffset,
+            float imageTopOffset,
+            float spacingAfterImage,
+            float fontSizePx
         )
         {
             SessionId = sessionId;
-            Text = text;
             ImageUrl = imageUrl;
+            TextLayout = textLayout;
+            TextBitmap = textBitmap;
+            Lane = lane;
             X = x;
             Y = y;
             Width = width;
             SpeedPxPerSec = speedPxPerSec;
+            LaneHeight = laneHeight;
+            ContentHeight = contentHeight;
+            ImageSize = imageSize;
+            TextTopOffset = textTopOffset;
+            ImageTopOffset = imageTopOffset;
+            SpacingAfterImage = spacingAfterImage;
+            FontSizePx = fontSizePx;
         }
 
         public string SessionId { get; }
-        public string Text { get; }
         public string ImageUrl { get; }
+        public NativeOverlayTextLayout.Layout? TextLayout { get; }
+        public Bitmap? TextBitmap { get; }
+        public int Lane { get; }
         public double X { get; set; }
-        public double Y { get; }
-        public double Width { get; }
+        public float Y { get; }
+        public float Width { get; }
         public double SpeedPxPerSec { get; }
+        public float LaneHeight { get; }
+        public float ContentHeight { get; }
+        public float ImageSize { get; }
+        public float TextTopOffset { get; }
+        public float ImageTopOffset { get; }
+        public float SpacingAfterImage { get; }
+        public float FontSizePx { get; }
     }
-
-    // --- Win32 interop + WndProc plumbing ---
-    private readonly Win32Native.WndProc _wndProc;
 
     private IntPtr WndProcImpl(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
@@ -794,6 +1023,7 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
                         try { _surface?.Resize(w, h); } catch { }
                         _wPx = w;
                         _hPx = h;
+                        ClearDanmakuState();
                         RenderFrame();
                     }
                     return IntPtr.Zero;
@@ -848,7 +1078,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
 
             case Win32Native.WM_LBUTTONDOWN:
                 {
-                    // Client coords for WM_LBUTTONDOWN.
                     var dx = Win32Native.GetXParam(lParam);
                     var dy = Win32Native.GetYParam(lParam);
                     var wPx = _wPx;
@@ -871,7 +1100,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
                             return IntPtr.Zero;
                         }
 
-                        // Only allow moving in EDIT (unlocked) mode.
                         if (!_locked)
                         {
                             try
@@ -897,7 +1125,6 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
 
             case Win32Native.WM_LBUTTONDBLCLK:
                 {
-                    var dx = Win32Native.GetXParam(lParam);
                     var dy = Win32Native.GetYParam(lParam);
                     if (dy >= 0 && dy < TopBarHeightPx)
                     {
@@ -914,5 +1141,15 @@ public sealed class NativeDanmakuOverlayWindow : IDisposable
         }
 
         return Win32Native.DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    private static double Clamp01(double value)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return 1.0;
+        }
+
+        return Math.Clamp(value, 0.0, 1.0);
     }
 }

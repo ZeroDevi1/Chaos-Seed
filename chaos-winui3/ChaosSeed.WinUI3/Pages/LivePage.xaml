@@ -223,6 +223,11 @@
 		                                                    <Flyout Placement="Top">
 		                                                        <StackPanel Padding="12" Spacing="12" Width="320">
 		                                                            <TextBlock Text="弹幕" FontSize="16" FontWeight="SemiBold" />
+                                                            <TextBlock
+                                                                Text="这些设置同时作用于播放器内 Overlay 与透明悬浮窗"
+                                                                TextWrapping="WrapWholeWords"
+                                                                Opacity="0.72"
+                                                                FontSize="12" />
 
 		                                                            <StackPanel Spacing="6">
 		                                                                <Grid>

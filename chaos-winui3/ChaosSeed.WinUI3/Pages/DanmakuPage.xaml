@@ -76,9 +76,9 @@
                                     <Run Text=" " />
                                     <InlineUIContainer>
                                         <Image
-                                            Width="20"
-                                            Height="20"
-                                            Margin="4,0,4,0"
+                                            Width="60"
+                                            Height="60"
+                                            Margin="6,0,6,0"
                                             VerticalAlignment="Center"
                                             Visibility="{x:Bind EmoteVisibility, Mode=OneWay}"
                                             Source="{x:Bind Emote, Mode=OneWay}" />
