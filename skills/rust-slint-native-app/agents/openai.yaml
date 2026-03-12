@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Slint Native App"
+  short_description: "构建与迭代 Rust + Slint 原生桌面应用"
+  default_prompt: "Use $rust-slint-native-app to design or extend a Rust + Slint native desktop app with the established component and theme strategy."

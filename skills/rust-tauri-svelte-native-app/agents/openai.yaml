@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Tauri Svelte Native App"
+  short_description: "构建与迭代 Tauri + Svelte + TS 原生应用"
+  default_prompt: "Use $rust-tauri-svelte-native-app to build or evolve a Rust + Tauri + Svelte + TypeScript native app with Fluent components and CSS token theming."
