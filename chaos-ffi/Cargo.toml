@@ -27,7 +27,8 @@ futures-util = "0.3"
 serde_json = "1"
 
 [features]
-default = ["tts-python", "silero-vad"]
+# 默认仅保留 silero-vad，避免 PyO3 将 python3x.dll 变成 FFI DLL 的加载前置条件。
+default = ["silero-vad"]
 live-tests = []
 gen-header = ["dep:cbindgen"]
 silero-vad = ["chaos-core/silero-vad"]

@@ -84,8 +84,8 @@ windows = { version = "0.62", features = [
 ] }
 
 [features]
-# 默认仅启用 PyO3(Python/.pt) 推理路径（更贴近 VoiceLab 的训练产物与 infer_sft.py 行为）。
-default = ["tts-python"]
+# 默认不启用 PyO3(Python/.pt) 推理路径，避免未配置 Python 环境的设备在加载动态库时被硬依赖阻塞。
+default = []
 live-tests = []
 silero-vad = ["dep:ndarray", "dep:ort-sys", "dep:silero-vad-rs"]
 

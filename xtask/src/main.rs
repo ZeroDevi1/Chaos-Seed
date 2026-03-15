@@ -58,20 +58,34 @@ fn build_winui3(release: bool) -> Result<(), String> {
         .join(".venv")
         .join("Scripts")
         .join("python.exe");
-    let use_pyo3_python = pyo3_python.exists();
-    if use_pyo3_python {
+    let bundled_pyo3_python = pyo3_python.exists();
+    let env_pyo3_python = env::var("PYO3_PYTHON")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let enable_tts_python = bundled_pyo3_python || env_pyo3_python.is_some();
+
+    if bundled_pyo3_python {
         eprintln!("> Using PYO3_PYTHON={}", pyo3_python.display());
-    } else if env::var("PYO3_PYTHON").ok().is_none() {
+    } else if let Some(py) = &env_pyo3_python {
+        eprintln!("> Using PYO3_PYTHON={py}");
+    } else {
+        eprintln!("> TTS/VoiceChat Python backend disabled: bundled python env not found.");
         eprintln!(
-            "> Hint: set PYO3_PYTHON to VoiceLab venv python.exe to avoid torch ABI mismatch (or run tools/sync_voicelab_python_env.ps1)"
+            "> Hint: run tools/sync_voicelab_python_env.ps1 or set PYO3_PYTHON, then rebuild to enable PyO3 TTS."
         );
     }
 
     let mut cargo = Command::new("cargo");
-    cargo.arg("build").arg("-p").arg("chaos-daemon");
-    // 仅使用 PyO3(Python/.pt) 后端。
-    cargo.arg("--features").arg("tts-python");
-    if use_pyo3_python {
+    cargo
+        .arg("build")
+        .arg("-p")
+        .arg("chaos-daemon")
+        .arg("--no-default-features");
+    if enable_tts_python {
+        cargo.arg("--features").arg("tts-python");
+    }
+    if bundled_pyo3_python {
         cargo.env("PYO3_PYTHON", &pyo3_python);
     }
     if release {
@@ -80,10 +94,18 @@ fn build_winui3(release: bool) -> Result<(), String> {
     run_cmd(cargo)?;
 
     let mut cargo_ffi = Command::new("cargo");
-    cargo_ffi.arg("build").arg("-p").arg("chaos-ffi");
-    // 同上：FFI 侧也启用 PyO3(Python/.pt) 后端。
-    cargo_ffi.arg("--features").arg("tts-python");
-    if use_pyo3_python {
+    cargo_ffi
+        .arg("build")
+        .arg("-p")
+        .arg("chaos-ffi")
+        .arg("--no-default-features");
+    let ffi_features = if enable_tts_python {
+        "silero-vad tts-python"
+    } else {
+        "silero-vad"
+    };
+    cargo_ffi.arg("--features").arg(ffi_features);
+    if bundled_pyo3_python {
         cargo_ffi.env("PYO3_PYTHON", &pyo3_python);
     }
     if release {

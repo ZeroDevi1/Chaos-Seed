@@ -2,6 +2,11 @@
 
 本仓库已移除 Candle 推理路径；当前 **仅支持** 通过 **PyO3 嵌入式 Python** 运行 VoiceLab 的 `tools/infer_sft.py`，直接使用训练产物 `.pt`（`llm_ckpt/flow_ckpt`）进行推理。
 
+说明：
+- `tts-python` 现为**可选特性**，默认不启用。
+- 未启用时，非 TTS 功能仍可正常编译/运行；TTS/语音聊天相关接口会在运行时返回“backend not enabled”。
+- WinUI3 的 `cargo xtask build-winui3 --release` 会在检测到已配置的 Python 环境时自动启用该特性。
+
 ## 核心接口
 
 - `chaos_core::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(...) -> TtsWavResult`
@@ -71,4 +76,3 @@ $env:CHAOS_TTS_PY_FLOW_CKPT = "exp/dream_sft/flow/torch_ddp/flow_avg.pt"
 
 cargo test -p chaos-core --release --no-default-features --features "live-tests tts-python" --test infer_dream_sft_pack_v1 -- --nocapture
 ```
-

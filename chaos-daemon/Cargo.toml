@@ -25,6 +25,7 @@ futures-util = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
-default = ["tts-python"]
+# 默认不启用 PyO3，避免未配置 Python 环境的设备连 daemon 都无法启动。
+default = []
 # 使用嵌入式 Python 运行 VoiceLab 的 infer_sft.py（直接使用 .pt checkpoint）
 tts-python = ["chaos-core/tts-python"]
