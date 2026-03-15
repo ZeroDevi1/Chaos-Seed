@@ -42,7 +42,7 @@ pub struct VoiceChatRequest {
     pub llm_ckpt: String,
     pub flow_ckpt: String,
 
-    /// （可选）python workdir / script；为空则使用 python_infer 内部的 env 兜底（CHAOS_TTS_PY_WORKDIR/CHAOS_TTS_PY_INFER_SFT）。
+    /// （可选）python workdir / script；为空则使用 python runner 内部的 env 兜底（CHAOS_TTS_PY_WORKDIR/CHAOS_TTS_PY_INFER_SFT）。
     pub python_workdir: Option<String>,
     pub python_infer_script: Option<String>,
 
@@ -149,7 +149,7 @@ async fn run_voice_chat(
 
     let out_dir2 = out_dir.clone();
     let join = tokio::task::spawn_blocking(move || -> Result<(), VoiceChatError> {
-        crate::tts::python_infer::run_infer_sft_pt_to_out_dir_with_cancel(
+        crate::tts::python_runner::run_infer_sft_pt_to_out_dir_with_cancel(
             &params2,
             &llm_ckpt2,
             &flow_ckpt2,
@@ -179,8 +179,10 @@ async fn run_voice_chat(
         match tokio::fs::read(&piece_path).await {
             Ok(bytes) => {
                 // 文件可能还在写入中：解码失败时短暂等待重试。
-                let decoded = match tokio::task::spawn_blocking(move || decode_wav_bytes_to_pcm16_mono(&bytes))
-                    .await
+                let decoded = match tokio::task::spawn_blocking(move || {
+                    decode_wav_bytes_to_pcm16_mono(&bytes)
+                })
+                .await
                 {
                     Ok(Ok(v)) => v,
                     Ok(Err(e)) => {
@@ -197,7 +199,8 @@ async fn run_voice_chat(
 
                 if let Some(prev) = pending.take() {
                     // 发送 prev（非最后）。
-                    let chunk_samples = ((prev.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000)
+                    let chunk_samples = ((prev.sample_rate as u64) * (req.cfg.chunk_ms as u64)
+                        / 1000)
                         .max(1) as usize;
                     for chunk in prev.pcm16.chunks(chunk_samples) {
                         if tx
@@ -279,7 +282,8 @@ async fn run_voice_chat(
         let wav_path = out_dir.join("chunk_0000.wav");
         if let Ok(bytes) = tokio::fs::read(&wav_path).await {
             if let Ok(decoded) = decode_wav_bytes_to_pcm16_mono(&bytes) {
-                let chunk_samples = ((decoded.sample_rate as u64) * (req.cfg.chunk_ms as u64) / 1000)
+                let chunk_samples = ((decoded.sample_rate as u64) * (req.cfg.chunk_ms as u64)
+                    / 1000)
                     .max(1) as usize;
                 let total_chunks = (decoded.pcm16.len() + chunk_samples - 1) / chunk_samples;
                 for (i, chunk) in decoded.pcm16.chunks(chunk_samples).enumerate() {

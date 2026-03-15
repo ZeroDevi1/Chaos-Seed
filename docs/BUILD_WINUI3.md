@@ -29,10 +29,10 @@ cargo xtask build-winui3 --release
 说明：
 - `chaos-winui3` 的 `csproj` 会在构建完成后，把 `target/release/chaos-daemon.exe` 复制到 WinUI 3 输出目录（与 WinUI exe 同目录）。
 - 同时会把 `target/release/chaos_ffi.dll` 复制到 WinUI 3 输出目录，供设置页选择 FFI 后端使用。
-- `cargo xtask build-winui3 --release` 现在会按环境自动决定是否启用 PyO3 TTS：
-  - 若存在 `third_party/voicelab_py_env/.venv/Scripts/python.exe`，会自动启用 `tts-python`
-  - 若显式设置了 `PYO3_PYTHON`，也会启用 `tts-python`
-  - 否则构建出的 `chaos-daemon.exe` / `chaos_ffi.dll` 不会依赖 Python DLL，TTS/语音聊天功能在运行时返回“未启用”，但其他功能可正常使用
+- `cargo xtask build-winui3 --release` 不再让 `chaos-daemon.exe` / `chaos_ffi.dll` 在编译期绑定 PyO3。
+  - 无论当前机器是否安装/配置 Python，daemon/FFI 都应能正常构建与启动
+  - 若存在 `third_party/voicelab_py_env/.venv/Scripts/python.exe` 或显式设置 `CHAOS_TTS_PYTHON_EXE`，运行时 TTS/语音聊天会优先复用该 Python
+  - 若没有 Python 环境，直播/分类/弹幕/歌词等基础功能不受影响；只有真正调用 TTS/语音聊天时才会返回对应错误
 
 ## 运行（开发/调试）
 

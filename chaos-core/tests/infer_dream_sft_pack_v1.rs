@@ -265,10 +265,18 @@ fn infer_dream_sft_pack_v1_writes_wav_file() {
 
         // infer_sft.py 默认输出文件名为 chunk_0000.wav
         let chunk = out_dir.join("chunk_0000.wav");
-        assert!(chunk.exists(), "expected python output wav at {}", chunk.display());
+        assert!(
+            chunk.exists(),
+            "expected python output wav at {}",
+            chunk.display()
+        );
 
         let run_json = out_dir.join("run.json");
-        assert!(run_json.exists(), "expected python run.json at {}", run_json.display());
+        assert!(
+            run_json.exists(),
+            "expected python run.json at {}",
+            run_json.display()
+        );
 
         let out_path = out_dir.join("infer_sft_pyo3_pt.wav");
         std::fs::write(&out_path, &wav.wav_bytes).expect("write wav");

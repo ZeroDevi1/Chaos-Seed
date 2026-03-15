@@ -48,31 +48,28 @@ fn help() -> String {
 fn build_winui3(release: bool) -> Result<(), String> {
     let profile = if release { "release" } else { "debug" };
     let root = repo_root()?;
-
-    // 若本仓库已同步了分发用 python venv，则优先用它来绑定 PyO3（避免 ABI 不匹配导致 torch 导入失败）。
-    // 说明：PyO3 会在编译期选择/绑定某个 Python；运行时我们又会随包分发 python + venv，
-    // 因此这里尽量保证“编译期 Python == 分发的 Python”。
-    let pyo3_python = root
+    let bundled_python = root
         .join("third_party")
         .join("voicelab_py_env")
         .join(".venv")
         .join("Scripts")
         .join("python.exe");
-    let bundled_pyo3_python = pyo3_python.exists();
-    let env_pyo3_python = env::var("PYO3_PYTHON")
+    let env_python = env::var("CHAOS_TTS_PYTHON_EXE")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
-    let enable_tts_python = bundled_pyo3_python || env_pyo3_python.is_some();
 
-    if bundled_pyo3_python {
-        eprintln!("> Using PYO3_PYTHON={}", pyo3_python.display());
-    } else if let Some(py) = &env_pyo3_python {
-        eprintln!("> Using PYO3_PYTHON={py}");
-    } else {
-        eprintln!("> TTS/VoiceChat Python backend disabled: bundled python env not found.");
+    if bundled_python.exists() {
         eprintln!(
-            "> Hint: run tools/sync_voicelab_python_env.ps1 or set PYO3_PYTHON, then rebuild to enable PyO3 TTS."
+            "> Detected bundled Python runtime for runtime TTS: {}",
+            bundled_python.display()
+        );
+    } else if let Some(py) = &env_python {
+        eprintln!("> Detected CHAOS_TTS_PYTHON_EXE for runtime TTS: {py}");
+    } else {
+        eprintln!("> Python runtime not detected. daemon/ffi will still build and start normally.");
+        eprintln!(
+            "> TTS/VoiceChat will only require Python when those features are actually invoked."
         );
     }
 
@@ -82,12 +79,6 @@ fn build_winui3(release: bool) -> Result<(), String> {
         .arg("-p")
         .arg("chaos-daemon")
         .arg("--no-default-features");
-    if enable_tts_python {
-        cargo.arg("--features").arg("tts-python");
-    }
-    if bundled_pyo3_python {
-        cargo.env("PYO3_PYTHON", &pyo3_python);
-    }
     if release {
         cargo.arg("--release");
     }
@@ -98,16 +89,9 @@ fn build_winui3(release: bool) -> Result<(), String> {
         .arg("build")
         .arg("-p")
         .arg("chaos-ffi")
-        .arg("--no-default-features");
-    let ffi_features = if enable_tts_python {
-        "silero-vad tts-python"
-    } else {
-        "silero-vad"
-    };
-    cargo_ffi.arg("--features").arg(ffi_features);
-    if bundled_pyo3_python {
-        cargo_ffi.env("PYO3_PYTHON", &pyo3_python);
-    }
+        .arg("--no-default-features")
+        .arg("--features")
+        .arg("silero-vad");
     if release {
         cargo_ffi.arg("--release");
     }

@@ -1,7 +1,7 @@
 use std::sync::Mutex as StdMutex;
 
-use chaos_core::llm::{ChatMessage, ChatRequest, LlmClient, LlmConfig, ReasoningMode};
 use chaos_core::llm::config_toml;
+use chaos_core::llm::{ChatMessage, ChatRequest, LlmClient, LlmConfig, ReasoningMode};
 use httpmock::Method::POST;
 use httpmock::MockServer;
 

@@ -2,12 +2,13 @@
 //!
 //! Design goals:
 //! - Core logic lives in `chaos-core` (single source of truth).
-//! - 推理默认走 PyO3(Python/.pt) 复刻（更贴近 VoiceLab 的 infer_sft.py）。ONNX 相关依赖已移除（仅保留 VAD 的 onnxruntime）。
+//! - 推理默认走外部 Python 子进程（更贴近 VoiceLab 的 infer_sft.py，同时不让 python DLL 变成主后端的加载前置条件）。
 
 pub mod params;
 pub mod post_process;
 #[cfg(feature = "tts-python")]
 pub mod python_infer;
+pub mod python_runner;
 pub mod sampling;
 pub mod text;
 pub mod vad;

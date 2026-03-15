@@ -67,7 +67,9 @@ async fn ensure_buvid_cookie(http: &reqwest::Client) -> Option<String> {
         .ok()?;
 
     if json.pointer("/code").and_then(|v| v.as_i64()).unwrap_or(-1) != 0 {
-        let _ = buvid_cookie_cache().lock().map(|mut g| *g = Some(String::new()));
+        let _ = buvid_cookie_cache()
+            .lock()
+            .map(|mut g| *g = Some(String::new()));
         return None;
     }
 
@@ -82,12 +84,16 @@ async fn ensure_buvid_cookie(http: &reqwest::Client) -> Option<String> {
         .unwrap_or("")
         .trim();
     if b3.is_empty() || b4.is_empty() {
-        let _ = buvid_cookie_cache().lock().map(|mut g| *g = Some(String::new()));
+        let _ = buvid_cookie_cache()
+            .lock()
+            .map(|mut g| *g = Some(String::new()));
         return None;
     }
 
     let cookie = format!("buvid3={b3}; buvid4={b4};");
-    let _ = buvid_cookie_cache().lock().map(|mut g| *g = Some(cookie.clone()));
+    let _ = buvid_cookie_cache()
+        .lock()
+        .map(|mut g| *g = Some(cookie.clone()));
     Some(cookie)
 }
 
@@ -266,10 +272,7 @@ fn pick_best_codec<'a>(streams: &'a [Value]) -> Option<&'a Value> {
             continue;
         };
         for f in formats {
-            let format_name = f
-                .get("format_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let format_name = f.get("format_name").and_then(|v| v.as_str()).unwrap_or("");
             let format_rank: u8 = match format_name {
                 "flv" | "fmp4" => 0,
                 _ => 1,
@@ -279,7 +282,11 @@ fn pick_best_codec<'a>(streams: &'a [Value]) -> Option<&'a Value> {
                 continue;
             };
             for c in codecs {
-                let base_url = c.get("base_url").and_then(|v| v.as_str()).unwrap_or("").trim();
+                let base_url = c
+                    .get("base_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
                 let url_info_len = c
                     .get("url_info")
                     .and_then(|v| v.as_array())
@@ -693,10 +700,18 @@ pub async fn decode_manifest(
     let max_qn = vars.iter().map(|v| v.quality).max().unwrap_or(-1);
     let resolved_qn = vars
         .iter()
-        .filter(|v| v.url.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false))
+        .filter(|v| {
+            v.url
+                .as_deref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+        })
         .map(|v| v.quality)
         .max();
-    debug!("bili_live: decode_manifest rid={} max_qn={} resolved_qn={:?}", rid, max_qn, resolved_qn);
+    debug!(
+        "bili_live: decode_manifest rid={} max_qn={} resolved_qn={:?}",
+        rid, max_qn, resolved_qn
+    );
 
     Ok(LiveManifest {
         site: Site::BiliLive,

@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-app"
-version = "0.4.6"
+version = "0.8.1"
 dependencies = [
  "base64 0.22.1",
  "chaos-core",
@@ -1097,7 +1097,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-core"
-version = "0.4.6"
+version = "0.8.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -1146,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-daemon"
-version = "0.4.6"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1165,7 +1165,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-ffi"
-version = "0.4.6"
+version = "0.8.1"
 dependencies = [
  "base64 0.22.1",
  "cbindgen",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-proto"
-version = "0.4.6"
+version = "0.8.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1192,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-slint"
-version = "0.4.6"
+version = "0.8.1"
 dependencies = [
  "chaos-core",
  "embed-resource",
@@ -1215,7 +1215,7 @@ dependencies = [
 
 [[package]]
 name = "chaos-tauri"
-version = "0.4.6"
+version = "0.8.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -10477,7 +10477,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.4.6"
+version = "0.8.1"
 
 [[package]]
 name = "y4m"

@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use pyo3::prelude::*;
-use pyo3::types::PyAnyMethods;
 use pyo3::types::IntoPyDict;
+use pyo3::types::PyAnyMethods;
 use pyo3::types::PyList;
 
 use crate::tts::wav::{duration_ms, read_wav_meta_from_bytes};
@@ -254,8 +254,8 @@ pub fn run_infer_sft_pt_to_out_dir_with_cancel(
         argv.push("--stream".into());
     }
 
-    let site_pkgs =
-        env_string("CHAOS_TTS_PY_VENV_SITE_PACKAGES").or_else(|| pick_default_site_packages(&workdir_path));
+    let site_pkgs = env_string("CHAOS_TTS_PY_VENV_SITE_PACKAGES")
+        .or_else(|| pick_default_site_packages(&workdir_path));
     let torch_abi = site_pkgs
         .as_ref()
         .and_then(|p| detect_torch_python_abi(Path::new(p)));
@@ -369,8 +369,7 @@ pub fn run_infer_sft_pt_to_out_dir_with_cancel(
                     let venv_scripts = venv_root.join("Scripts");
                     let venv_library_bin = venv_root.join("Library").join("bin");
                     if venv_scripts.exists() {
-                        if let Ok(h) =
-                            add_dll.call1((venv_scripts.to_string_lossy().to_string(),))
+                        if let Ok(h) = add_dll.call1((venv_scripts.to_string_lossy().to_string(),))
                         {
                             handles.push(h.into_py(py));
                         }
@@ -629,7 +628,7 @@ pub fn infer_sft_pt_wav_bytes_with_cancel(
             .map_err(|e| TtsError::Candle(e.to_string()))?;
         if env_bool("CHAOS_TTS_PY_DEBUG") {
             // 仅在 debug 时打印，避免污染正常输出。
-            // 这些信息对排查 “torch DLL load failed / WinError 126” 很关键（通常是 Python 版本/ABI 不匹配）。 
+            // 这些信息对排查 “torch DLL load failed / WinError 126” 很关键（通常是 Python 版本/ABI 不匹配）。
             let platform = py
                 .import("platform")
                 .map_err(|e| TtsError::Candle(e.to_string()))?;
@@ -725,8 +724,7 @@ pub fn infer_sft_pt_wav_bytes_with_cancel(
                     let venv_scripts = venv_root.join("Scripts");
                     let venv_library_bin = venv_root.join("Library").join("bin");
                     if venv_scripts.exists() {
-                        if let Ok(h) =
-                            add_dll.call1((venv_scripts.to_string_lossy().to_string(),))
+                        if let Ok(h) = add_dll.call1((venv_scripts.to_string_lossy().to_string(),))
                         {
                             handles.push(h.into_py(py));
                         }

@@ -1,6 +1,6 @@
-# CosyVoice3 SFT TTS（PyO3 / VoiceLab infer_sft.py）
+# CosyVoice3 SFT TTS（Python Runner / VoiceLab infer_sft.py）
 
-本仓库已移除 Candle 推理路径；当前 **仅支持** 通过 **PyO3 嵌入式 Python** 执行 VoiceLab 的 `tools/infer_sft.py`，直接使用 `.pt` checkpoint（`llm_ckpt/flow_ckpt`）完成推理。
+本仓库已移除 Candle 推理路径；当前默认通过 **外部 Python 子进程** 执行 VoiceLab 的 `tools/infer_sft.py`，直接使用 `.pt` checkpoint（`llm_ckpt/flow_ckpt`）完成推理。
 
 ## 1) 对外接口（daemon / FFI）
 
@@ -21,6 +21,7 @@
 3) 训练产物权重：`model_dir` + `llm_ckpt` + `flow_ckpt`
 
 对应环境变量（推荐由启动进程设置，便于“解压即用”）：
+- `CHAOS_TTS_PYTHON_EXE`：显式指定 Python 可执行文件（可选）
 - `CHAOS_TTS_PY_WORKDIR`：workdir（包含 `tools/infer_sft.py`）
 - `CHAOS_TTS_PY_INFER_SFT`：脚本路径（默认 `tools/infer_sft.py`）
 - `CHAOS_TTS_PY_VENV_SITE_PACKAGES`：venv 的 `site-packages`（必须包含 torch）
@@ -62,10 +63,11 @@ pwsh -NoLogo -NoProfile -File tools/sync_voicelab_python_env.ps1
 - `third_party/voicelab_py_env/.venv/**` → `$(OutDir)/.venv/**`
 
 WinUI3 进程启动时（`Program.cs`）也会 best-effort 注入：
-- `PYTHONHOME/PYTHONPATH/PATH`（确保 python 标准库与 `python310.dll` 可加载）
+- `PYTHONHOME/PATH`（便于运行时找到内置 python）
 - `CHAOS_TTS_PY_*` 的默认值（指向打包内置的 dream_sft 权重）
 
 因此：只要同步目录存在，Release 构建后的 zip 解压即可用（无需外部 VoiceLab checkout）。
+即使同步目录不存在，`chaos-daemon.exe` / `chaos_ffi.dll` 也应能正常启动；只是在调用 TTS/语音聊天时才会提示缺少 Python 环境。
 
 ## 5) CUDA 自动切换（Python 侧）
 
@@ -109,4 +111,3 @@ $env:CHAOS_TTS_PY_FLOW_CKPT = \"exp/dream_sft/flow/torch_ddp/flow_avg.pt\"
 
 cargo test -p chaos-core --release --no-default-features --features \"live-tests tts-python\" --test infer_dream_sft_pack_v1 -- --nocapture
 ```
-

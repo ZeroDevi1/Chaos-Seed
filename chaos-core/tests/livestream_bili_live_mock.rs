@@ -634,7 +634,11 @@ async fn decode_manifest_v2_current_qn_mismatch_uses_v2_url_as_last_resort() {
 
     assert_eq!(man.site, Site::BiliLive);
     assert_eq!(man.room_id, "1212");
-    assert_eq!(playurl_10000.hits(), 1, "should try v1 playUrl before v2 last resort");
+    assert_eq!(
+        playurl_10000.hits(),
+        1,
+        "should try v1 playUrl before v2 last resort"
+    );
 
     let high = man
         .variants

@@ -1,18 +1,18 @@
-# chaos-core TTS（CosyVoice3 SFT via PyO3 / VoiceLab）
+# chaos-core TTS（CosyVoice3 SFT via Python Runner / VoiceLab）
 
-本仓库已移除 Candle 推理路径；当前 **仅支持** 通过 **PyO3 嵌入式 Python** 运行 VoiceLab 的 `tools/infer_sft.py`，直接使用训练产物 `.pt`（`llm_ckpt/flow_ckpt`）进行推理。
+本仓库已移除 Candle 推理路径；当前默认通过 **外部 Python 子进程** 运行 VoiceLab 的 `tools/infer_sft.py`，直接使用训练产物 `.pt`（`llm_ckpt/flow_ckpt`）进行推理。
 
 说明：
-- `tts-python` 现为**可选特性**，默认不启用。
-- 未启用时，非 TTS 功能仍可正常编译/运行；TTS/语音聊天相关接口会在运行时返回“backend not enabled”。
-- WinUI3 的 `cargo xtask build-winui3 --release` 会在检测到已配置的 Python 环境时自动启用该特性。
+- `chaos-daemon.exe` / `chaos_ffi.dll` 不再要求编译期启用 `tts-python`；即使没有 Python，主后端也应可正常加载。
+- Python 仅在真正调用 TTS/语音聊天时才会被探测；缺失时只影响这些功能，不影响直播等基础能力。
+- `tts-python` 特性仅保留给 `chaos_core::tts::python_infer` 这条遗留 PyO3 路径或相关实验/测试使用。
 
 ## 核心接口
 
-- `chaos_core::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(...) -> TtsWavResult`
-  - 通过 `runpy.run_path()` 执行 `tools/infer_sft.py`，并以 `sys.argv` 方式传参
+- `chaos_core::tts::python_runner::infer_sft_pt_wav_bytes_with_cancel(...) -> TtsWavResult`
+  - 通过外部 `python.exe tools/infer_sft.py ...` 子进程执行推理
   - 返回 WAV bytes（PCM16，单声道；采样率从输出 wav 元信息读取）
-  - 取消：无法硬中断 python 脚本，仅支持开始前/结束后检查取消标记并丢弃结果
+  - 取消：当前仍主要支持开始前/结束后检查取消标记并丢弃结果
 
 ## 运行所需环境变量（推荐）
 
@@ -23,6 +23,7 @@
 - `CHAOS_TTS_PY_FLOW_CKPT`：默认 Flow checkpoint（.pt）
 
 可选：
+- `CHAOS_TTS_PYTHON_EXE`：显式指定 Python 可执行文件
 - `CHAOS_TTS_PY_INFER_SFT`：脚本路径（相对 workdir 或绝对路径），默认 `tools/infer_sft.py`
 - `CHAOS_TTS_PY_OUT_DIR`：对齐 python 的 `--out_dir`；不设置则使用临时目录（自动清理）
 - `CHAOS_TTS_PY_DEBUG=1`：打印 python 版本/路径等调试信息
@@ -66,13 +67,13 @@ uv run python tools/infer_sft.py \
 Windows PowerShell（建议先运行同步脚本，把 voicelab + 权重 + python env 放到 third_party）：
 
 ```powershell
-# （可选但强烈建议）让 PyO3 编译时绑定到 VoiceLab venv 的 python.exe（避免 ABI 不匹配）
-# $env:PYO3_PYTHON = "C:\Projects\AntiGravityProjects\VoiceLab\workflows\cosyvoice\.venv\Scripts\python.exe"
+$env:CHAOS_TTS_PYTHON_EXE = "$pwd\\third_party\\voicelab_py_env\\.venv\\Scripts\\python.exe"
 
 $env:CHAOS_TTS_PY_WORKDIR = "$pwd\\third_party\\voicelab_embed\\workflows\\cosyvoice"
 $env:CHAOS_TTS_PY_VENV_SITE_PACKAGES = "$pwd\\third_party\\voicelab_py_env\\.venv\\Lib\\site-packages"
 $env:CHAOS_TTS_PY_LLM_CKPT = "exp/dream_sft/llm/torch_ddp/epoch_5_whole.pt"
 $env:CHAOS_TTS_PY_FLOW_CKPT = "exp/dream_sft/flow/torch_ddp/flow_avg.pt"
 
+# 运行时主链路不需要 tts-python；仅在验证遗留 PyO3 测试路径时才需要附带该 feature。
 cargo test -p chaos-core --release --no-default-features --features "live-tests tts-python" --test infer_dream_sft_pack_v1 -- --nocapture
 ```

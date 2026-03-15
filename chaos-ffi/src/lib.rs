@@ -95,10 +95,8 @@ use chaos_proto::{
     TtsSftStatus,
     VoiceChatChunkNotif,
     VoiceChatStreamStartParams,
+    VoiceChatStreamStartResult,
 };
-
-#[cfg(feature = "tts-python")]
-use chaos_proto::VoiceChatStreamStartResult;
 
 const API_VERSION: u32 = 11;
 
@@ -5354,12 +5352,10 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
             .flow_ckpt
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
-        #[cfg(feature = "tts-python")]
         let python_workdir = params
             .python_workdir
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
-        #[cfg(feature = "tts-python")]
         let python_infer_script = params
             .python_infer_script
             .map(|v| v.trim().to_string())
@@ -5378,10 +5374,10 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
                 st.stage = Some("loading".to_string());
             }
 
-            // 仅使用 Python(.pt) 后端：复刻 VoiceLab 的 infer_sft.py。
+            // 仅使用 Python(.pt) 后端：通过外部 python runner 复刻 VoiceLab 的 infer_sft.py。
             //
             // - llmCkpt/flowCkpt 可由请求传入；也可通过环境变量提供默认值（便于 WinUI3 “解压即用”）。
-            // - pythonWorkdir/pythonInferScript 可选；若不传则由 python_infer 读取环境变量。
+            // - pythonWorkdir/pythonInferScript 可选；若不传则由 python runner 读取环境变量。
             let llm_ckpt = llm_ckpt.or_else(|| {
                 std::env::var("CHAOS_TTS_PY_LLM_CKPT")
                     .ok()
@@ -5401,8 +5397,7 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
                 st.state = TtsJobState::Failed;
                 st.stage = Some("python".to_string());
                 st.error = Some(
-                    "missing llmCkpt: set request.llmCkpt or env CHAOS_TTS_PY_LLM_CKPT"
-                        .to_string(),
+                    "missing llmCkpt: set request.llmCkpt or env CHAOS_TTS_PY_LLM_CKPT".to_string(),
                 );
                 return;
             };
@@ -5447,29 +5442,18 @@ pub extern "C" fn chaos_tts_sft_start_json(params_json_utf8: *const c_char) -> *
                 text_frontend,
             };
 
-            #[cfg(feature = "tts-python")]
             let cancel_for_run = cancel2.clone();
             let res = tokio::task::spawn_blocking(
                 move || -> Result<chaos_core::tts::TtsWavResult, String> {
-                    #[cfg(feature = "tts-python")]
-                    {
-                        chaos_core::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(
-                            &tts_params,
-                            &llm_ckpt,
-                            &flow_ckpt,
-                            python_workdir.as_deref(),
-                            python_infer_script.as_deref(),
-                            Some(cancel_for_run.as_ref()),
-                        )
-                        .map_err(|e| e.to_string())
-                    }
-                    #[cfg(not(feature = "tts-python"))]
-                    {
-                        let _ = tts_params;
-                        let _ = llm_ckpt;
-                        let _ = flow_ckpt;
-                        Err("python backend not enabled: build chaos-ffi with feature `tts-python`".to_string())
-                    }
+                    chaos_core::tts::python_runner::infer_sft_pt_wav_bytes_with_cancel(
+                        &tts_params,
+                        &llm_ckpt,
+                        &flow_ckpt,
+                        python_workdir.as_deref(),
+                        python_infer_script.as_deref(),
+                        Some(cancel_for_run.as_ref()),
+                    )
+                    .map_err(|e| e.to_string())
                 },
             )
             .await
@@ -5818,227 +5802,211 @@ pub extern "C" fn chaos_voice_chat_stream_start_json(
             );
         })?;
 
-        #[cfg(not(feature = "tts-python"))]
-        {
-            let _ = params;
+        let cfg = {
+            let locked = llm_state().lock().map_err(|_| {
+                set_last_error("llm state poisoned", None);
+            })?;
+            locked.cfg.clone()
+        };
+        let Some(cfg) = cfg else {
             set_last_error(
-                "voice chat backend not enabled: build chaos-ffi with feature `tts-python`",
+                "LLM is not configured (call chaos_llm_config_set_json first)",
                 None,
             );
             return Err(());
+        };
+        let llm_client = chaos_core::llm::LlmClient::new(cfg).map_err(|e| {
+            set_last_error("failed to init llm client", Some(e.to_string()));
+        })?;
+
+        let model_dir = params.model_dir.trim().to_string();
+        let spk_id = params.spk_id.trim().to_string();
+        if model_dir.is_empty() || spk_id.is_empty() {
+            set_last_error("modelDir/spkId is empty", None);
+            return Err(());
         }
 
-        #[cfg(feature = "tts-python")]
-        {
-            let cfg = {
-                let locked = llm_state().lock().map_err(|_| {
-                    set_last_error("llm state poisoned", None);
-                })?;
-                locked.cfg.clone()
-            };
-            let Some(cfg) = cfg else {
+        // voice chat 依赖 TTS，但 Python 运行时仅在真正发起语音推理时才需要。
+        let llm_ckpt = std::env::var("CHAOS_TTS_PY_LLM_CKPT")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
                 set_last_error(
-                    "LLM is not configured (call chaos_llm_config_set_json first)",
+                    "missing env CHAOS_TTS_PY_LLM_CKPT (required for voice chat tts)",
                     None,
                 );
-                return Err(());
-            };
-            let llm_client = chaos_core::llm::LlmClient::new(cfg).map_err(|e| {
-                set_last_error("failed to init llm client", Some(e.to_string()));
+            })?;
+        let flow_ckpt = std::env::var("CHAOS_TTS_PY_FLOW_CKPT")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                set_last_error(
+                    "missing env CHAOS_TTS_PY_FLOW_CKPT (required for voice chat tts)",
+                    None,
+                );
             })?;
 
-            let model_dir = params.model_dir.trim().to_string();
-            let spk_id = params.spk_id.trim().to_string();
-            if model_dir.is_empty() || spk_id.is_empty() {
-                set_last_error("modelDir/spkId is empty", None);
-                return Err(());
-            }
+        // CosyVoice3 输出采样率一般为 24k；这里作为启动时的固定元信息返回。
+        let sample_rate = 24_000u32;
 
-            // voice chat 依赖 TTS（当前仅支持 PyO3/Python 后端），因此必须有默认 ckpt。
-            let llm_ckpt = std::env::var("CHAOS_TTS_PY_LLM_CKPT")
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| {
-                    set_last_error(
-                        "missing env CHAOS_TTS_PY_LLM_CKPT (required for voice chat tts)",
-                        None,
-                    );
-                })?;
-            let flow_ckpt = std::env::var("CHAOS_TTS_PY_FLOW_CKPT")
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| {
-                    set_last_error(
-                        "missing env CHAOS_TTS_PY_FLOW_CKPT (required for voice chat tts)",
-                        None,
-                    );
-                })?;
+        let session_id = gen_session_id("voice_chat");
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let queue: Arc<Mutex<VecDeque<VoiceChatChunkNotif>>> =
+            Arc::new(Mutex::new(VecDeque::new()));
 
-            // CosyVoice3 输出采样率一般为 24k；这里作为启动时的固定元信息返回。
-            let sample_rate = 24_000u32;
+        let sid2 = session_id.clone();
+        let queue2 = queue.clone();
+        let cancel2 = cancel.clone();
+        let llm_ckpt2 = llm_ckpt.clone();
+        let flow_ckpt2 = flow_ckpt.clone();
 
-            let session_id = gen_session_id("voice_chat");
-            let cancel = tokio_util::sync::CancellationToken::new();
-            let queue: Arc<Mutex<VecDeque<VoiceChatChunkNotif>>> =
-                Arc::new(Mutex::new(VecDeque::new()));
+        let handle = runtime().spawn(async move {
+            use futures_util::StreamExt;
 
-            let sid2 = session_id.clone();
-            let queue2 = queue.clone();
-            let cancel2 = cancel.clone();
-            let llm_ckpt2 = llm_ckpt.clone();
-            let flow_ckpt2 = flow_ckpt.clone();
+            let core_reasoning = match params.reasoning_mode.unwrap_or(ReasoningMode::Normal) {
+                ReasoningMode::Normal => chaos_core::llm::ReasoningMode::Normal,
+                ReasoningMode::Reasoning => chaos_core::llm::ReasoningMode::Reasoning,
+            };
 
-            let handle = runtime().spawn(async move {
-                use futures_util::StreamExt;
+            let messages = params
+                .messages
+                .iter()
+                .map(|m| chaos_core::llm::ChatMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                })
+                .collect::<Vec<_>>();
 
-                let core_reasoning = match params.reasoning_mode.unwrap_or(ReasoningMode::Normal) {
-                    ReasoningMode::Normal => chaos_core::llm::ReasoningMode::Normal,
-                    ReasoningMode::Reasoning => chaos_core::llm::ReasoningMode::Reasoning,
-                };
+            let prompt_strategy = params.prompt_strategy.unwrap_or(TtsPromptStrategy::Inject);
+            let prompt_strategy2 = match prompt_strategy {
+                TtsPromptStrategy::Inject => chaos_core::tts::PromptStrategy::Inject,
+                TtsPromptStrategy::GuidePrefix => chaos_core::tts::PromptStrategy::GuidePrefix,
+            };
 
-                let messages = params
-                    .messages
-                    .iter()
-                    .map(|m| chaos_core::llm::ChatMessage {
-                        role: m.role.clone(),
-                        content: m.content.clone(),
-                    })
-                    .collect::<Vec<_>>();
+            let guide_sep = params.guide_sep.clone().unwrap_or_else(|| " ".to_string());
+            let speed = params.speed.unwrap_or(1.0).max(0.01) as f32;
+            let seed = params.seed.unwrap_or(1986);
+            let temperature = params.temperature.unwrap_or(1.0).max(1e-6) as f32;
+            let top_p = params.top_p.unwrap_or(0.6).clamp(1e-6, 1.0) as f32;
+            let top_k = params.top_k.unwrap_or(10).max(1) as usize;
+            let win_size = params.win_size.unwrap_or(10).max(1) as usize;
+            let tau_r = params.tau_r.unwrap_or(1.0).max(0.0) as f32;
+            let text_frontend = params.text_frontend.unwrap_or(true);
+            let chunk_ms = params.chunk_ms.unwrap_or(100).clamp(10, 2000);
 
-                let prompt_strategy = params.prompt_strategy.unwrap_or(TtsPromptStrategy::Inject);
-                let prompt_strategy2 = match prompt_strategy {
-                    TtsPromptStrategy::Inject => chaos_core::tts::PromptStrategy::Inject,
-                    TtsPromptStrategy::GuidePrefix => chaos_core::tts::PromptStrategy::GuidePrefix,
-                };
+            let tts_params = chaos_core::tts::TtsSftParams {
+                model_dir: model_dir.clone(),
+                spk_id: spk_id.clone(),
+                text: String::new(),
+                prompt_text: params.prompt_text.clone(),
+                prompt_strategy: prompt_strategy2,
+                guide_sep,
+                speed,
+                seed,
+                sampling: chaos_core::tts::SamplingConfig {
+                    temperature,
+                    top_p,
+                    top_k,
+                    win_size,
+                    tau_r,
+                },
+                text_frontend,
+            };
 
-                let guide_sep = params.guide_sep.clone().unwrap_or_else(|| " ".to_string());
-                let speed = params.speed.unwrap_or(1.0).max(0.01) as f32;
-                let seed = params.seed.unwrap_or(1986);
-                let temperature = params.temperature.unwrap_or(1.0).max(1e-6) as f32;
-                let top_p = params.top_p.unwrap_or(0.6).clamp(1e-6, 1.0) as f32;
-                let top_k = params.top_k.unwrap_or(10).max(1) as usize;
-                let win_size = params.win_size.unwrap_or(10).max(1) as usize;
-                let tau_r = params.tau_r.unwrap_or(1.0).max(0.0) as f32;
-                let text_frontend = params.text_frontend.unwrap_or(true);
-                let chunk_ms = params.chunk_ms.unwrap_or(100).clamp(10, 2000);
+            let vc_req = chaos_core::voice_chat::VoiceChatRequest {
+                messages,
+                reasoning_mode: core_reasoning,
+                spk_id: spk_id.clone(),
+                model_dir: model_dir.clone(),
+                tts: tts_params,
+                llm_ckpt: llm_ckpt2,
+                flow_ckpt: flow_ckpt2,
+                python_workdir: None,
+                python_infer_script: None,
+                cfg: chaos_core::voice_chat::VoiceChatConfig {
+                    chunk_ms,
+                    ..Default::default()
+                },
+            };
 
-                let tts_params = chaos_core::tts::TtsSftParams {
-                    model_dir: model_dir.clone(),
-                    spk_id: spk_id.clone(),
-                    text: String::new(),
-                    prompt_text: params.prompt_text.clone(),
-                    prompt_strategy: prompt_strategy2,
-                    guide_sep,
-                    speed,
-                    seed,
-                    sampling: chaos_core::tts::SamplingConfig {
-                        temperature,
-                        top_p,
-                        top_k,
-                        win_size,
-                        tau_r,
-                    },
-                    text_frontend,
-                };
-
-                let vc_req = chaos_core::voice_chat::VoiceChatRequest {
-                    messages,
-                    reasoning_mode: core_reasoning,
-                    spk_id: spk_id.clone(),
-                    model_dir: model_dir.clone(),
-                    tts: tts_params,
-                    llm_ckpt: llm_ckpt2,
-                    flow_ckpt: flow_ckpt2,
-                    python_workdir: None,
-                    python_infer_script: None,
-                    cfg: chaos_core::voice_chat::VoiceChatConfig {
-                        chunk_ms,
-                        ..Default::default()
-                    },
-                };
-
-                let mut stream = chaos_core::voice_chat::realtime_chat_stream(
-                    vc_req,
-                    llm_client,
-                    cancel2.clone(),
-                );
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(chunk) => {
-                            let mut bytes = Vec::with_capacity(chunk.pcm16.len() * 2);
-                            for s in chunk.pcm16 {
-                                bytes.extend_from_slice(&s.to_le_bytes());
-                            }
-                            let pcm_b64 = base64::Engine::encode(
-                                &base64::engine::general_purpose::STANDARD,
-                                bytes,
-                            );
-                            let notif = VoiceChatChunkNotif {
-                                session_id: sid2.clone(),
-                                seq: chunk.seq,
-                                pcm_base64: pcm_b64,
-                                is_last: chunk.is_last,
-                            };
-                            {
-                                if let Ok(mut q) = queue2.lock() {
-                                    q.push_back(notif);
-                                }
-                            }
-                            if chunk.is_last {
-                                break;
-                            }
+            let mut stream =
+                chaos_core::voice_chat::realtime_chat_stream(vc_req, llm_client, cancel2.clone());
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(chunk) => {
+                        let mut bytes = Vec::with_capacity(chunk.pcm16.len() * 2);
+                        for s in chunk.pcm16 {
+                            bytes.extend_from_slice(&s.to_le_bytes());
                         }
-                        Err(e) => {
-                            let notif = VoiceChatChunkNotif {
-                                session_id: sid2.clone(),
-                                seq: 0,
-                                pcm_base64: String::new(),
-                                is_last: true,
-                            };
+                        let pcm_b64 = base64::Engine::encode(
+                            &base64::engine::general_purpose::STANDARD,
+                            bytes,
+                        );
+                        let notif = VoiceChatChunkNotif {
+                            session_id: sid2.clone(),
+                            seq: chunk.seq,
+                            pcm_base64: pcm_b64,
+                            is_last: chunk.is_last,
+                        };
+                        {
                             if let Ok(mut q) = queue2.lock() {
                                 q.push_back(notif);
                             }
-                            eprintln!("[ffi voice_chat] session={sid2} error={e}");
+                        }
+                        if chunk.is_last {
                             break;
                         }
                     }
+                    Err(e) => {
+                        let notif = VoiceChatChunkNotif {
+                            session_id: sid2.clone(),
+                            seq: 0,
+                            pcm_base64: String::new(),
+                            is_last: true,
+                        };
+                        if let Ok(mut q) = queue2.lock() {
+                            q.push_back(notif);
+                        }
+                        eprintln!("[ffi voice_chat] session={sid2} error={e}");
+                        break;
+                    }
                 }
-
-                // Cleanup session.
-                if let Ok(mut st) = voice_chat_state().lock() {
-                    st.sessions.remove(&sid2);
-                }
-            });
-
-            {
-                let mut st = voice_chat_state().lock().map_err(|_| {
-                    set_last_error("voice chat state poisoned", None);
-                })?;
-                st.sessions.insert(
-                    session_id.clone(),
-                    VoiceChatFfiSession {
-                        queue,
-                        cancel,
-                        handle,
-                    },
-                );
             }
 
-            let out = VoiceChatStreamStartResult {
-                session_id,
-                sample_rate,
-                channels: 1,
-                format: "pcm16le".to_string(),
-            };
-            serde_json::to_string(&out).map_err(|e| {
-                set_last_error(
-                    "failed to serialize voice chat start result",
-                    Some(e.to_string()),
-                );
-            })
+            // Cleanup session.
+            if let Ok(mut st) = voice_chat_state().lock() {
+                st.sessions.remove(&sid2);
+            }
+        });
+
+        {
+            let mut st = voice_chat_state().lock().map_err(|_| {
+                set_last_error("voice chat state poisoned", None);
+            })?;
+            st.sessions.insert(
+                session_id.clone(),
+                VoiceChatFfiSession {
+                    queue,
+                    cancel,
+                    handle,
+                },
+            );
         }
+
+        let out = VoiceChatStreamStartResult {
+            session_id,
+            sample_rate,
+            channels: 1,
+            format: "pcm16le".to_string(),
+        };
+        serde_json::to_string(&out).map_err(|e| {
+            set_last_error(
+                "failed to serialize voice chat start result",
+                Some(e.to_string()),
+            );
+        })
     });
 
     match res {

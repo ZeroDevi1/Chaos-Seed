@@ -193,7 +193,9 @@ impl LlmClient {
 
         let base0 = {
             let locked = self.resolved_base_url.lock().await;
-            locked.clone().unwrap_or_else(|| self.cfg.base_url.trim().to_string())
+            locked
+                .clone()
+                .unwrap_or_else(|| self.cfg.base_url.trim().to_string())
         };
         let base0 = base0.trim_end_matches('/').to_string();
 
@@ -251,7 +253,10 @@ impl LlmClient {
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
         let status = resp.status();
-        let text_body = resp.text().await.map_err(|e| LlmError::Http(e.to_string()))?;
+        let text_body = resp
+            .text()
+            .await
+            .map_err(|e| LlmError::Http(e.to_string()))?;
 
         let raw: serde_json::Value = match serde_json::from_str(&text_body) {
             Ok(v) => v,

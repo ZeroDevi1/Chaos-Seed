@@ -29,11 +29,7 @@ pub struct LlmTomlConfig {
 
 impl LlmTomlConfig {
     pub fn into_llm_config(self) -> Result<LlmConfig, String> {
-        let base_url = self
-            .base_url
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        let base_url = self.base_url.unwrap_or_default().trim().to_string();
         let api_key = self.api_key.unwrap_or_default().trim().to_string();
         let model = self.model.unwrap_or_default().trim().to_string();
 
@@ -53,10 +49,7 @@ impl LlmTomlConfig {
             .filter(|s| !s.is_empty());
 
         let timeout_ms = self.timeout_ms.unwrap_or(30_000).max(1);
-        let default_temperature = self
-            .default_temperature
-            .unwrap_or(0.7)
-            .clamp(0.0, 5.0) as f32;
+        let default_temperature = self.default_temperature.unwrap_or(0.7).clamp(0.0, 5.0) as f32;
 
         Ok(LlmConfig {
             base_url,
@@ -114,11 +107,12 @@ pub fn default_search_paths() -> Vec<PathBuf> {
 }
 
 pub fn load_from_path(path: &Path) -> Result<LlmConfig, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("read llm config failed: {}: {e}", path.display()))?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("read llm config failed: {}: {e}", path.display()))?;
     let s = String::from_utf8(bytes)
         .map_err(|e| format!("llm.toml must be UTF-8 (no BOM): {}: {e}", path.display()))?;
-    let parsed: LlmTomlConfig =
-        toml::from_str(&s).map_err(|e| format!("parse llm.toml failed: {}: {e}", path.display()))?;
+    let parsed: LlmTomlConfig = toml::from_str(&s)
+        .map_err(|e| format!("parse llm.toml failed: {}: {e}", path.display()))?;
     parsed.into_llm_config()
 }
 
@@ -140,4 +134,3 @@ pub fn autoload_llm_config_with_path() -> Result<Option<(PathBuf, LlmConfig)>, S
 pub fn autoload_llm_config() -> Result<Option<LlmConfig>, String> {
     Ok(autoload_llm_config_with_path()?.map(|(_, cfg)| cfg))
 }
-

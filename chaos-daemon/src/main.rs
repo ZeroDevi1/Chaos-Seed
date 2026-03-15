@@ -48,7 +48,6 @@ mod win {
         BiliTvAuth,
         BiliWebAuth,
         // llm + voice chat
-        ChatMessage,
         DanmakuConnectParams,
         DanmakuConnectResult,
         DanmakuDisconnectParams,
@@ -678,10 +677,10 @@ mod win {
                     ));
                 }
 
-                // 仅使用 Python(.pt) 后端：复刻 VoiceLab 的 infer_sft.py。
+                // 仅使用 Python(.pt) 后端：通过外部 python runner 复刻 VoiceLab 的 infer_sft.py。
                 //
                 // - llmCkpt/flowCkpt 可由请求传入；也可通过环境变量提供默认值（便于 WinUI3 “解压即用”）。
-                // - pythonWorkdir/pythonInferScript 可选；若不传则由 python_infer 读取环境变量。
+                // - pythonWorkdir/pythonInferScript 可选；若不传则由 python runner 读取环境变量。
                 let llm_ckpt = llm_ckpt.or_else(|| {
                     std::env::var("CHAOS_TTS_PY_LLM_CKPT")
                         .ok()
@@ -784,25 +783,15 @@ mod win {
                 let cancel_for_run = cancel2.clone();
                 let res = tokio::task::spawn_blocking(
                     move || -> Result<chaos_core::tts::TtsWavResult, String> {
-                        #[cfg(feature = "tts-python")]
-                        {
-                            chaos_core::tts::python_infer::infer_sft_pt_wav_bytes_with_cancel(
-                                &tts_params,
-                                &llm_ckpt,
-                                &flow_ckpt,
-                                python_workdir.as_deref(),
-                                python_infer_script.as_deref(),
-                                Some(cancel_for_run.as_ref()),
-                            )
-                            .map_err(|e| e.to_string())
-                        }
-                        #[cfg(not(feature = "tts-python"))]
-                        {
-                            let _ = tts_params;
-                            let _ = llm_ckpt;
-                            let _ = flow_ckpt;
-                            Err("python backend not enabled: build chaos-daemon with feature `tts-python`".to_string())
-                        }
+                        chaos_core::tts::python_runner::infer_sft_pt_wav_bytes_with_cancel(
+                            &tts_params,
+                            &llm_ckpt,
+                            &flow_ckpt,
+                            python_workdir.as_deref(),
+                            python_infer_script.as_deref(),
+                            Some(cancel_for_run.as_ref()),
+                        )
+                        .map_err(|e| e.to_string())
                     },
                 )
                 .await
@@ -945,7 +934,9 @@ mod win {
                 }
             };
             let _ = path;
-            Self { cfg: Mutex::new(cfg) }
+            Self {
+                cfg: Mutex::new(cfg),
+            }
         }
 
         async fn set_config(&self, params: LlmConfigSetParams) -> Result<OkReply, String> {
@@ -1237,7 +1228,8 @@ mod win {
             },
         };
 
-        let mut stream = chaos_core::voice_chat::realtime_chat_stream(vc_req, llm_client, cancel.clone());
+        let mut stream =
+            chaos_core::voice_chat::realtime_chat_stream(vc_req, llm_client, cancel.clone());
 
         while let Some(item) = stream.next().await {
             match item {
