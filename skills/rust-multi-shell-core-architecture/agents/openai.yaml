@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Multi-Shell Core Architecture"
+  short_description: "Plan core/app/proto/ffi/daemon/UI layering in Rust"
+  default_prompt: "Use $rust-multi-shell-core-architecture to decide where a new Rust capability belongs across core, app, proto, ffi, daemon, and UI shells, and whether it should stay alloc-friendly for future MCU reuse."
