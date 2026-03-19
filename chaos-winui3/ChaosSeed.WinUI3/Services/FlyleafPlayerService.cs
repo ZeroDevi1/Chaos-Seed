@@ -14,14 +14,29 @@ public sealed class PlayOpenOptions
 
 public sealed class FlyleafPlayerService : IDisposable
 {
+    private static readonly Lazy<FlyleafPlayerService> _instance = new(() => new FlyleafPlayerService());
+    private static Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
+
+    public static FlyleafPlayerService Instance => _instance.Value;
+
+    /// <summary>
+    /// 初始化全局 DispatcherQueue（必须在 UI 线程调用，通常在 App 启动时）
+    /// </summary>
+    public static void Initialize(Microsoft.UI.Dispatching.DispatcherQueue dispatcherQueue)
+    {
+        _dispatcherQueue = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
+    }
+
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _dq;
     private readonly Config _config;
     private readonly Player _player;
     private readonly SemaphoreSlim _openGate = new(1, 1);
 
-    public FlyleafPlayerService(Microsoft.UI.Dispatching.DispatcherQueue dispatcherQueue)
+    private FlyleafPlayerService()
     {
-        _dq = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
+        _dq = _dispatcherQueue ?? throw new InvalidOperationException(
+            "FlyleafPlayerService 未初始化。请先调用 FlyleafPlayerService.Initialize(dispatcherQueue)。"
+        );
 
         if (!Engine.IsLoaded)
         {

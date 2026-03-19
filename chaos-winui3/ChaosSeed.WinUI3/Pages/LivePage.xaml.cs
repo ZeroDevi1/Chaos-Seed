@@ -99,6 +99,8 @@ public sealed partial class LivePage : Page
     private CancellationTokenSource? _danmakuAnimCts;
     private CancellationTokenSource? _danmakuToggleHideCts;
     private CancellationTokenSource? _fullscreenAnimCts;
+    private EventHandler<string>? _playerErrorHandler;
+    private EventHandler<string>? _playerInfoHandler;
     private LiveMode _mode = LiveMode.Parse;
     private LivestreamDecodeManifestResult? _manifest;
     private string? _lastInput;
@@ -140,6 +142,18 @@ public sealed partial class LivePage : Page
         {
             try { _danmakuOverlayEngine?.SetActive(false); } catch { }
             try { _danmakuOverlayEngine?.Clear(); } catch { }
+            // 移除事件处理器，避免重复订阅
+            if (_player != null)
+            {
+                if (_playerErrorHandler != null)
+                {
+                    try { _player.Error -= _playerErrorHandler; } catch { }
+                }
+                if (_playerInfoHandler != null)
+                {
+                    try { _player.Info -= _playerInfoHandler; } catch { }
+                }
+            }
         };
 
         if (!string.IsNullOrWhiteSpace(_backend.InitNotice))
@@ -444,15 +458,17 @@ public sealed partial class LivePage : Page
 
         try
         {
-            var p = new FlyleafPlayerService(_dq);
-            p.Error += (_, msg) => _dq.TryEnqueue(() =>
+            var p = FlyleafPlayerService.Instance;
+            _playerErrorHandler = (_, msg) => _dq.TryEnqueue(() =>
             {
                 try { ShowPlayerError(msg); } catch { }
             });
-            p.Info += (_, msg) => _dq.TryEnqueue(() =>
+            _playerInfoHandler = (_, msg) => _dq.TryEnqueue(() =>
             {
                 try { ShowPlayerInfo(msg); } catch { }
             });
+            p.Error += _playerErrorHandler;
+            p.Info += _playerInfoHandler;
             BindFlyleafHostPlayer(p);
             return p;
         }
@@ -552,7 +568,7 @@ public sealed partial class LivePage : Page
                 try { ExitSystemFullscreenIfNeeded(); } catch { }
                 try { ExitInAppFullscreenIfNeeded(); } catch { }
                 try { ApplyContextLayerProgress(0); } catch { }
-                try { UnbindFlyleafHostPlayer(); } catch { }
+                // 不再解绑播放器，保持全局播放状态
             });
         }
         catch

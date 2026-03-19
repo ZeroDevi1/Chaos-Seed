@@ -121,6 +121,20 @@ public sealed partial class App : Application
         MainWindowInstance = new MainWindow();
         MainWindowInstance.Activate();
 
+        // 初始化 FlyleafPlayerService 单例的 DispatcherQueue
+        if (Engine.IsLoaded && string.IsNullOrWhiteSpace(FlyleafInitError))
+        {
+            try
+            {
+                var dq = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+                FlyleafPlayerService.Initialize(dq);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("FlyleafPlayerService init error: " + ex.Message);
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(FlyleafInitError))
         {
             AppLog.Error("Flyleaf init error: " + FlyleafInitError);
