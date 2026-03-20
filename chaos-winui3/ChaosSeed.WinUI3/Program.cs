@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
+using ChaosSeed.WinUI3.Cli;
 using ChaosSeed.WinUI3.Services;
 using Microsoft.UI.Xaml;
 using WinRT;
@@ -16,7 +17,7 @@ public static class Program
     private static extern void XamlCheckProcessRequirements();
 
     [STAThread]
-    public static void Main(string[] args)
+    public static async Task Main(string[] args)
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
@@ -60,7 +61,50 @@ public static class Program
         AppLog.Info($"Process={Environment.ProcessPath} BaseDir={AppContext.BaseDirectory}");
         AppLog.Info($".NET={Environment.Version} OS={Environment.OSVersion} Arch={RuntimeInformation.ProcessArchitecture}");
 
-        // TTS（PyO3/PT）：为 zip 分发“解压即用”做一层默认环境注入。
+        // 检查是否为 CLI 模式
+        if (CliParser.IsCliMode(args))
+        {
+            AppLog.Info("Running in CLI mode");
+            try
+            {
+                var exitCode = await RunCliModeAsync(args);
+                Environment.Exit(exitCode);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"CLI Error: {ex.Message}");
+                Environment.Exit(1);
+            }
+            return;
+        }
+
+        // GUI 模式初始化
+        await InitializeGuiModeAsync();
+    }
+
+    /// <summary>
+    /// 运行 CLI 模式
+    /// </summary>
+    private static async Task<int> RunCliModeAsync(string[] args)
+    {
+        // 注册取消键 (Ctrl+C)
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+
+        var runner = new CliRunner();
+        return await runner.RunAsync(args, cts.Token);
+    }
+
+    /// <summary>
+    /// 初始化 GUI 模式
+    /// </summary>
+    private static async Task InitializeGuiModeAsync()
+    {
+        // TTS（PyO3/PT）：为 zip 分发"解压即用"做一层默认环境注入。
         // 说明：FFI 路径下 Rust 引擎在本进程内运行，因此需要在首次调用 PyO3 初始化前设置这些环境变量。
         try
         {
@@ -72,7 +116,7 @@ public static class Program
 
             if (Directory.Exists(pyHome))
             {
-                // 嵌入式 Python：强制指定标准库位置，避免 “No module named encodings”。
+                // 嵌入式 Python：强制指定标准库位置，避免 "No module named encodings"。
                 if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PYTHONHOME")))
                 {
                     Environment.SetEnvironmentVariable("PYTHONHOME", pyHome);
