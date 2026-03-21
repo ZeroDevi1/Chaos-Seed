@@ -30,22 +30,52 @@ rustup override set 1.93.0
 rustc -V
 ```
 
-## Workspace（多 UI）
+## 项目分支结构
 
-本仓库已拆成 Cargo workspace：
+本项目按前端实现拆分为多个独立分支，`main` 分支为核心仓库（不含前端 UI）：
+
+| 分支 | 说明 | 技术栈 |
+|------|------|--------|
+| `main` | **核心仓库** - 包含 core/ffi/proto/daemon/app 等核心库 | Rust |
+| `winui3` | WinUI3 桌面端 | C# / WinUI 3 / .NET 8 |
+| `tauri` | Tauri 桌面端 | Rust / Tauri v2 / TypeScript |
+| `slint` | Slint Native UI | Rust / Slint |
+| `flutter` | Flutter 跨平台 | Dart / Flutter |
+| `android` | Android 原生 | Kotlin / Jetpack Compose |
+| `cli` | 命令行工具 | Rust / TUI |
+
+### 克隆特定分支
+
+```bash
+# 核心仓库（本分支）
+git clone https://github.com/ZeroDevi1/Chaos-Seed.git
+
+# WinUI3 桌面端
+git clone -b winui3 https://github.com/ZeroDevi1/Chaos-Seed.git
+
+# Tauri 桌面端
+git clone -b tauri https://github.com/ZeroDevi1/Chaos-Seed.git
+
+# 其他分支...
+```
+
+## Workspace（核心库）
+
+`main` 分支包含以下核心库：
 
 - `chaos-core`：纯 Rust 核心（字幕 + 弹幕 + 直播源解析）
 - `chaos-proto`：IPC 协议与 DTO（JSON-RPC 方法/参数/返回/事件）
-- `chaos-app`：应用编排层（会话/任务/缓存/事件，**无 UI 依赖**；当前主要供 daemon 使用）
-- `chaos-daemon`：Windows 后端进程（NamedPipe + JSON-RPC），供 WinUI3 连接
-- `chaos-slint`：Slint UI（产物仍为 `chaos-seed` 可执行文件）
-- `chaos-tauri`：Tauri v2 + Vite(TS) UI（跨平台备选 UI；Rust 后端目前仍直接调用 `chaos-core`）
-- `chaos-ffi`：C ABI 适配层（导出 `chaos-core` 为 dll/so，供 Qt/其他语言调用；与 IPC 主链路解耦）
-- `xtask`：一键构建编排（Windows 上可一条命令构建 daemon + WinUI3）
+- `chaos-app`：应用编排层（会话/任务/缓存/事件，**无 UI 依赖**）
+- `chaos-daemon`：Windows 后端进程（NamedPipe + JSON-RPC）
+- `chaos-ffi`：C ABI 适配层（导出 `chaos-core` 为 dll/so）
 
-另外：
-- `chaos-winui3`：WinUI 3（C# / XAML）工程目录（不由 cargo 编译，由 `xtask` 调用 MSBuild/dotnet 构建）
-- `chaos-cli`：命令行工具和 TUI 界面（跨平台；直接调用 `chaos-core`/`chaos-app`）
+前端实现位于各自分支：
+- `winui3` 分支：`chaos-winui3`（WinUI 3 / C# / XAML）+ `xtask`（构建编排）
+- `tauri` 分支：`chaos-tauri`（Tauri v2 / TypeScript）
+- `slint` 分支：`chaos-slint`（Slint Native UI）
+- `flutter` 分支：`chaos-flutter`（Flutter 跨平台）
+- `android` 分支：`chaos-android`（Android 原生）
+- `cli` 分支：`chaos-cli`（命令行 TUI）
 
 ## 架构（当前）
 
