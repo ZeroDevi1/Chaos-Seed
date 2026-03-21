@@ -2,14 +2,10 @@
 resolver = "2"
 members = [
     "chaos-core",
-    "chaos-cli",
-    "chaos-slint",
-    "chaos-tauri/src-tauri",
     "chaos-ffi",
     "chaos-proto",
     "chaos-app",
     "chaos-daemon",
-    "xtask",
 ]
 exclude = [
     # 第三方子项目（其自身也有 Cargo.toml/pyproject.toml），避免被本仓库 workspace 误识别。
@@ -18,8 +14,8 @@ exclude = [
     "third_party/candle-patched",
 ]
 
-# Keep `cargo build` friction low on dev machines that don't have Tauri system deps.
-default-members = ["chaos-core", "chaos-slint", "chaos-ffi", "chaos-cli"]
+# 核心库默认成员
+default-members = ["chaos-core", "chaos-ffi", "chaos-daemon"]
 
 [workspace.package]
 version = "0.9.0"
