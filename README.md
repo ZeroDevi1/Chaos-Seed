@@ -45,6 +45,7 @@ rustc -V
 
 另外：
 - `chaos-winui3`：WinUI 3（C# / XAML）工程目录（不由 cargo 编译，由 `xtask` 调用 MSBuild/dotnet 构建）
+- `chaos-cli`：命令行工具和 TUI 界面（跨平台；直接调用 `chaos-core`/`chaos-app`）
 
 ## 架构（当前）
 
@@ -88,6 +89,29 @@ in-process（现状不改，跨平台备选 UI）
 │         Tauri v2 + Web UI（目前 Rust 侧仍直接调用 chaos-core）       │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### chaos-cli（命令行工具）
+
+跨平台 CLI 和 TUI 工具，支持直播源解析、弹幕监控、外部播放器调用。
+
+```bash
+# 构建
+cargo build -p chaos-cli --release
+
+# 解析直播源
+chaos-cli resolve "https://live.bilibili.com/12345"
+
+# 监控弹幕
+chaos-cli danmaku "https://live.bilibili.com/12345"
+
+# 使用外部播放器播放
+chaos-cli play "https://live.bilibili.com/12345"
+
+# 启动 TUI
+chaos-cli tui
+```
+
+完整文档：`docs/CHAOS_CLI.md`
 
 ## 构建
 

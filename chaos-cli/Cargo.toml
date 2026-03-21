@@ -1,0 +1,63 @@
+[package]
+name = "chaos-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "CLI and TUI for chaos-seed (livestream + danmaku)"
+
+[[bin]]
+name = "chaos-cli"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace crates
+chaos-core = { path = "../chaos-core", default-features = false, features = ["silero-vad"] }
+chaos-app = { path = "../chaos-app" }
+
+# CLI framework
+clap = { version = "4.5", features = ["derive", "cargo"] }
+
+# TUI framework
+ratatui = { version = "0.28", features = ["crossterm"] }
+crossterm = { version = "0.27", features = ["event-stream"] }
+
+# Async runtime
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "time",
+    "process",
+    "io-std",
+    "signal",
+] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Time and random
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+
+# Regex for filtering
+regex = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging/tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Terminal utilities
+terminal_size = "0.4"
+
+# Platform detection
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["processthreadsapi", "winuser"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
