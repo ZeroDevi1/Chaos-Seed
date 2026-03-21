@@ -191,6 +191,7 @@ jobs:
 
       - name: Generate changelog
         run: |
+          mkdir -p dist
           echo "## Core Crates" > dist/CHANGELOG.md
           echo "" >> dist/CHANGELOG.md
           echo "- chaos-core: 核心库" >> dist/CHANGELOG.md
