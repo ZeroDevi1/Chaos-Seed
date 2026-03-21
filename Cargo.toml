@@ -2,9 +2,6 @@
 resolver = "2"
 members = [
     "chaos-core",
-    "chaos-cli",
-    "chaos-slint",
-    "chaos-tauri/src-tauri",
     "chaos-ffi",
     "chaos-proto",
     "chaos-app",
@@ -18,8 +15,8 @@ exclude = [
     "third_party/candle-patched",
 ]
 
-# Keep `cargo build` friction low on dev machines that don't have Tauri system deps.
-default-members = ["chaos-core", "chaos-slint", "chaos-ffi", "chaos-cli"]
+# WinUI3 分支 workspace 成员
+default-members = ["chaos-core", "chaos-ffi", "chaos-daemon", "xtask"]
 
 [workspace.package]
 version = "0.9.0"
