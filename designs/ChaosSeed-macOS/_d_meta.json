@@ -1,0 +1,18 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "Chaos Seed macOS 高保真原型": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-06-13T09:42:21.587Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-06-13T09:42:21.587Z",
+  "updatedAt": "2026-06-13T09:42:21.587Z"
+}
