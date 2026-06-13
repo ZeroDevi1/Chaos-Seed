@@ -10,6 +10,9 @@ function HomeView({ onOpenRoom }) {
   const [rooms, setRooms] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
+  const [urlParsing, setUrlParsing] = useState(false);
   const pageSize = 6;
 
   function load() {
@@ -38,6 +41,24 @@ function HomeView({ onOpenRoom }) {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  function handleUrlParse() {
+    if (!urlInput.trim()) return;
+    setUrlParsing(true);
+    setTimeout(() => {
+      setUrlParsing(false);
+      setShowUrlModal(false);
+      setUrlInput('');
+      // 模拟解析出一个房间对象
+      onOpenRoom({
+        id: 'url-' + Date.now(),
+        title: '通过 URL 解析的直播间',
+        streamer: '未知主播',
+        viewers: 0,
+        platform: 'bili_live',
+      });
+    }, 700);
+  }
+
   return (
     <>
       <div className="toolbar">
@@ -54,6 +75,9 @@ function HomeView({ onOpenRoom }) {
           onSubmit={handleSearch}
           placeholder="搜索主播或标题…"
         />
+        <Button variant="secondary" onClick={() => setShowUrlModal(true)}>
+          解析 URL
+        </Button>
         <div
           className="icon-button"
           title="刷新"
@@ -101,6 +125,40 @@ function HomeView({ onOpenRoom }) {
           </>
         )}
       </div>
+
+      {showUrlModal && (
+        <Modal
+          title="解析直播间 URL"
+          onClose={() => { setShowUrlModal(false); setUrlInput(''); }}
+          onConfirm={handleUrlParse}
+          confirmText={urlParsing ? '解析中…' : '解析'}
+          confirmDisabled={!urlInput.trim() || urlParsing}
+        >
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10 }}>
+            支持 BiliLive、Douyu、Huya 的直播间链接或平台前缀。
+          </div>
+          <input
+            type="text"
+            value={urlInput}
+            onChange={e => setUrlInput(e.target.value)}
+            placeholder="https://live.bilibili.com/12345"
+            style={{
+              width: '100%',
+              height: 36,
+              padding: '0 10px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+              background: 'var(--bg)',
+              color: 'var(--text)',
+              fontFamily: 'inherit',
+              fontSize: 13,
+              outline: 'none',
+            }}
+            onKeyDown={e => e.key === 'Enter' && handleUrlParse()}
+            autoFocus
+          />
+        </Modal>
+      )}
     </>
   );
 }

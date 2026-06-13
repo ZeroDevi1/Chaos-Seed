@@ -80,6 +80,56 @@ function Button({ children, variant = 'secondary', onClick, disabled = false, ti
   );
 }
 
+function Modal({ title, children, onClose, onConfirm, confirmText = '确认', confirmDisabled = false }) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,0.35)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        backdropFilter: 'blur(4px)',
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: 420,
+          background: 'var(--surface-elevated)',
+          borderRadius: 14,
+          boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+          border: '1px solid var(--border)',
+          overflow: 'hidden',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div
+          style={{
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--border)',
+            fontSize: 15,
+            fontWeight: 700,
+            color: 'var(--text)',
+          }}
+        >
+          {title}
+        </div>
+        <div style={{ padding: 20 }}>
+          {children}
+        </div>
+        <div
+          style={{
+            padding: '12px 20px 16px',
+            display: 'flex', justifyContent: 'flex-end', gap: 10,
+          }}
+        >
+          <Button variant="secondary" onClick={onClose}>取消</Button>
+          <Button variant="primary" onClick={onConfirm} disabled={confirmDisabled}>{confirmText}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 Object.assign(window, {
   RoomCard,
   SegmentedControl,
@@ -87,4 +137,5 @@ Object.assign(window, {
   EmptyState,
   Toast,
   Button,
+  Modal,
 });
