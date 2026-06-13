@@ -13,71 +13,84 @@
 
 - 不内置视频渲染（复用 IINA）。
 - 第一轮不接入弹幕、歌词、歌曲下载等 Chaos-Seed 其他能力。
-- 不重新实现直播源解析协议；所有平台协议逻辑由 Rust 核心负责。
+- 不引入 `chaos-ffi` 或 `chaos-daemon` 作为运行依赖；macOS 应用使用纯 Swift 自包含实现。
 
 ## 3. 架构
 
 ```text
 ┌──────────────────────────────────────────────────────┐
 │            Swift / AppKit macOS 应用                  │
-│  HomeViewController → RoomGrid → RoomDetail → IINA   │
-└──────────────┬───────────────────────────────────────┘
-               │ JSON-RPC 2.0 over Unix Domain Socket
-               ▼
-┌──────────────────────────────────────────────────────┐
-│              chaos-daemon (macOS 本地进程)             │
-│  live_directory.list_rooms / search                   │
-│  livestream.resolve / resolve_variant                 │
+│  HomeViewController → CategoryBar → RoomGrid          │
+│       → RoomDetail → StreamResolver → IINA           │
 └──────────────────────────────────────────────────────┘
-               │
-               ▼
+                          │
+                          ▼
 ┌──────────────────────────────────────────────────────┐
-│                   chaos-core (Rust)                   │
-│        BiliLive / Douyu / Huya 协议实现               │
+│              LiveKit (纯 Swift 网络层)                │
+│   BiliLive / Douyu / Huya 目录 + 直播源解析            │
+│   URLSession · CryptoKit · Regex · JSONDecoder        │
 └──────────────────────────────────────────────────────┘
 ```
 
-### 3.1 为什么选择 chaos-daemon + Unix Domain Socket
+### 3.1 为什么用 Swift 重写而不复用 Rust 核心
 
-- 与 WinUI3 分支的 IPC 方案一致，降低跨前端维护成本。
-- Swift 侧无需维护 C header，只需按 `chaos-proto` 的 JSON 形状序列化/反序列化。
-- daemon 崩溃不影响 UI 进程，可自动重启。
-- 未来升级核心时，只需替换 daemon 二进制。
+- macOS 应用零额外依赖，用户无需配置/启动任何后台进程。
+- 避免 FFI/daemon 跨平台差异带来的调试成本。
+- Swift 原生支持 `URLSession`、`async/await`、`Codable`、`CryptoKit`，在 macOS 上开发和调试体验一致。
+- 参考来源：以 Chaos-Seed 的 `chaos-core` 为协议实现蓝本（`live_directory` + `livestream` 模块），保持 API 行为与数据形状对齐。
 
-### 3.2 备选方案
+### 3.2 参考实现范围
 
-- **in-process FFI**：启动更快，但需维护 `chaos_ffi` 的 C header 与 Swift 桥接头；后续升级容易因 ABI 变化而破坏兼容性。保留为第二阶段优化项。
+从 `chaos-core` 迁移到 Swift 的核心模块包括：
+
+| 平台 | 目录分类 | 推荐/分类房间 | 直播源解析 |
+|---|---|---|---|
+| BiliLive | `room/v1/Area/getList` | `second/getListByArea` + WBI 签名 | `room/v1/Room/playUrl` + codec 选择 |
+| Douyu | 固定分类/搜索 | `cache.php?m=LiveList` | HTML 提取 room_id + `getH5Play` 加密接口 |
+| Huya | `liveconfig/game/bussLive` | `cache.php?m=LiveList` | `cache.php?m=Live&do=profileRoom` + anti-code URL |
+
+需同步迁移的辅助模块：
+- Bili WBI 签名（`bili_wbi.rs`）。
+- Douyu 加密/auth（`douyu_auth.rs`）。
+- Huya anti-code URL 拼接（`huya_url.rs`）。
+- 通用 HTML JSON 对象提取（`brace_extract.rs`）。
 
 ## 4. 数据流
 
-### 4.1 首页加载直播间列表
+### 4.1 加载分类列表
 
-1. UI 发送 `live_directory.list_rooms`：
-   - 参数：`{ platform: "bili_live" | "douyu" | "huya", category?: string, page: number, page_size: number }`
-   - 返回：`{ rooms: [{ id, title, cover_url, streamer_name, viewer_count, platform, room_url }], total, has_more }`
+1. 切换平台 Tab 时，调用 `LiveKit.getCategories(platform)`。
+2. 返回 `LiveCategory` 数组，每个分类包含 `id`、`name`、`children`（子分类）。
+3. UI 在平台 Tab 下方渲染一级/二级分类 Tab；默认选中「推荐」或第一个分类。
+
+### 4.2 首页加载直播间列表
+
+1. UI 调用 `LiveKit.getRooms(platform, category, subCategory?, page, pageSize)`：
+   - 参数：`platform: .biliLive | .douyu | .huya`, `categoryId?: String`, `subCategoryId?: String`, `page: Int`, `pageSize: Int`
+   - 返回：`{ rooms: [{ id, title, coverUrl, streamerName, viewerCount, platform, input }], hasMore }`
 2. UI 以瀑布流/网格展示卡片。
 
-### 4.2 搜索
+### 4.3 搜索
 
-1. UI 发送 `live_directory.search`：
-   - 参数：`{ platform, keyword: string, page, page_size }`
-   - 返回与 list_rooms 相同。
+1. UI 调用 `LiveKit.searchRooms(platform, keyword, page, pageSize)`。
+2. 返回与 `getRooms` 相同。
+3. 搜索时隐藏分类 Tab，仅保留平台 Tab 与结果列表。
 
-### 4.3 进入直播间详情
+### 4.4 进入直播间详情
 
-1. UI 发送 `livestream.resolve`：
-   - 参数：`{ input: room_url }`
-   - 返回：`{ room: { id, title, streamer }, manifests: [{ name, variants: [{ variant_id, name, url?: string }] }] }`
-2. UI 展示清晰度列表；若 variant 已带 `url`，可直接播放；否则需要二段解析。
+1. UI 调用 `LiveKit.decodeManifest(input)`：
+   - 参数：`input` 为直播间 URL 或平台前缀（如 `bilibili:12345`）。
+   - 返回：`LiveManifest { site, roomId, title, streamer, isLiving, variants: [StreamVariant] }`。
+2. UI 展示清晰度/线路列表；每个 variant 可能已带 `url`。
 
-### 4.4 二段解析与播放
+### 4.5 直播流播放
 
-1. 用户选择某个 variant，UI 发送 `livestream.resolve_variant`：
-   - 参数：`{ input: room_url, manifest_name, variant_id }`
-   - 返回：`{ url: string, headers?: { Referer?, User-Agent?, Cookie? } }`
+1. 用户选择 variant：
+   - 若 variant 已有 `url`，直接使用。
+   - 若只有 `variantId`（如 BiliLive 的 qn），调用 `LiveKit.resolveVariant(site, roomId, variantId)` 获取最终 URL 与 `PlaybackHints`。
 2. UI 启动 IINA：
    - 优先使用 `NSWorkspace.shared.open(_:)` 打开 URL。
-   - 若需要注入 Referer/UA/Cookie，使用 `Process` 执行 `/Applications/IINA.app/Contents/MacOS/iina-cli` 并传入 `--mpv-http-header-fields` 或等效参数。
+   - 若 `PlaybackHints` 包含 Referer/UA/Cookie，使用 `Process` 执行 IINA CLI 并传入对应 HTTP header。
 
 ## 5. 页面结构
 
@@ -91,13 +104,18 @@
 
 - 顶部工具栏：
   - 平台 Segmented Control：BiliLive / Douyu / Huya。
-  - 搜索框 + 搜索按钮。
+  - 搜索框（回车触发搜索）。
+  -「解析 URL」按钮。
   - 刷新按钮。
+- 分类栏（平台 Tab 下方）：
+  - 一级分类横向滚动 Tab（如 推荐 / 网游 / 手游 / 单机 / 娱乐）。
+  - 选中一级分类后，下方或右侧展示二级子分类（如 网游 → 英雄联盟 / DOTA2 / CS2）。
+  - 默认选中「推荐」，展示该平台推荐房间。
 - 主体：
   - 直播间卡片网格（2–4 列自适应）。
   - 每个卡片显示封面、标题、主播名、在线人数。
   - 底部翻页：上一页 / 下一页 / 页码。
-- 空状态：首次加载提示、搜索无结果提示、网络错误重试。
+- 空状态：首次加载提示、分类无房间、搜索无结果、网络错误重试。
 
 ### 5.3 直播间详情页
 
@@ -112,11 +130,10 @@
 
 ### 5.4 设置页
 
-- daemon 可执行文件路径（默认 `Contents/Resources/chaos-daemon`）。
 - IINA 应用路径（默认 `/Applications/IINA.app`）。
-- 默认清晰度偏好（例如优先 1080P）。
+- 默认清晰度偏好（例如优先 原画 / 蓝光 / 超清）。
 - 网络超时秒数。
-- daemon 启动/停止/重启按钮。
+- 调试日志开关。
 
 ## 6. 本地数据
 
@@ -127,10 +144,10 @@
 
 ## 7. 错误处理
 
-- daemon 未启动：提示并引导用户在设置中配置/启动。
-- 解析失败：展示 Rust 核心返回的错误信息，并提供“重试”。
+- 解析失败：展示 Swift 网络层返回的错误信息，并提供“重试”。
 - IINA 未安装：提示下载安装。
 - 网络超时：可配置重试次数，默认 3 次。
+- 平台反爬拦截：BiliLive 遇到 -352/-412 时自动刷新 buvid + WBI key 并重试一次。
 
 ## 8. 视觉方向
 
@@ -147,11 +164,12 @@
 
 ## 10. 验收标准
 
-- [ ] 启动应用后自动检测/启动 daemon。
-- [ ] 切换平台 Tab 可加载对应直播间列表。
+- [ ] 切换平台 Tab 后自动加载分类栏。
+- [ ] 选择一级/二级分类可加载对应直播间列表。
 - [ ] 搜索关键词可返回结果。
 - [ ] 点击卡片进入详情页并展示清晰度列表。
 - [ ] 选择清晰度后成功调用 IINA 播放。
 - [ ] 支持直接粘贴 URL 解析。
 - [ ] 深色/浅色模式外观正常。
 - [ ] 历史记录与收藏可持久化。
+- [ ] Swift 网络层可独立编译运行，不依赖 Rust 核心。

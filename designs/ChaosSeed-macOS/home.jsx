@@ -4,6 +4,9 @@ const { useState, useEffect } = React;
 
 function HomeView({ onOpenRoom }) {
   const [platform, setPlatform] = useState('bili_live');
+  const [categories, setCategories] = useState([]);
+  const [category, setCategory] = useState('recommend');
+  const [subCategory, setSubCategory] = useState('');
   const [keyword, setKeyword] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [page, setPage] = useState(1);
@@ -18,7 +21,7 @@ function HomeView({ onOpenRoom }) {
   function load() {
     setLoading(true);
     setTimeout(() => {
-      const res = window.makeRooms(platform, page, pageSize, searchKeyword);
+      const res = window.makeRooms(platform, page, pageSize, searchKeyword, category, subCategory);
       setRooms(res.rooms);
       setTotal(res.total);
       setLoading(false);
@@ -26,16 +29,37 @@ function HomeView({ onOpenRoom }) {
   }
 
   useEffect(() => {
+    const cats = window.makeCategories(platform);
+    setCategories(cats);
+    const first = cats[0];
+    setCategory(first?.id || 'recommend');
+    setSubCategory('');
     setPage(1);
     load();
-  }, [platform, searchKeyword]);
+  }, [platform]);
 
   useEffect(() => {
     load();
-  }, [page]);
+  }, [page, category, subCategory, searchKeyword]);
 
   function handleSearch() {
     setSearchKeyword(keyword);
+    setCategory('recommend');
+    setSubCategory('');
+    setPage(1);
+  }
+
+  function handleSelectCategory(catId) {
+    setSearchKeyword('');
+    setKeyword('');
+    setCategory(catId);
+    const parent = categories.find(c => c.id === catId);
+    setSubCategory(parent?.children?.[0]?.id || '');
+    setPage(1);
+  }
+
+  function handleSelectSub(subId) {
+    setSubCategory(subId);
     setPage(1);
   }
 
@@ -86,6 +110,16 @@ function HomeView({ onOpenRoom }) {
           <IconRefresh size={16} />
         </div>
       </div>
+
+      {!searchKeyword && (
+        <CategoryBar
+          categories={categories}
+          selectedCategory={category}
+          selectedSub={subCategory}
+          onSelectCategory={handleSelectCategory}
+          onSelectSub={handleSelectSub}
+        />
+      )}
 
       <div className="scroll-content">
         {loading ? (

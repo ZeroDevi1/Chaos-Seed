@@ -38,6 +38,40 @@ function SegmentedControl({ options, value, onChange }) {
   );
 }
 
+function CategoryBar({ categories, selectedCategory, selectedSub, onSelectCategory, onSelectSub }) {
+  const parent = categories.find(c => c.id === selectedCategory) || categories[0];
+  const children = parent?.children || [];
+
+  return (
+    <div className="category-bar">
+      <div className="category-row">
+        {categories.map(cat => (
+          <div
+            key={cat.id}
+            className={`category-chip ${selectedCategory === cat.id ? 'active' : ''}`}
+            onClick={() => onSelectCategory(cat.id)}
+          >
+            {cat.name}
+          </div>
+        ))}
+      </div>
+      {children.length > 0 && (
+        <div className="category-row">
+          {children.map(sub => (
+            <div
+              key={sub.id}
+              className={`category-chip ${selectedSub === sub.id ? 'active' : ''}`}
+              onClick={() => onSelectSub(sub.id)}
+            >
+              {sub.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SearchBox({ value, onChange, onSubmit, placeholder = '搜索主播或标题…' }) {
   return (
     <div className="search-box">
@@ -133,6 +167,7 @@ function Modal({ title, children, onClose, onConfirm, confirmText = '确认', co
 Object.assign(window, {
   RoomCard,
   SegmentedControl,
+  CategoryBar,
   SearchBox,
   EmptyState,
   Toast,
