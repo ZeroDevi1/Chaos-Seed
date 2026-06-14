@@ -377,6 +377,7 @@ func biliDecodeManifest(ctx: LivestreamContext, roomId: String, rawInput: String
     let title = getStr(json, "/data/title") ?? ""
     let isLiving = (getI64(json, "/data/live_status") ?? 0) == 1
     let cover = getStr(json, "/data/user_cover")?.filter { !$0.isWhitespace }
+    Log.network.debug("bili get_info: input_rid=\(ridStr) canonical_rid=\(rid) living=\(isLiving) title=\(title)")
 
     var name: String? = nil
     var avatar: String? = nil
@@ -384,10 +385,13 @@ func biliDecodeManifest(ctx: LivestreamContext, roomId: String, rawInput: String
     if let anchor = try? await biliGetJSON(ctx: ctx, url: anchorURL) {
         name = getStr(anchor, "/data/info/uname")?.filter { !$0.isWhitespace }
         avatar = getStr(anchor, "/data/info/face")?.filter { !$0.isWhitespace }
+    } else {
+        Log.network.debug("bili anchor: 不可用（get_anchor_in_room 失败），继续无主播信息")
     }
     let info = LiveInfo(title: title, name: name, avatar: avatar, cover: cover, isLiving: isLiving)
 
     var vars = try await biliFetchPlayInfoList(ctx: ctx, rid: rid)
+    Log.network.debug("bili playinfo: 枚举到 \(vars.count) 个清晰度 qns=\(vars.map(\.quality))")
     // 取最高 qn 尝试绑定 URL（对齐 Rust 行为，避免只剩低清）。
     var qns = Set(vars.map(\.quality)).sorted(by: >)
     for qn in qns.prefix(8) {
@@ -395,17 +399,21 @@ func biliDecodeManifest(ctx: LivestreamContext, roomId: String, rawInput: String
         if already { break }
         // biliResolveVariantForQn throws & returns Optional → try? gives StreamVariant??
         if let rv = (try? await biliResolveVariantForQn(ctx: ctx, rid: rid, qn: qn)) ?? nil {
+            Log.network.debug("bili resolve: qn=\(qn) 绑定到 url=\(rv.url != nil) backups=\(rv.backupUrls.count)")
             if let idx = vars.firstIndex(where: { $0.quality == qn }) {
                 vars[idx].url = rv.url
                 vars[idx].backupUrls = rv.backupUrls
             }
             break
+        } else {
+            Log.network.debug("bili resolve: qn=\(qn) 未能获取可播放 URL")
         }
     }
     qns.removeAll()
 
     vars = applyDropInaccessible(vars, options: options)
     vars.sort { $0.quality > $1.quality }
+    Log.network.debug("bili manifest 完成: variants=\(vars.map { "\($0.label)(qn=\($0.quality),url=\($0.url != nil))" })")
 
     return LiveManifest(
         site: .biliLive,

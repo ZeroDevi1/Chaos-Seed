@@ -117,7 +117,23 @@ private func biliGetJSON(ctx: LiveDirectoryPlatformContext, url: String, query: 
     // Bili APIs 通常 HTTP 200 但 code 字段表示业务错误。
     if let code = json.pointer("/code")?.asInt64, code != 0 {
         let msg = json.pointer("/message")?.asString ?? "unknown error"
-        throw LiveKitError.parse("bilibili api error (code=\(code)): \(msg)")
+        // 把常见拦截码翻译成可读提示，避免用户看到生硬的 "code=-352"。
+        let readable: String
+        switch code {
+        case -352:
+            readable = "bilibili api error (code=\(code)): 请求被风控拦截（-352），将在重试后自动恢复；\(msg)"
+        case -412:
+            readable = "bilibili api error (code=\(code)): 请求被风控拦截（-412），稍后重试；\(msg)"
+        case -404, 404:
+            readable = "bilibili api error (code=\(code)): 资源不存在（房间/分类已下线或路径变更）；\(msg)"
+        case -400, 400:
+            readable = "bilibili api error (code=\(code)): 请求参数错误；\(msg)"
+        case -509, 509:
+            readable = "bilibili api error (code=\(code)): 请求过于频繁，请稍后再试；\(msg)"
+        default:
+            readable = "bilibili api error (code=\(code)): \(msg)"
+        }
+        throw LiveKitError.parse(readable)
     }
     return json
 }

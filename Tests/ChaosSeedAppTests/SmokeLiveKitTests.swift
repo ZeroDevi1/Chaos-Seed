@@ -64,4 +64,30 @@ final class SmokeLiveKitTests: XCTestCase {
             throw error
         }
     }
+
+    // MARK: 分类房间（复现用户报告的 404）
+
+    /// 先拉分类，再用第一个有子分类的一级分类拉房间列表。
+    /// 这是用户报告 "bilibili api error 404" 最可能的发生路径。
+    func testBili_categoryRooms_live() async throws {
+        try skipUnlessSmoke()
+        let kit = RealLiveKit()
+        do {
+            let cats = try await kit.getCategories(site: .biliLive)
+            // 找一个有子分类的一级分类（跳过 recommend）。
+            guard let parent = cats.first(where: { !$0.children.isEmpty && $0.id != "recommend" }),
+                  let sub = parent.children.first else {
+                throw LiveKitError.parse("no category with children")
+            }
+            print("[SMOKE] bili 分类: parent=\(parent.id)(\(parent.name)) sub=\(sub.id)(\(sub.name))")
+            let list = try await kit.getCategoryRooms(site: .biliLive, parentId: parent.id, categoryId: sub.id, page: 1)
+            print("[SMOKE] bili 分类房间: \(list.items.count) 个 hasMore=\(list.hasMore)")
+            if list.items.isEmpty {
+                print("[SMOKE] ⚠️ 分类房间为空（可能被拦截，但未报错）")
+            }
+        } catch {
+            print("[SMOKE] ❌ bili 分类房间失败: \(error)")
+            throw error
+        }
+    }
 }

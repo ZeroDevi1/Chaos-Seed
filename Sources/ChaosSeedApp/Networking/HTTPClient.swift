@@ -80,9 +80,19 @@ public actor HTTPClient {
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         if let body { req.httpBody = body }
 
+        let started = Date()
+        Log.network.debug("\(method) \(url.absoluteString)")
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw LiveKitError.http("non-http response")
+        }
+        let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+        if (200..<300).contains(http.statusCode) {
+            Log.network.debug("\(method) \(http.statusCode) \(elapsedMs)ms \(url.absoluteString)")
+        } else {
+            // 非 2xx 在 ensureSuccess 抛错前先记录，便于定位（带 body 片段）。
+            let snippet = String(data: data.prefix(160), encoding: .utf8) ?? ""
+            Log.network.error("\(method) \(url.absoluteString) -> \(http.statusCode) (\(elapsedMs)ms) body=\(snippet)")
         }
         return (data, http)
     }

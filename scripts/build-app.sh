@@ -49,7 +49,16 @@ mkdir -p "$APP_DIR/Contents/Resources"
 cp "$EXEC" "$APP_DIR/Contents/MacOS/ChaosSeed"
 chmod +x "$APP_DIR/Contents/MacOS/ChaosSeed"
 
-# Info.plist：声明为 LSUIElement=NO 的普通窗口应用、最小系统版本、签名占位。
+# 复制应用图标（.icns）到 Resources，供 Info.plist 的 CFBundleIconFile 引用。
+ICON_SRC="$ROOT/Sources/ChaosSeedApp/Resources/AppIcon.icns"
+if [ -f "$ICON_SRC" ]; then
+  cp "$ICON_SRC" "$APP_DIR/Contents/Resources/AppIcon.icns"
+  echo "    图标：AppIcon.icns"
+else
+  echo "    ⚠️ 未找到 AppIcon.icns（跳过图标）"
+fi
+
+# Info.plist：声明为 LSUIElement=NO 的普通窗口应用、最小系统版本、图标、签名占位。
 cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -65,6 +74,10 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleExecutable</key>
+    <string>ChaosSeed</string>
     <key>CFBundleExecutable</key>
     <string>ChaosSeed</string>
     <key>CFBundlePackageType</key>

@@ -17,7 +17,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ChaosSeedApp",
-            path: "Sources/ChaosSeedApp"
+            path: "Sources/ChaosSeedApp",
+            resources: [
+                .copy("Resources"),
+            ]
         ),
         .testTarget(
             name: "ChaosSeedAppTests",

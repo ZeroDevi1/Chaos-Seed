@@ -121,11 +121,26 @@ public final class HomeViewModel: ObservableObject {
             let result: LiveRoomList
             if !searchKeyword.isEmpty {
                 result = try await liveKit.searchRooms(site: platform, keyword: searchKeyword, page: page)
+            } else if category == "recommend" || category.isEmpty {
+                result = try await liveKit.getRecommendRooms(site: platform, page: page)
             } else {
+                // category = 一级分类 id；subCategory = 二级分类 id（空/"0" 表示该一级分类下全部）。
+                // BiliLive 需要 parent_area_id（一级）+ area_id（二级，"0"=全部）。
+                // Douyu/Huya 不需要 parentId（接口签名里忽略），传 nil 即可。
+                let parentId: String?
+                let categoryId: String
+                switch platform {
+                case .biliLive:
+                    parentId = category
+                    categoryId = subCategory.isEmpty ? "0" : subCategory
+                case .douyu, .huya:
+                    parentId = nil
+                    categoryId = subCategory.isEmpty ? category : subCategory
+                }
                 result = try await liveKit.getRooms(
                     site: platform,
-                    categoryId: category,
-                    parentId: categories.first { $0.id == category }?.id,
+                    categoryId: categoryId,
+                    parentId: parentId,
                     page: page
                 )
             }

@@ -15,21 +15,8 @@ public struct RoomCard: View {
         Button(action: onClick) {
             VStack(alignment: .leading, spacing: 0) {
                 ZStack(alignment: .bottomLeading) {
-                    // 封面占位
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [.gray.opacity(0.25), .gray.opacity(0.45)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                    CoverImage(cover: room.cover, site: room.site, placeholderIcon: "play.tv.fill")
                         .aspectRatio(16.0/9.0, contentMode: .fit)
-                        .overlay(
-                            Text("封面占位")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.primary.opacity(0.3))
-                        )
                     if let online = room.online {
                         HStack(spacing: 4) {
                             Image(systemName: "eye")

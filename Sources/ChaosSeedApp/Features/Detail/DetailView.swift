@@ -48,20 +48,8 @@ public struct DetailView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 20) {
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [.gray.opacity(0.25), .gray.opacity(0.45)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            CoverImage(cover: vm.room.cover, site: vm.room.site, placeholderIcon: "play.tv.fill")
                 .frame(width: 280, height: 158)
-                .overlay(
-                    Text("封面占位")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary.opacity(0.3))
-                )
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 10) {
                 Text(vm.room.title)
