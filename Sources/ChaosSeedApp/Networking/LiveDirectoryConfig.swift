@@ -14,6 +14,7 @@ public struct LiveEndpoints: Sendable {
     public var huyaSearchBase: String    // search.cdn.huya.com
     public var douyuBase: String         // www.douyu.com
     public var douyuMBase: String        // m.douyu.com
+    public var douyuPlayBase: String     // playweb.douyucdn.cn
     public var douyuCdnScheme: String    // https
     public var douyuP2pScheme: String    // https
 
@@ -27,6 +28,7 @@ public struct LiveEndpoints: Sendable {
         huyaSearchBase: String = "https://search.cdn.huya.com",
         douyuBase: String = "https://www.douyu.com",
         douyuMBase: String = "https://m.douyu.com",
+        douyuPlayBase: String = "https://playweb.douyucdn.cn",
         douyuCdnScheme: String = "https",
         douyuP2pScheme: String = "https"
     ) {
@@ -39,6 +41,7 @@ public struct LiveEndpoints: Sendable {
         self.huyaSearchBase = huyaSearchBase
         self.douyuBase = douyuBase
         self.douyuMBase = douyuMBase
+        self.douyuPlayBase = douyuPlayBase
         self.douyuCdnScheme = douyuCdnScheme
         self.douyuP2pScheme = douyuP2pScheme
     }

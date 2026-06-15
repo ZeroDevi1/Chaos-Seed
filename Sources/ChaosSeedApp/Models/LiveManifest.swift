@@ -33,6 +33,25 @@ public struct PlaybackHints: Codable, Hashable, Sendable {
     }
 }
 
+/// 内置播放器实际采用的媒体后端。
+public enum BuiltinPlaybackEngine: String, Codable, Hashable, Sendable {
+    /// HLS / MP4 等由 AVFoundation 原生解封装。
+    case avFoundation
+    /// HTTP-FLV 由应用内 WebKit + Media Source Extensions 解封装。
+    case webFLV
+}
+
+/// 已选定的内置播放源，避免把 HTTP 可访问误判为 AVFoundation 可播放。
+public struct BuiltinPlaybackSource: Hashable, Sendable {
+    public var url: URL
+    public var engine: BuiltinPlaybackEngine
+
+    public init(url: URL, engine: BuiltinPlaybackEngine) {
+        self.url = url
+        self.engine = engine
+    }
+}
+
 /// 单条清晰度 / 线路。
 ///
 /// 对齐 Rust `chaos_core::livestream::model::StreamVariant`。
@@ -59,6 +78,59 @@ public struct StreamVariant: Codable, Hashable, Sendable, Identifiable {
     /// 是否已带可直接播放的直连 URL（未带则需要二段解析）。
     public var isResolved: Bool {
         url?.trimmingCharacters(in: .whitespaces).isEmpty == false
+    }
+
+    /// 主线路与备用线路的去重列表，保持解析器给出的优先级。
+    public var allURLs: [String] {
+        var seen = Set<String>()
+        return ([url].compactMap { $0 } + backupUrls).filter { value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmed.isEmpty && seen.insert(trimmed).inserted
+        }
+    }
+
+    /// AVPlayer 可直接尝试的 URL。
+    ///
+    /// 三个平台的传统 HTTP-FLV 与 P2P `.xs` 线路不能由 AVPlayer 解封装；
+    /// 解析器会把 HLS 放入备用地址，点播文件仅接受系统明确支持的扩展名。
+    public var builtinPlaybackURL: URL? {
+        let urls = allURLs.compactMap(URL.init(string:))
+        if let hls = urls.first(where: { $0.pathExtension.lowercased() == "m3u8" }) {
+            return hls
+        }
+        let fileFormats: Set<String> = ["mp4", "m4v", "mov"]
+        return urls.first(where: { fileFormats.contains($0.pathExtension.lowercased()) })
+    }
+
+    /// 应用内 WebKit 后端可播放的 HTTP-FLV；P2P `.xs` 不属于 HTTP-FLV。
+    public var webFLVPlaybackURL: URL? {
+        allURLs
+            .compactMap(URL.init(string:))
+            .first {
+                ["http", "https"].contains($0.scheme?.lowercased() ?? "")
+                    && $0.pathExtension.lowercased() == "flv"
+            }
+    }
+
+    /// 当前线路可用的内置播放源，优先选择系统原生 AVFoundation。
+    public var builtinPlaybackSource: BuiltinPlaybackSource? {
+        if let url = builtinPlaybackURL {
+            return BuiltinPlaybackSource(url: url, engine: .avFoundation)
+        }
+        if let url = webFLVPlaybackURL {
+            return BuiltinPlaybackSource(url: url, engine: .webFLV)
+        }
+        return nil
+    }
+
+    /// BiliLive / Huya 优先二次解析出 HLS；Douyu 的官方网页接口直接返回 HTTP-FLV。
+    public func needsBuiltinResolution(for site: Site) -> Bool {
+        switch site {
+        case .biliLive, .huya:
+            return builtinPlaybackURL == nil
+        case .douyu:
+            return builtinPlaybackSource == nil
+        }
     }
 }
 

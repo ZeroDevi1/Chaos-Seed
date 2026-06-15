@@ -5,15 +5,15 @@ import SwiftUI
 /// 复刻原型 `HomeView.jsx`。
 public struct HomeView: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var vm: HomeViewModel
+    @ObservedObject private var vm: HomeViewModel
     @State private var showUrlModal = false
     @State private var urlInput = ""
     @State private var urlParsing = false
 
     private let onOpenRoom: (LiveRoomCard) -> Void
 
-    public init(liveKit: LiveKit, onOpenRoom: @escaping (LiveRoomCard) -> Void) {
-        self._vm = StateObject(wrappedValue: HomeViewModel(liveKit: liveKit))
+    public init(liveKit: LiveKit, homeVM: HomeViewModel, onOpenRoom: @escaping (LiveRoomCard) -> Void) {
+        self._vm = ObservedObject(wrappedValue: homeVM)
         self.onOpenRoom = onOpenRoom
     }
 
@@ -23,13 +23,15 @@ public struct HomeView: View {
             if vm.searchKeyword.isEmpty {
                 CategoryBar(
                     categories: vm.categories,
-                    selectedCategory: $vm.category,
-                    selectedSub: $vm.subCategory
+                    selectedCategory: vm.category,
+                    selectedSub: vm.subCategory,
+                    onSelectCategory: { vm.selectCategory($0) },
+                    onSelectSub: { vm.selectSub($0) }
                 )
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
                 .padding(.bottom, 6)
-                .background(.bar)
+                .liquidGlassBar()
             }
             Divider()
             content
@@ -42,7 +44,10 @@ public struct HomeView: View {
                 onConfirm: parseUrl
             )
         }
-        .onAppear { vm.bootstrap() }
+        .onAppear {
+            // 只在首次（categories 为空）时 bootstrap，避免进出详情重复加载。
+            if vm.categories.isEmpty { vm.bootstrap() }
+        }
     }
 
     // MARK: 工具栏
@@ -70,7 +75,7 @@ public struct HomeView: View {
         }
         .padding(.horizontal, 20)
         .frame(height: 54)
-        .background(.bar)
+        .liquidGlassBar()
     }
 
     // MARK: 内容区

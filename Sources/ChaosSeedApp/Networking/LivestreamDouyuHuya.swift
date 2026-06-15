@@ -136,20 +136,29 @@ private func douyuFetchH5Play(ctx: LivestreamContext, env: EnvConfig, rid: Int64
     let auth = enc.auth(rid: String(rid), ts: ts)
 
     let form: [(String, String)] = [
+        ("rate", String(rate)),
+        ("ver", "219032101"),
+        ("iar", "0"),
+        ("ive", "0"),
+        ("rid", String(rid)),
+        ("hevc", "0"),
+        ("fa", "0"),
+        ("sov", "0"),
         ("enc_data", enc.encData),
         ("tt", String(ts)),
         ("did", did),
         ("auth", auth),
-        ("cdn", ""),
-        ("rate", String(rate)),
-        ("hevc", "0"),
-        ("fa", "0"),
-        ("ive", "0"),
+        // 空 CDN 当前常返回无法从 AVFoundation 访问的 scdn/edgesrv；
+        // `hw-h5` 是接口 cdnsWithName 返回的网页华为云线路。
+        ("cdn", "hw-h5"),
     ]
 
-    let base = ctx.endpoints.douyuBase.trimmingTrailingSlash
+    let base = ctx.endpoints.douyuPlayBase.trimmingTrailingSlash
     let url = "\(base)/lapi/live/getH5PlayV1/\(rid)"
-    let json = try await douyuPostFormJSON(ctx, url: url, form: form)
+    let json = try await ctx.http.postFormJSON(url, form: form, headers: [
+        "Origin": "https://www.douyu.com",
+        "Referer": "https://www.douyu.com/",
+    ])
     guard let data = json.pointer("/data") else {
         throw LiveKitError.parse("douyu: missing data")
     }
@@ -287,8 +296,16 @@ private func huyaParseBitrateInfo(_ s: String) -> [(String, Int)] {
     return out
 }
 
-/// (streamName, presenterUid, flvUrl, suffix, antiCode)
-private typealias HuyaStream = (streamName: String, presenterUid: UInt32, flvUrl: String, suffix: String, antiCode: String)
+private struct HuyaStream {
+    let streamName: String
+    let presenterUid: UInt32
+    let flvUrl: String
+    let flvSuffix: String
+    let flvAntiCode: String
+    let hlsUrl: String
+    let hlsSuffix: String
+    let hlsAntiCode: String
+}
 
 private func huyaParseStreamInfos(_ v: JSONValue) -> [HuyaStream] {
     var out: [HuyaStream] = []
@@ -301,10 +318,22 @@ private func huyaParseStreamInfos(_ v: JSONValue) -> [HuyaStream] {
         }
         let presenterUid = max(0, min(Int64(UInt32.max), presenterUidI ?? 0))
         let sFlvUrl = it.pointer("/sFlvUrl")?.asString ?? ""
-        let sSuffix = it.pointer("/sFlvUrlSuffix")?.asString ?? ""
-        let sAnti = it.pointer("/sFlvAntiCode")?.asString ?? ""
-        if !sStreamName.isEmpty && !sFlvUrl.isEmpty && !sSuffix.isEmpty && !sAnti.isEmpty && presenterUid > 0 {
-            out.append((sStreamName, UInt32(presenterUid), sFlvUrl, sSuffix, sAnti))
+        let sFlvSuffix = it.pointer("/sFlvUrlSuffix")?.asString ?? ""
+        let sFlvAnti = it.pointer("/sFlvAntiCode")?.asString ?? ""
+        let sHlsUrl = it.pointer("/sHlsUrl")?.asString ?? ""
+        let sHlsSuffix = it.pointer("/sHlsUrlSuffix")?.asString ?? ""
+        let sHlsAnti = it.pointer("/sHlsAntiCode")?.asString ?? ""
+        if !sStreamName.isEmpty && !sFlvUrl.isEmpty && !sFlvSuffix.isEmpty && !sFlvAnti.isEmpty && presenterUid > 0 {
+            out.append(HuyaStream(
+                streamName: sStreamName,
+                presenterUid: UInt32(presenterUid),
+                flvUrl: sFlvUrl,
+                flvSuffix: sFlvSuffix,
+                flvAntiCode: sFlvAnti,
+                hlsUrl: sHlsUrl,
+                hlsSuffix: sHlsSuffix,
+                hlsAntiCode: sHlsAnti
+            ))
         }
     }
     return out
@@ -358,17 +387,33 @@ func huyaDecodeManifest(ctx: LivestreamContext, roomId: String, rawInput: String
         let nowMs = ctx.env.nowMs()
 
         for (label, bitrate) in brs {
-            var urls: [String] = streams.compactMap { st in
+            let flvURLs: [String] = streams.compactMap { st in
                 HuyaUrl.format(
                     streamName: st.streamName,
                     flvUrl: st.flvUrl,
-                    flvSuffix: st.suffix,
-                    flvAntiCode: st.antiCode,
+                    flvSuffix: st.flvSuffix,
+                    flvAntiCode: st.flvAntiCode,
                     presenterUid: st.presenterUid,
                     nowMs: nowMs,
                     ratio: bitrate > 0 ? bitrate : nil
                 )
             }
+            let hlsURLs: [String] = streams.compactMap { st in
+                guard !st.hlsUrl.isEmpty, !st.hlsSuffix.isEmpty, !st.hlsAntiCode.isEmpty else {
+                    return nil
+                }
+                return HuyaUrl.format(
+                    streamName: st.streamName,
+                    flvUrl: st.hlsUrl,
+                    flvSuffix: st.hlsSuffix,
+                    flvAntiCode: st.hlsAntiCode,
+                    presenterUid: st.presenterUid,
+                    nowMs: nowMs,
+                    ratio: bitrate > 0 ? bitrate : nil
+                )
+            }
+            var seen = Set<String>()
+            var urls = (flvURLs + hlsURLs).filter { seen.insert($0).inserted }
             if urls.isEmpty { continue }
             let url = urls.removeFirst()
             let quality = bitrate == 0 ? 9_999_999 : bitrate

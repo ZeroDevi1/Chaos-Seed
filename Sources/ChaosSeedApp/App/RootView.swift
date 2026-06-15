@@ -7,15 +7,18 @@ public struct RootView: View {
     @Binding private var appearance: AppAppearance
 
     private let liveKit: LiveKit
+    private let homeVM: HomeViewModel
     private let onOpenRoom: (LiveRoomCard) -> Void
 
     public init(
         liveKit: LiveKit,
+        homeVM: HomeViewModel,
         selection: Binding<NavDestination>,
         appearance: Binding<AppAppearance>,
         onOpenRoom: @escaping (LiveRoomCard) -> Void
     ) {
         self.liveKit = liveKit
+        self.homeVM = homeVM
         self._selection = selection
         self._appearance = appearance
         self.onOpenRoom = onOpenRoom
@@ -23,7 +26,7 @@ public struct RootView: View {
 
     public var body: some View {
         NavigationSplitView {
-            // 侧边栏：导航项列表。
+            // 侧边栏：导航项列表（macOS 26 使用 Liquid Glass 材质）。
             List(selection: $selection) {
                 Section("导航") {
                     ForEach(NavDestination.allCases) { item in
@@ -34,10 +37,11 @@ public struct RootView: View {
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
             .listStyle(.sidebar)
+            .liquidGlassBackground(in: .rect)
         } detail: {
             switch selection {
             case .home:
-                HomeView(liveKit: liveKit, onOpenRoom: onOpenRoom)
+                HomeView(liveKit: liveKit, homeVM: homeVM, onOpenRoom: onOpenRoom)
             case .history:
                 HistoryView()
             case .settings:
@@ -56,7 +60,7 @@ public struct RootView: View {
     }
 }
 
-/// 底部 Toast 提示（对齐原型 `.toast`）。
+/// 底部 Toast 提示（对齐原型 `.toast`，macOS 26 使用 Liquid Glass 材质）。
 private struct ToastView: View {
     let message: String
 
@@ -66,11 +70,7 @@ private struct ToastView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
-            .background(
-                .ultraThinMaterial,
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
-            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .liquidGlassBackground(in: .capsule)
             .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
     }
 }

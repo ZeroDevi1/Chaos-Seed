@@ -92,46 +92,142 @@ private struct CodecKey: Comparable {
     }
 }
 
+private struct BiliCodecCandidate {
+    let codec: JSONValue
+    let key: CodecKey
+    let protocolName: String
+    let formatName: String
+    let codecName: String
+    let currentQn: Int
+    let acceptQn: [Int]
+    let urls: [String]
+}
+
 private func codecAcceptQnMax(_ codec: JSONValue) -> Int {
     codec.pointer("/accept_qn")?.asArray?.compactMap { $0.asInt64 }.map(Int.init).max() ?? -1
 }
 
-/// 在 streams 树里选最佳 codec 分支。
-/// 排序：http_stream > http_hls > others；flv/fmp4 > 其他；accept_qn 高优先；avc 优先。
-private func pickBestCodec(_ streams: [JSONValue]) -> JSONValue? {
-    var best: (JSONValue, CodecKey)?
-    for s in streams {
-        let proto = s.pointer("/protocol_name")?.asString ?? ""
-        let protoRank: UInt8
-        switch proto {
-        case "http_stream": protoRank = 0
-        case "http_hls": protoRank = 1
-        default: protoRank = 2
+private func biliCodecCandidates(_ streams: [JSONValue]) -> [BiliCodecCandidate] {
+    var candidates: [BiliCodecCandidate] = []
+    for stream in streams {
+        let protocolName = stream.pointer("/protocol_name")?.asString ?? ""
+        let protocolRank: UInt8
+        switch protocolName {
+        case "http_stream": protocolRank = 0
+        case "http_hls": protocolRank = 1
+        default: protocolRank = 2
         }
-        guard let formats = s.pointer("/format")?.asArray else { continue }
-        for f in formats {
-            let fmt = f.pointer("/format_name")?.asString ?? ""
-            let fmtRank: UInt8 = (fmt == "flv" || fmt == "fmp4") ? 0 : 1
-            guard let codecs = f.pointer("/codec")?.asArray else { continue }
-            for c in codecs {
-                let base = (c.pointer("/base_url")?.asString ?? "").trimmingCharacters(in: .whitespaces)
-                let urlInfoLen = c.pointer("/url_info")?.asArray?.count ?? 0
-                if base.isEmpty || urlInfoLen == 0 { continue }
-                let maxAccept = codecAcceptQnMax(c)
-                let codecName = c.pointer("/codec_name")?.asString ?? ""
+        guard let formats = stream.pointer("/format")?.asArray else { continue }
+        for format in formats {
+            let formatName = format.pointer("/format_name")?.asString ?? ""
+            let formatRank: UInt8 = (formatName == "flv" || formatName == "fmp4") ? 0 : 1
+            guard let codecs = format.pointer("/codec")?.asArray else { continue }
+            for codec in codecs {
+                let baseURL = (codec.pointer("/base_url")?.asString ?? "")
+                    .trimmingCharacters(in: .whitespaces)
+                guard !baseURL.isEmpty,
+                      let urlInfo = codec.pointer("/url_info")?.asArray,
+                      !urlInfo.isEmpty
+                else { continue }
+
+                let codecName = codec.pointer("/codec_name")?.asString ?? ""
                 let codecRank: UInt8 = codecName == "avc" ? 0 : 1
-                let key = CodecKey(protocolRank: protoRank, formatRank: fmtRank, maxAccept: maxAccept, codecRank: codecRank)
-                if best == nil || key > best!.1 {
-                    best = (c, key)
-                }
+                let key = CodecKey(
+                    protocolRank: protocolRank,
+                    formatRank: formatRank,
+                    maxAccept: codecAcceptQnMax(codec),
+                    codecRank: codecRank
+                )
+                let urls = Mbga.sortUrls(urlInfo.compactMap { info in
+                    guard let host = info.pointer("/host")?.asString else { return nil }
+                    return "\(host)\(baseURL)\(info.pointer("/extra")?.asString ?? "")"
+                })
+                guard !urls.isEmpty else { continue }
+                candidates.append(BiliCodecCandidate(
+                    codec: codec,
+                    key: key,
+                    protocolName: protocolName,
+                    formatName: formatName,
+                    codecName: codecName,
+                    currentQn: Int(codec.pointer("/current_qn")?.asInt64 ?? -1),
+                    acceptQn: (codec.pointer("/accept_qn")?.asArray ?? [])
+                        .compactMap { $0.asInt64.map(Int.init) },
+                    urls: urls
+                ))
             }
         }
     }
-    return best?.0
+    return candidates.sorted { $0.key < $1.key }
+}
+
+/// 在 streams 树里选最佳 codec 分支。
+/// 排序：http_stream > http_hls > others；flv/fmp4 > 其他；accept_qn 高优先；avc 优先。
+/// 标记为 internal 以便单元测试。
+func pickBestCodec(_ streams: [JSONValue]) -> JSONValue? {
+    biliCodecCandidates(streams).first?.codec
+}
+
+private func biliURLs(
+    from candidates: [BiliCodecCandidate],
+    targetQn: Int,
+    requestedQn: Int?
+) -> [String] {
+    var seen = Set<String>()
+    return candidates
+        .filter { candidate in
+            if requestedQn != nil {
+                return candidate.acceptQn.contains(targetQn)
+            }
+            return candidate.currentQn == targetQn
+        }
+        .flatMap(\.urls)
+        .filter { seen.insert($0).inserted }
+}
+
+private enum BiliURLQualityEvidence {
+    case matches
+    case conflicts
+    case unknown
+}
+
+private func biliURLReportedQn(_ value: String) -> Int? {
+    guard let components = URLComponents(string: value) else { return nil }
+    return components.queryItems?
+        .first(where: { $0.name == "qn" })?
+        .value
+        .flatMap(Int.init)
+}
+
+/// Bili 在未登录或当前房间限制画质时，可能忽略请求的 qn，同时仍返回 HTTP 200。
+/// URL 的 `qn` 查询参数比 `current_qn` 更接近实际媒体档位，优先用它阻止低清流冒充高画质。
+private func biliURLQualityEvidence(_ urls: [String], requestedQn: Int) -> BiliURLQualityEvidence {
+    let reportedQns = Set(urls.compactMap(biliURLReportedQn))
+    guard !reportedQns.isEmpty else { return .unknown }
+    return reportedQns.contains(requestedQn) ? .matches : .conflicts
+}
+
+private func biliURLsCompatibleWithRequestedQuality(
+    _ urls: [String],
+    requestedQn: Int
+) -> [String] {
+    let exact = urls.filter { biliURLReportedQn($0) == requestedQn }
+    if !exact.isEmpty {
+        return exact
+    }
+    switch biliURLQualityEvidence(urls, requestedQn: requestedQn) {
+    case .matches:
+        return exact
+    case .unknown:
+        // URL 不携带 qn 时保留 main 分支的兼容行为，避免误杀确实已切档的旧线路。
+        return urls
+    case .conflicts:
+        return []
+    }
 }
 
 /// 对齐 `parse_room_playinfo_value`：枚举 accept_qn + g_qn_desc，按 requested_qn 绑定 URL。
-private func biliParseRoomPlayInfoValue(_ v: JSONValue, requestedQn: Int?) throws -> [StreamVariant] {
+/// 标记为 internal 以便单元测试对照 Rust fixture。
+func biliParseRoomPlayInfoValue(_ v: JSONValue, requestedQn: Int?) throws -> [StreamVariant] {
     if getBool(v, "/data/encrypted") ?? false && !(getBool(v, "/data/pwd_verified") ?? true) {
         throw LiveKitError.needPassword
     }
@@ -141,26 +237,30 @@ private func biliParseRoomPlayInfoValue(_ v: JSONValue, requestedQn: Int?) throw
     guard let streams = v.pointer("/data/playurl_info/playurl/stream")?.asArray else {
         throw LiveKitError.parse("missing stream")
     }
-    guard let codec = pickBestCodec(streams) else {
+    let candidates = biliCodecCandidates(streams)
+    guard let best = candidates.first else {
         throw LiveKitError.parse("no suitable codec")
     }
+    let codec = best.codec
     guard let currentQn = codec.pointer("/current_qn")?.asInt64 else {
         throw LiveKitError.parse("missing current_qn")
     }
     let currentQnI = Int(currentQn)
     let acceptQn: [Int] = (codec.pointer("/accept_qn")?.asArray ?? []).compactMap { $0.asInt64.map(Int.init) }
-    guard let baseUrl = codec.pointer("/base_url")?.asString else {
-        throw LiveKitError.parse("missing base_url")
-    }
-    guard let urlInfo = codec.pointer("/url_info")?.asArray else {
-        throw LiveKitError.parse("missing url_info")
-    }
-    var urls: [String] = urlInfo.compactMap { ui in
-        guard let host = ui.pointer("/host")?.asString else { return nil }
-        let extra = ui.pointer("/extra")?.asString ?? ""
-        return "\(host)\(baseUrl)\(extra)"
-    }
-    urls = Mbga.sortUrls(urls)
+    let candidateURLs = biliURLs(
+        from: candidates,
+        targetQn: requestedQn ?? currentQnI,
+        requestedQn: requestedQn
+    )
+    let urls = requestedQn.map {
+        biliURLsCompatibleWithRequestedQuality(
+            candidateURLs,
+            requestedQn: $0
+        )
+    } ?? candidateURLs
+    Log.network.debug(
+        "bili codec: \(best.protocolName)/\(best.formatName)/\(best.codecName), urls=\(urls.count)"
+    )
 
     var out: [StreamVariant] = []
     for item in qnDesc {
@@ -171,7 +271,13 @@ private func biliParseRoomPlayInfoValue(_ v: JSONValue, requestedQn: Int?) throw
         var variant = StreamVariant(id: biliMakeVariantId(qn: qn, label: label), label: label, quality: qn, rate: nil, url: nil, backupUrls: [])
         let shouldBind: Bool
         if let r = requestedQn {
-            shouldBind = (r == qn)
+            if currentQnI != r {
+                Log.network.notice("bili_live(playinfo): current_qn(\(currentQnI)) != requested_qn(\(r))")
+            }
+            shouldBind = r == qn && !urls.isEmpty
+            if r == qn && !shouldBind {
+                Log.network.notice("bili_live(playinfo): URL 明确回退到其它 qn，拒绝绑定 requested_qn=\(r)")
+            }
         } else {
             shouldBind = (qn == currentQnI)
         }
@@ -189,24 +295,19 @@ private func biliExtractV2CurrentQnAndUrls(_ v: JSONValue) throws -> (Int, [Stri
     guard let streams = v.pointer("/data/playurl_info/playurl/stream")?.asArray else {
         throw LiveKitError.parse("missing stream")
     }
-    guard let codec = pickBestCodec(streams) else {
+    let candidates = biliCodecCandidates(streams)
+    guard let best = candidates.first else {
         throw LiveKitError.parse("no suitable codec")
     }
+    let codec = best.codec
     guard let currentQn = codec.pointer("/current_qn")?.asInt64 else {
         throw LiveKitError.parse("missing current_qn")
     }
-    guard let baseUrl = codec.pointer("/base_url")?.asString else {
-        throw LiveKitError.parse("missing base_url")
-    }
-    guard let urlInfo = codec.pointer("/url_info")?.asArray else {
-        throw LiveKitError.parse("missing url_info")
-    }
-    var urls: [String] = urlInfo.compactMap { ui in
-        guard let host = ui.pointer("/host")?.asString else { return nil }
-        let extra = ui.pointer("/extra")?.asString ?? ""
-        return "\(host)\(baseUrl)\(extra)"
-    }
-    urls = Mbga.sortUrls(urls)
+    let urls = biliURLs(
+        from: candidates,
+        targetQn: Int(currentQn),
+        requestedQn: nil
+    )
     return (Int(currentQn), urls)
 }
 
@@ -264,6 +365,12 @@ private func biliFetchPlayUrl(ctx: LivestreamContext, rid: Int64, qn: Int) async
         urls = durl.compactMap { $0.pointer("/url")?.asString }
     }
     urls = Mbga.sortUrls(urls)
+    if qn > 0 {
+        urls = biliURLsCompatibleWithRequestedQuality(
+            urls,
+            requestedQn: qn
+        )
+    }
 
     var out: [StreamVariant] = []
     for item in qnDesc {
@@ -272,9 +379,16 @@ private func biliFetchPlayUrl(ctx: LivestreamContext, rid: Int64, qn: Int) async
         if descQn <= 0 || label.isEmpty { continue }
         var v = StreamVariant(id: biliMakeVariantId(qn: descQn, label: label), label: label, quality: descQn, rate: nil, url: nil, backupUrls: [])
         if qn > 0 {
-            if descQn == qn && !urls.isEmpty {
-                v.url = urls[0]
-                v.backupUrls = Array(urls.dropFirst())
+            if descQn == qn {
+                if Int(currentQn) != qn {
+                    Log.network.notice("bili_live(playUrl): current_qn(\(currentQn)) != requested_qn(\(qn))")
+                }
+                if !urls.isEmpty {
+                    v.url = urls[0]
+                    v.backupUrls = Array(urls.dropFirst())
+                } else {
+                    Log.network.notice("bili_live(playUrl): 没有与 requested_qn=\(qn) 匹配的 URL")
+                }
             }
         } else if descQn == Int(currentQn) && !urls.isEmpty {
             v.url = urls[0]
@@ -294,11 +408,21 @@ private func biliResolveVariantForQn(ctx: LivestreamContext, rid: Int64, qn: Int
     var v2LastResort: ([StreamVariant], [String])?
     do {
         let info = try await biliFetchRoomPlayInfo(ctx: ctx, rid: rid, qn: qn)
-        if let v = pickVariantWithUrl(info.vars, qn: qn), info.currentQn == qn {
-            return v
-        }
-        if !info.urls.isEmpty {
-            v2LastResort = (info.vars, info.urls)
+        if let v = pickVariantWithUrl(info.vars, qn: qn) {
+            if info.currentQn == qn {
+                return v
+            }
+            // 对齐 Rust：current_qn 与请求的 qn 不一致，继续走 fallback，保留 v2 URL 作最后兜底。
+            Log.network.notice("bili_live(resolve): v2 current_qn(\(info.currentQn)) != requested_qn(\(qn))，将尝试 v1 playUrl / html fallback")
+            v2LastResort = (info.vars, v.allURLs)
+        } else {
+            let compatibleURLs = biliURLsCompatibleWithRequestedQuality(
+                info.urls,
+                requestedQn: qn
+            )
+            if !compatibleURLs.isEmpty {
+                v2LastResort = (info.vars, compatibleURLs)
+            }
         }
     } catch LiveKitError.needPassword {
         throw LiveKitError.needPassword
@@ -318,7 +442,9 @@ private func biliResolveVariantForQn(ctx: LivestreamContext, rid: Int64, qn: Int
         throw LiveKitError.needPassword
     } catch {}
 
-    if let (vars, urls) = v2LastResort, var v = vars.first(where: { $0.quality == qn }) {
+    if let (vars, urls) = v2LastResort,
+       biliURLQualityEvidence(urls, requestedQn: qn) != .conflicts,
+       var v = vars.first(where: { $0.quality == qn }) {
         v.url = urls[0]
         v.backupUrls = Array(urls.dropFirst())
         return v

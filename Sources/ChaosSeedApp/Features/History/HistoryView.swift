@@ -26,6 +26,6 @@ public struct HistoryView: View {
         }
         .padding(.horizontal, 20)
         .frame(height: 54)
-        .background(.bar)
+        .liquidGlassBar()
     }
 }

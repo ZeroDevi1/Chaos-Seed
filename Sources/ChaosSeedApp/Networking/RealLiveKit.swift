@@ -56,4 +56,11 @@ public final class RealLiveKit: LiveKit, @unchecked Sendable {
     public func resolveVariant(site: Site, roomId: String, variantId: String) async throws -> StreamVariant {
         try await LivestreamPlatforms.resolveVariant(ctx: streamContext, site: site, roomId: roomId, variantId: variantId)
     }
+
+    public func resolveDanmakuConnection(site: Site, roomId: String) async throws -> DanmakuConnectionInfo {
+        guard site == .biliLive else {
+            throw LiveKitError.unsupportedSite
+        }
+        return try await BiliDanmakuResolver(http: http, wbi: biliWbi).resolve(roomId: roomId)
+    }
 }

@@ -9,7 +9,7 @@ import PackageDescription
 let package = Package(
     name: "ChaosSeed",
     platforms: [
-        .macOS(.v14),
+        .macOS("26.0"),
     ],
     products: [
         .executable(name: "ChaosSeed", targets: ["ChaosSeedApp"]),

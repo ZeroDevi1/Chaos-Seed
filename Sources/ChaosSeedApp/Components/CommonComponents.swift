@@ -57,6 +57,8 @@ public struct RoomCard: View {
                     .strokeBorder(.separator)
             )
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            // macOS 26 卡片使用 Liquid Glass 背景（带圆角）。
+            .liquidGlassBackground(in: .rect(cornerRadius: 10))
         }
         .buttonStyle(.plain)
     }
@@ -83,15 +85,21 @@ public struct PlatformBadge: View {
 
 public struct CategoryBar: View {
     let categories: [LiveCategory]
-    @Binding var selectedCategory: String
-    @Binding var selectedSub: String
+    let selectedCategory: String
+    let selectedSub: String
+    let onSelectCategory: (String) -> Void
+    let onSelectSub: (String) -> Void
 
     public init(categories: [LiveCategory],
-                selectedCategory: Binding<String>,
-                selectedSub: Binding<String>) {
+                selectedCategory: String,
+                selectedSub: String,
+                onSelectCategory: @escaping (String) -> Void,
+                onSelectSub: @escaping (String) -> Void) {
         self.categories = categories
-        self._selectedCategory = selectedCategory
-        self._selectedSub = selectedSub
+        self.selectedCategory = selectedCategory
+        self.selectedSub = selectedSub
+        self.onSelectCategory = onSelectCategory
+        self.onSelectSub = onSelectSub
     }
 
     public var body: some View {
@@ -99,13 +107,11 @@ public struct CategoryBar: View {
         VStack(alignment: .leading, spacing: 8) {
             chipRow(items: categories.map { CategoryChip(id: $0.id, name: $0.name) },
                     selected: selectedCategory) { newCat in
-                selectedCategory = newCat
-                let parent = categories.first(where: { $0.id == newCat })
-                selectedSub = parent?.children.first?.id ?? ""
+                onSelectCategory(newCat)
             }
             if !children.isEmpty {
                 chipRow(items: children.map { CategoryChip(id: $0.id, name: $0.name) },
-                        selected: selectedSub) { selectedSub = $0 }
+                        selected: selectedSub) { onSelectSub($0) }
             }
         }
     }

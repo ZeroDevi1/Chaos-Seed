@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 /// IINA 播放器桥。
 ///
@@ -37,13 +38,11 @@ public enum IINAPlayer {
             return open(url: streamURL, appPath: appPath, config: config)
         }
         // 需要 header：调用 iina-cli 传入 `--mpv-http-header-fields`。
-        return launchCLI(url: url, hints: hints)
+        return launchCLI(url: url, hints: hints, appPath: appPath)
     }
 
     private static func open(url: URL, appPath: String, config: NSWorkspace.OpenConfiguration) -> LaunchResult {
-        guard let appURL = URL(string: "file://\(appPath)") else {
-            return .failure("invalid app path: \(appPath)")
-        }
+        let appURL = URL(fileURLWithPath: appPath)
         // `open(_:withApplicationAt:configuration:)` 不抛出——通过闭包回报失败。
         var launchError: Error?
         NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config) { _, error in
@@ -55,17 +54,13 @@ public enum IINAPlayer {
         return .launched
     }
 
-    private static func launchCLI(url: String, hints: PlaybackHints) -> LaunchResult {
-        guard FileManager.default.isExecutableFile(atPath: defaultCLIPath) else {
-            // CLI 不存在时退回直接打开 URL（header 会丢失）。
-            if let streamURL = URL(string: url) {
-                _ = NSWorkspace.shared.open(streamURL)
-                return .launched
-            }
-            return .failure("iina-cli not found")
+    private static func launchCLI(url: String, hints: PlaybackHints, appPath: String) -> LaunchResult {
+        let cliPath = "\(appPath)/Contents/MacOS/iina-cli"
+        guard FileManager.default.isExecutableFile(atPath: cliPath) else {
+            return .failure("iina-cli not found: \(cliPath)")
         }
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: defaultCLIPath)
+        task.executableURL = URL(fileURLWithPath: cliPath)
         var args: [String] = [url]
         if let referer = hints.referer {
             args.append(contentsOf: ["--mpv-http-header-fields", "Referer: \(referer)"])
@@ -80,5 +75,25 @@ public enum IINAPlayer {
         } catch {
             return .failure(error.localizedDescription)
         }
+    }
+}
+
+// MARK: - LivePlayer 协议适配
+
+/// IINA 播放器协议适配器：将静态 `IINAPlayer.launch()` 包装为 `LivePlayer` 实例。
+/// 外部播放器不需要提供内联播放视图，`playerView` 返回 nil。
+@MainActor
+public final class IINALauncher: LivePlayer {
+    public let appPath: String
+    public var playerView: AnyView? { nil }
+    public var lastResult: IINAPlayer.LaunchResult?
+
+    /// - Parameter appPath: IINA.app 路径，默认 `/Applications/IINA.app`。
+    public init(appPath: String = IINAPlayer.defaultAppPath) {
+        self.appPath = appPath
+    }
+
+    public func play(url: URL, hints: PlaybackHints) {
+        lastResult = IINAPlayer.launch(url: url.absoluteString, hints: hints, appPath: appPath)
     }
 }

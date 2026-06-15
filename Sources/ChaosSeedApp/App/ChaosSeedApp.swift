@@ -13,23 +13,38 @@ struct ChaosSeedApp: App {
     private let realLiveKit = RealLiveKit()
     private let mockLiveKit = MockLiveKit(simulateLatency: true)
 
+    /// HomeViewModel 提升到 App 层持久化，避免进出详情时 HomeView 被销毁导致
+    /// 平台/分类/分页状态丢失（任务1：记忆状态）。
+    @StateObject private var homeVM: HomeViewModel
+
+    init() {
+        // useMockLiveKit 在 AppStorage 初始化前读取默认值（首次启动为 false）。
+        let useMock = UserDefaults.standard.bool(forKey: "useMockLiveKit")
+        let kit: LiveKit = useMock
+            ? MockLiveKit(simulateLatency: true)
+            : RealLiveKit()
+        _homeVM = StateObject(wrappedValue: HomeViewModel(liveKit: kit))
+    }
+
     var body: some Scene {
         WindowGroup("Chaos Seed") {
-            Group {
+            ZStack {
+                RootView(
+                    liveKit: liveKit,
+                    homeVM: homeVM,
+                    selection: $selection,
+                    appearance: Binding(
+                        get: { AppAppearance(rawValue: appearanceRaw) ?? .system },
+                        set: { appearanceRaw = $0.rawValue }
+                    ),
+                    onOpenRoom: { openedRoom = $0 }
+                )
                 if let room = openedRoom {
                     DetailView(liveKit: liveKit, room: room, onBack: { openedRoom = nil })
-                } else {
-                    RootView(
-                        liveKit: liveKit,
-                        selection: $selection,
-                        appearance: Binding(
-                            get: { AppAppearance(rawValue: appearanceRaw) ?? .system },
-                            set: { appearanceRaw = $0.rawValue }
-                        ),
-                        onOpenRoom: { openedRoom = $0 }
-                    )
+                        .transition(.opacity)
                 }
             }
+            .animation(.easeInOut(duration: 0.18), value: openedRoom)
             .environmentObject(appState)
             .preferredColorScheme(AppAppearance(rawValue: appearanceRaw)?.colorScheme)
             .frame(minWidth: 900, minHeight: 600)

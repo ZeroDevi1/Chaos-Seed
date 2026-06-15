@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 设置页：外观主题、IINA 路径、网络超时、调试日志。
+/// 设置页：外观主题、播放器选择、IINA 路径、网络超时、调试日志、记忆浏览位置。
 ///
 /// 复刻原型 `settings.jsx` 的控件；持久化用 `@AppStorage`。
 public struct SettingsView: View {
@@ -8,6 +8,10 @@ public struct SettingsView: View {
     @AppStorage("networkTimeout") private var networkTimeout = 30
     @AppStorage("debugLogging") private var debugLogging = false
     @AppStorage("useMockLiveKit") private var useMockLiveKit = false
+    /// 是否在启动时恢复上次浏览位置（平台/分类/页码）。
+    @AppStorage("rememberBrowsePosition") private var rememberBrowsePosition = false
+    /// 默认播放器偏好：内置 AVPlayer 或 IINA。
+    @AppStorage("playerPreference") private var playerPreferenceRaw = PlayerPreference.builtin.rawValue
     @Binding var appearance: AppAppearance
 
     public init(appearance: Binding<AppAppearance>) {
@@ -22,6 +26,10 @@ public struct SettingsView: View {
                 VStack(spacing: 0) {
                     appearanceRow
                     Divider()
+                    playerRow
+                    Divider()
+                    rememberRow
+                    Divider()
                     iinaPathRow
                     Divider()
                     timeoutRow
@@ -34,6 +42,7 @@ public struct SettingsView: View {
                 .background(Color(NSColor.controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator))
+                .liquidGlassBackground(in: .rect(cornerRadius: 10))
                 .padding(20)
             }
         }
@@ -47,7 +56,7 @@ public struct SettingsView: View {
         }
         .padding(.horizontal, 20)
         .frame(height: 54)
-        .background(.bar)
+        .liquidGlassBar()
     }
 
     private var appearanceRow: some View {
@@ -67,6 +76,48 @@ public struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 220)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    /// 记住浏览位置开关：开启后退出应用重开会恢复上次的平台/分类/页码。
+    private var rememberRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("记住浏览位置")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("关闭应用后重新打开时，恢复上次选择的平台、分类与页码。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: $rememberBrowsePosition)
+                .toggleStyle(.switch)
+                .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    /// 播放器偏好：内置 AVPlayer 或 IINA。
+    private var playerRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("默认播放器")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("内置播放器使用 AVFoundation；HLS、HDR 与杜比格式取决于直播源和当前设备。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Picker("默认播放器", selection: $playerPreferenceRaw) {
+                ForEach(PlayerPreference.allCases, id: \.self) { pref in
+                    Text(pref.label).tag(pref.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 180)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

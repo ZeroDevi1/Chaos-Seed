@@ -24,10 +24,15 @@ public protocol LiveKit: Sendable {
 
     func decodeManifest(input: String, options: ResolveOptions) async throws -> LiveManifest
     func resolveVariant(site: Site, roomId: String, variantId: String) async throws -> StreamVariant
+    func resolveDanmakuConnection(site: Site, roomId: String) async throws -> DanmakuConnectionInfo
 }
 
 /// 便捷方法：根据是否传 `categoryId` 决定走推荐还是分类。
 public extension LiveKit {
+    func resolveDanmakuConnection(site: Site, roomId: String) async throws -> DanmakuConnectionInfo {
+        throw LiveKitError.unsupportedSite
+    }
+
     func getRooms(
         site: Site,
         categoryId: String?,

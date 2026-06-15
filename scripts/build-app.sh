@@ -30,7 +30,11 @@ else
 fi
 
 # 定位产物目录（兼容 SwiftPM 新旧布局：.build/out/Products 或 .build）。
-PRODUCTS_DIR="$(cd "$ROOT" && "$SWIFT_BIN" build --show-bin-path -c ${CONFIG/release/""} 2>/dev/null || true)"
+SHOW_BIN_ARGS=(build --show-bin-path)
+if [ "$CONFIG" = "release" ]; then
+  SHOW_BIN_ARGS+=(-c release)
+fi
+PRODUCTS_DIR="$(cd "$ROOT" && "$SWIFT_BIN" "${SHOW_BIN_ARGS[@]}" 2>/dev/null || true)"
 if [ -z "$PRODUCTS_DIR" ] || [ ! -d "$PRODUCTS_DIR" ]; then
   # 兜底：手动查找。
   PRODUCTS_DIR="$ROOT/.build/out/Products/$([ "$CONFIG" = release ] && echo Release || echo Debug)"
@@ -48,6 +52,16 @@ mkdir -p "$APP_DIR/Contents/Resources"
 
 cp "$EXEC" "$APP_DIR/Contents/MacOS/ChaosSeed"
 chmod +x "$APP_DIR/Contents/MacOS/ChaosSeed"
+
+# SwiftPM 的 Bundle.module 会从应用 Resources 中查找资源 bundle。
+RESOURCE_BUNDLE="$PRODUCTS_DIR/ChaosSeed_ChaosSeedApp.bundle"
+if [ -d "$RESOURCE_BUNDLE" ]; then
+  cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
+  echo "    资源：ChaosSeed_ChaosSeedApp.bundle"
+else
+  echo "❌ 找不到 SwiftPM 资源 bundle：$RESOURCE_BUNDLE" >&2
+  exit 1
+fi
 
 # 复制应用图标（.icns）到 Resources，供 Info.plist 的 CFBundleIconFile 引用。
 ICON_SRC="$ROOT/Sources/ChaosSeedApp/Resources/AppIcon.icns"
@@ -78,12 +92,10 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
     <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>ChaosSeed</string>
-    <key>CFBundleExecutable</key>
-    <string>ChaosSeed</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <key>LSUIElement</key>
     <false/>
     <key>NSHighResolutionCapable</key>
