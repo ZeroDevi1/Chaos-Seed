@@ -62,7 +62,15 @@ public struct DanmakuConfig: Equatable, Codable {
     /// 显示区域：0.25=顶部1/4 / 0.5=半屏 / 1.0=全屏。
     public var displayAreaRatio: Double = 0.5
     /// 显示模式。
+    ///
+    /// 仅用于兼容旧版持久化配置；新版渲染按每条弹幕自身的 sourceMode 分类。
     public var mode: DanmakuMode = .scroll
+    /// 是否显示滚动弹幕。
+    public var showScrolling = true
+    /// 是否显示顶部固定弹幕。
+    public var showTop = true
+    /// 是否显示底部固定弹幕。
+    public var showBottom = true
     /// 是否显示彩色弹幕（非彩色弹幕显示为白色）。
     public var showColored: Bool = true
     /// 屏蔽词列表。
@@ -80,6 +88,9 @@ public struct DanmakuConfig: Equatable, Codable {
         case speed
         case displayAreaRatio
         case mode
+        case showScrolling
+        case showTop
+        case showBottom
         case showColored
         case blockedWords
         case minOpacity
@@ -95,6 +106,9 @@ public struct DanmakuConfig: Equatable, Codable {
         speed = try values.decodeIfPresent(Double.self, forKey: .speed) ?? 1
         displayAreaRatio = try values.decodeIfPresent(Double.self, forKey: .displayAreaRatio) ?? 0.5
         mode = try values.decodeIfPresent(DanmakuMode.self, forKey: .mode) ?? .scroll
+        showScrolling = try values.decodeIfPresent(Bool.self, forKey: .showScrolling) ?? true
+        showTop = try values.decodeIfPresent(Bool.self, forKey: .showTop) ?? true
+        showBottom = try values.decodeIfPresent(Bool.self, forKey: .showBottom) ?? true
         showColored = try values.decodeIfPresent(Bool.self, forKey: .showColored) ?? true
         blockedWords = try values.decodeIfPresent([String].self, forKey: .blockedWords) ?? []
         minOpacity = try values.decodeIfPresent(Double.self, forKey: .minOpacity) ?? 0
@@ -108,6 +122,9 @@ public struct DanmakuConfig: Equatable, Codable {
         try values.encode(speed, forKey: .speed)
         try values.encode(displayAreaRatio, forKey: .displayAreaRatio)
         try values.encode(mode, forKey: .mode)
+        try values.encode(showScrolling, forKey: .showScrolling)
+        try values.encode(showTop, forKey: .showTop)
+        try values.encode(showBottom, forKey: .showBottom)
         try values.encode(showColored, forKey: .showColored)
         try values.encode(blockedWords, forKey: .blockedWords)
         try values.encode(minOpacity, forKey: .minOpacity)
@@ -130,23 +147,18 @@ public enum DanmakuMode: String, CaseIterable, Codable, Sendable {
     }
 }
 
-// MARK: - 弹幕客户端（BiliLive WebSocket）
+// MARK: - 弹幕客户端
 
-/// BiliLive 弹幕 WebSocket 客户端。
+/// BiliLive / Douyu / Huya 统一弹幕 WebSocket 客户端。
 ///
-/// 协议对齐 chaos-core `danmaku/platforms/bili_live.rs`：
-/// - WebSocket 连接 `wss://broadcastlv.chat.bilibili.com/sub`
-/// - 二进制包格式：(packet_len, header_len=16, protover, operation, seq, body)
-/// - operation 7: 进房认证（JSON body, protover=1）
-/// - operation 2: 心跳（空 body）
-/// - operation 5: 弹幕数据（protover=0 为 JSON, protover=2 为 zlib 压缩）
-/// - operation 8: 进房确认
+/// 协议对齐 `main` 分支 `chaos-core/src/danmaku/platforms`。
 @MainActor
 public final class DanmakuClient: ObservableObject {
     /// 收到的弹幕流（供 UI 渲染）。
     @Published public var comments: [DanmakuComment] = []
     /// 连接状态。
     @Published public private(set) var isConnected = false
+    @Published public private(set) var isReconnecting = false
     @Published public private(set) var error: String?
     /// 最近一次接收统计，便于诊断协议版本变化。
     @Published public private(set) var receivedPacketCount = 0
@@ -161,6 +173,9 @@ public final class DanmakuClient: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var heartbeatTask: Task<Void, Never>?
     private var receiveTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    private var shouldReconnect = false
+    private var reconnectAttempt = 0
     private var sequence: UInt32 = 1
     private let maxComments = 400
 
@@ -185,9 +200,20 @@ public final class DanmakuClient: ObservableObject {
 
     /// 连接弹幕服务器并开始接收。
     public func connect() {
+        shouldReconnect = true
+        reconnectAttempt = 0
+        openConnection()
+    }
+
+    private func openConnection() {
+        guard shouldReconnect else { return }
         guard webSocketTask == nil else { return }
         var request = URLRequest(url: connection.endpoint)
         request.timeoutInterval = 15
+        if connection.site == .douyu {
+            request.setValue("https://www.douyu.com", forHTTPHeaderField: "Origin")
+            request.setValue("chaos-seed/0.1 (douyu-danmaku)", forHTTPHeaderField: "User-Agent")
+        }
         webSocketTask = URLSession.shared.webSocketTask(with: request)
         webSocketTask?.resume()
 
@@ -198,6 +224,9 @@ public final class DanmakuClient: ObservableObject {
 
     /// 断开连接。
     public func disconnect() {
+        shouldReconnect = false
+        reconnectTask?.cancel()
+        reconnectTask = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
         receiveTask?.cancel()
@@ -205,11 +234,29 @@ public final class DanmakuClient: ObservableObject {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         isConnected = false
+        isReconnecting = false
+        reconnectAttempt = 0
     }
 
     // MARK: - 进房认证
 
     private func joinRoom() {
+        switch connection.site {
+        case .biliLive:
+            joinBiliRoom()
+        case .douyu:
+            sendPlatformPacket(Self.encodeDouyuPacket("type@=loginreq/roomid@=\(connection.roomId)/"))
+            sendPlatformPacket(Self.encodeDouyuPacket("type@=joingroup/rid@=\(connection.roomId)/gid@=-9999/"))
+        case .huya:
+            guard let yyuid = connection.huyaYyuid, let uid = connection.huyaUid else {
+                error = "huya danmaku credentials missing"
+                return
+            }
+            sendPlatformPacket(Self.encodeHuyaJoin(yyuid: yyuid, uid: uid), markConnected: true)
+        }
+    }
+
+    private func joinBiliRoom() {
         let auth: [String: Any] = [
             "uid": connection.uid,
             "roomid": UInt64(connection.roomId) ?? 0,
@@ -227,11 +274,35 @@ public final class DanmakuClient: ObservableObject {
         webSocketTask?.send(.data(packet)) { [weak self] err in
             if let err {
                 Task { @MainActor in
-                    self?.error = "joinRoom failed: \(err.localizedDescription)"
-                    self?.isConnected = false
+                    self?.handleConnectionFailure("joinRoom failed: \(err.localizedDescription)")
                 }
             }
         }
+    }
+
+    private func sendPlatformPacket(_ packet: Data, markConnected: Bool = false) {
+        webSocketTask?.send(.data(packet)) { [weak self] err in
+            Task { @MainActor in
+                guard let self else { return }
+                if let err {
+                    self.handleConnectionFailure("joinRoom failed: \(err.localizedDescription)")
+                    return
+                }
+                if markConnected {
+                    self.markPlatformConnected()
+                }
+            }
+        }
+    }
+
+    private func markPlatformConnected() {
+        guard !isConnected else { return }
+        isConnected = true
+        isReconnecting = false
+        error = nil
+        reconnectAttempt = 0
+        startHeartbeat()
+        Log.network.debug("danmaku: \(connection.site.rawKey) 进房 room=\(connection.roomId)")
     }
 
     // MARK: - 心跳
@@ -249,7 +320,15 @@ public final class DanmakuClient: ObservableObject {
     }
 
     private func sendHeartbeat() {
-        let packet = encodePacket(body: Data(), operation: 2, protover: 1)
+        let packet: Data
+        switch connection.site {
+        case .biliLive:
+            packet = encodePacket(body: Data(), operation: 2, protover: 1)
+        case .douyu:
+            packet = Self.encodeDouyuPacket("type@=mrkl/")
+        case .huya:
+            packet = Data([0x00, 0x14, 0x1D, 0x00, 0x0C, 0x2C, 0x36, 0x00, 0x4C])
+        }
         webSocketTask?.send(.data(packet)) { _ in }
     }
 
@@ -265,27 +344,77 @@ public final class DanmakuClient: ObservableObject {
                     switch msg {
                     case .data(let data):
                         await self.handleFrame(data: data, depth: 0)
-                    case .string:
-                        break
+                    case .string(let text):
+                        if self.connection.site == .douyu {
+                            await self.handleDouyuText(text)
+                        }
                     @unknown default:
                         break
                     }
                 } catch {
                     guard !Task.isCancelled else { break }
-                    self.error = "receive error: \(error.localizedDescription)"
-                    self.isConnected = false
-                    self.heartbeatTask?.cancel()
-                    self.heartbeatTask = nil
-                    self.webSocketTask = nil
+                    self.handleConnectionFailure("receive error: \(error.localizedDescription)")
                     break
                 }
             }
         }
     }
 
+    private func handleConnectionFailure(_ message: String) {
+        guard shouldReconnect, reconnectTask == nil else { return }
+        isConnected = false
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        lastTextDiagnostic = message
+        scheduleReconnect(after: message)
+    }
+
+    private func scheduleReconnect(after message: String) {
+        guard shouldReconnect else { return }
+        reconnectTask?.cancel()
+        reconnectAttempt += 1
+        let delay = Self.reconnectDelay(forAttempt: reconnectAttempt)
+        isReconnecting = true
+        error = "连接中断，\(Int(delay)) 秒后重连：\(message)"
+        Log.network.error(
+            "danmaku: \(connection.site.rawKey) 连接中断 room=\(connection.roomId)，"
+                + "\(Int(delay)) 秒后重连：\(message)"
+        )
+        reconnectTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self, self.shouldReconnect else { return }
+            self.reconnectTask = nil
+            self.openConnection()
+        }
+    }
+
+    static func reconnectDelay(forAttempt attempt: Int) -> TimeInterval {
+        let exponent = min(max(attempt - 1, 0), 4)
+        return min(pow(2, Double(exponent)), 15)
+    }
+
     // MARK: - 帧处理
 
     private func handleFrame(data: Data, depth: Int) async {
+        switch connection.site {
+        case .biliLive:
+            await handleBiliFrame(data: data, depth: depth)
+        case .douyu:
+            for text in Self.decodeDouyuPackets(data) {
+                await handleDouyuText(text)
+            }
+        case .huya:
+            await handleHuyaFrame(data)
+        }
+    }
+
+    private func handleBiliFrame(data: Data, depth: Int) async {
         guard depth < 4 else { return }
 
         let packets = parsePackets(data: data)
@@ -335,6 +464,44 @@ public final class DanmakuClient: ObservableObject {
             default:
                 break
             }
+        }
+    }
+
+    private func handleDouyuText(_ text: String) async {
+        receivedPacketCount += 1
+        lastPacketSummary = "douyu chars=\(text.count)"
+        lastTextDiagnostic = String(text.prefix(240))
+        let eventType = text
+            .split(separator: "/", maxSplits: 1)
+            .first?
+            .replacingOccurrences(of: "type@=", with: "") ?? "unknown"
+        packetHistogram[eventType, default: 0] += 1
+        if text.hasPrefix("type@=loginres") {
+            markPlatformConnected()
+            return
+        }
+        guard let comment = Self.parseDouyuComment(text, receivedAt: Date()) else { return }
+        await append(comment)
+    }
+
+    private func handleHuyaFrame(_ data: Data) async {
+        receivedPacketCount += 1
+        lastPacketSummary = "huya bytes=\(data.count)"
+        markPlatformConnected()
+        do {
+            guard try HuyaJCE.int32(data, tag: 0) == 7,
+                  let push = try HuyaJCE.bytes(data, tag: 1),
+                  try HuyaJCE.int64(push, tag: 1) == 1400,
+                  let message = try HuyaJCE.bytes(push, tag: 2),
+                  let text = try HuyaJCE.string(message, tag: 3),
+                  !text.isEmpty else {
+                return
+            }
+            let userInfo = try HuyaJCE.structBytes(message, tag: 0)
+            let user = try userInfo.flatMap { try HuyaJCE.string($0, tag: 2) } ?? ""
+            await append(DanmakuComment(text: text, user: user))
+        } catch {
+            self.error = "huya danmaku decode failed: \(error.localizedDescription)"
         }
     }
 
@@ -475,6 +642,74 @@ public final class DanmakuClient: ObservableObject {
             opacity: opacity,
             sourceMode: mode
         )
+    }
+
+    static func encodeDouyuPacket(_ message: String) -> Data {
+        let body = Data(message.utf8)
+        let fullLength = UInt32(body.count + 9)
+        var data = Data(capacity: Int(fullLength + 4))
+        data.appendUInt32LE(fullLength)
+        data.appendUInt32LE(fullLength)
+        data.appendUInt16LE(689)
+        data.append(0)
+        data.append(0)
+        data.append(body)
+        data.append(0)
+        return data
+    }
+
+    static func decodeDouyuPackets(_ data: Data) -> [String] {
+        var result: [String] = []
+        var offset = 0
+        while offset + 12 <= data.count {
+            let fullLength = Int(data.u32LE(at: offset))
+            let totalLength = fullLength + 4
+            guard fullLength >= 9, offset + totalLength <= data.count else { break }
+            let bodyLength = fullLength - 9
+            let start = offset + 12
+            result.append(String(decoding: data[start..<(start + bodyLength)], as: UTF8.self))
+            offset += totalLength
+        }
+        return result
+    }
+
+    static func parseDouyuComment(
+        _ text: String,
+        receivedAt: Date = Date()
+    ) -> DanmakuComment? {
+        guard text.hasPrefix("type@=chatmsg") else { return nil }
+        var values: [String: String] = [:]
+        for part in text.split(separator: "/", omittingEmptySubsequences: true) {
+            guard let range = part.range(of: "@=") else { continue }
+            let key = String(part[..<range.lowerBound])
+            let rawValue = String(part[range.upperBound...])
+            values[key] = rawValue
+                .replacingOccurrences(of: "@S", with: "/")
+                .replacingOccurrences(of: "@A", with: "@")
+        }
+        guard let content = values["txt"], !content.isEmpty else { return nil }
+        return DanmakuComment(
+            text: content,
+            user: values["nn"] ?? "",
+            receivedAt: receivedAt
+        )
+    }
+
+    static func encodeHuyaJoin(yyuid: Int64, uid: Int64) -> Data {
+        var inner = HuyaJCE.Encoder()
+        inner.writeInt64(tag: 0, value: yyuid)
+        inner.writeBool(tag: 1, value: true)
+        inner.writeString(tag: 2, value: "")
+        inner.writeString(tag: 3, value: "")
+        inner.writeInt64(tag: 4, value: uid)
+        inner.writeInt64(tag: 5, value: uid)
+        inner.writeInt32(tag: 6, value: 0)
+        inner.writeInt32(tag: 7, value: 0)
+
+        var outer = HuyaJCE.Encoder()
+        outer.writeInt32(tag: 0, value: 1)
+        outer.writeBytes(tag: 1, value: inner.data)
+        return outer.data
     }
 
     private func append(_ comment: DanmakuComment) async {
@@ -697,6 +932,25 @@ private extension Data {
     mutating func appendUInt16BE(_ value: UInt16) {
         append(UInt8((value >> 8) & 0xFF))
         append(UInt8(value & 0xFF))
+    }
+
+    func u32LE(at offset: Int) -> UInt32 {
+        UInt32(self[offset]) |
+            (UInt32(self[offset + 1]) << 8) |
+            (UInt32(self[offset + 2]) << 16) |
+            (UInt32(self[offset + 3]) << 24)
+    }
+
+    mutating func appendUInt32LE(_ value: UInt32) {
+        append(UInt8(value & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
+        append(UInt8((value >> 16) & 0xFF))
+        append(UInt8((value >> 24) & 0xFF))
+    }
+
+    mutating func appendUInt16LE(_ value: UInt16) {
+        append(UInt8(value & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
     }
 }
 

@@ -15,12 +15,31 @@ let package = Package(
         .executable(name: "ChaosSeed", targets: ["ChaosSeedApp"]),
     ],
     targets: [
+        .systemLibrary(
+            name: "CMpv",
+            pkgConfig: "mpv",
+            providers: [
+                .brew(["mpv"]),
+            ]
+        ),
         .executableTarget(
             name: "ChaosSeedApp",
+            dependencies: [
+                "CMpv",
+                "CPrivatePIP",
+            ],
             path: "Sources/ChaosSeedApp",
             resources: [
                 .copy("Resources"),
+            ],
+            linkerSettings: [
+                .linkedFramework("OpenGL"),
             ]
+        ),
+        .target(
+            name: "CPrivatePIP",
+            path: "Sources/CPrivatePIP",
+            publicHeadersPath: "include"
         ),
         .testTarget(
             name: "ChaosSeedAppTests",

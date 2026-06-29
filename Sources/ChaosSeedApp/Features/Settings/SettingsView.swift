@@ -12,6 +12,8 @@ public struct SettingsView: View {
     @AppStorage("rememberBrowsePosition") private var rememberBrowsePosition = false
     /// 默认播放器偏好：内置 AVPlayer 或 IINA。
     @AppStorage("playerPreference") private var playerPreferenceRaw = PlayerPreference.builtin.rawValue
+    /// HTTP-FLV 小窗是否先尝试系统 PiP；当前 libmpv 后端会自动回退到 IINA。
+    @AppStorage("experimentalSystemPiPForFLV") private var experimentalSystemPiPForFLV = false
     @Binding var appearance: AppAppearance
 
     public init(appearance: Binding<AppAppearance>) {
@@ -27,6 +29,8 @@ public struct SettingsView: View {
                     appearanceRow
                     Divider()
                     playerRow
+                    Divider()
+                    experimentalPiPRow
                     Divider()
                     rememberRow
                     Divider()
@@ -118,6 +122,25 @@ public struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 180)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    /// 实验系统 PiP：只作为未来 AVSampleBufferDisplayLayer 路线的入口。
+    private var experimentalPiPRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("实验系统画中画")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("HTTP-FLV 会先尝试应用内系统 PiP；若当前后端不支持，会立即回退到 IINA 小窗。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: $experimentalSystemPiPForFLV)
+                .toggleStyle(.switch)
+                .labelsHidden()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

@@ -27,6 +27,7 @@ struct WebFLVPlayerView: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
+        context.coordinator.attachPlaybackActions(to: webView)
         context.coordinator.request = request
         context.coordinator.loadPlayerPage(in: webView)
         return webView
@@ -34,6 +35,7 @@ struct WebFLVPlayerView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.player = player
+        context.coordinator.attachPlaybackActions(to: webView)
         guard context.coordinator.request?.id != request.id else { return }
         context.coordinator.request = request
         context.coordinator.pageLoaded = false
@@ -42,6 +44,7 @@ struct WebFLVPlayerView: NSViewRepresentable {
 
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.evaluateJavaScript("destroyPlayback()")
+        coordinator.player?.detachWebPlaybackActions(id: coordinator.id)
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: Coordinator.messageHandlerName
         )
@@ -51,12 +54,42 @@ struct WebFLVPlayerView: NSViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         static let messageHandlerName = "chaosSeed"
 
+        let id = UUID()
         weak var player: BuiltinPlayer?
         var request: WebFLVPlaybackRequest?
         var pageLoaded = false
 
         init(player: BuiltinPlayer) {
             self.player = player
+        }
+
+        func attachPlaybackActions(to webView: WKWebView) {
+            guard let player else { return }
+            player.attachWebPlaybackActions(
+                id: id,
+                actions: WebPlaybackActions(
+                    togglePlayback: { [weak webView] in
+                        webView?.evaluateJavaScript("void togglePlayback();")
+                    },
+                    setMuted: { [weak webView] muted in
+                        webView?.evaluateJavaScript("void setMuted(\(muted));")
+                    },
+                    setVolume: { [weak webView] volume in
+                        webView?.evaluateJavaScript("void setVolume(\(volume));")
+                    },
+                    togglePictureInPicture: { [weak webView, weak self] in
+                        webView?.evaluateJavaScript("void togglePictureInPicture();") { _, error in
+                            guard let self, let error else { return }
+                            self.player?.webPictureInPictureDidFail(
+                                error.localizedDescription,
+                                id: self.id
+                            )
+                        }
+                    }
+                )
+            )
+            webView.evaluateJavaScript("void setMuted(\(player.isMuted));")
+            webView.evaluateJavaScript("void setVolume(\(player.volume));")
         }
 
         func loadPlayerPage(in webView: WKWebView) {
@@ -91,6 +124,7 @@ struct WebFLVPlayerView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             pageLoaded = true
+            attachPlaybackActions(to: webView)
             startPlayback(in: webView)
         }
 
@@ -148,8 +182,29 @@ struct WebFLVPlayerView: NSViewRepresentable {
                 player?.webFLVDidStartPlaying()
             case "paused":
                 player?.webFLVDidPause()
+            case "playbackState":
+                player?.webPlaybackStateChanged(
+                    isPlaying: body["playing"] as? Bool ?? false,
+                    isMuted: body["muted"] as? Bool ?? false,
+                    volume: Float(body["volume"] as? Double ?? 1)
+                )
             case "error":
                 player?.webFLVDidFail(body["message"] as? String ?? "")
+            case "pictureInPictureAvailability":
+                player?.webPictureInPictureAvailabilityChanged(
+                    body["available"] as? Bool ?? false,
+                    id: id
+                )
+            case "pictureInPictureState":
+                player?.webPictureInPictureStateChanged(
+                    body["active"] as? Bool ?? false,
+                    id: id
+                )
+            case "pictureInPictureError":
+                player?.webPictureInPictureDidFail(
+                    body["message"] as? String ?? "无法切换画中画",
+                    id: id
+                )
             default:
                 break
             }

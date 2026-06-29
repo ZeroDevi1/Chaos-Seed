@@ -22,7 +22,7 @@ public struct LiveInfo: Codable, Hashable, Sendable {
 /// 播放所需的 HTTP header 提示（Referer / UA）。
 ///
 /// 对齐 Rust `chaos_core::livestream::model::PlaybackHints`。
-/// IINA 启动时会把这些 header 通过 `--mpv-http-header-fields` 传入。
+/// IINA 启动时会把这些 header 通过 mpv 的 referrer / user-agent 选项传入。
 public struct PlaybackHints: Codable, Hashable, Sendable {
     public var referer: String?
     public var userAgent: String?
@@ -37,6 +37,8 @@ public struct PlaybackHints: Codable, Hashable, Sendable {
 public enum BuiltinPlaybackEngine: String, Codable, Hashable, Sendable {
     /// HLS / MP4 等由 AVFoundation 原生解封装。
     case avFoundation
+    /// HTTP-FLV 等由内嵌 libmpv 解封装和渲染。
+    case libMPV
     /// HTTP-FLV 由应用内 WebKit + Media Source Extensions 解封装。
     case webFLV
 }
@@ -112,15 +114,37 @@ public struct StreamVariant: Codable, Hashable, Sendable, Identifiable {
             }
     }
 
-    /// 当前线路可用的内置播放源，优先选择系统原生 AVFoundation。
-    public var builtinPlaybackSource: BuiltinPlaybackSource? {
-        if let url = builtinPlaybackURL {
+    /// 当前清晰度下全部可用的内置播放候选。
+    ///
+    /// 与 WinUI3 播放器一致保留主链和备链；macOS 优先尝试系统原生 HLS，
+    /// 失败后继续尝试其它 HLS/CDN，最后回退到 WebKit HTTP-FLV。
+    public var builtinPlaybackSources: [BuiltinPlaybackSource] {
+        let urls = allURLs.compactMap(URL.init(string:))
+        let nativeFormats: Set<String> = ["m3u8", "mp4", "m4v", "mov"]
+        let native = urls.compactMap { url -> BuiltinPlaybackSource? in
+            guard nativeFormats.contains(url.pathExtension.lowercased()) else { return nil }
             return BuiltinPlaybackSource(url: url, engine: .avFoundation)
         }
-        if let url = webFLVPlaybackURL {
+        let libMPV = urls.compactMap { url -> BuiltinPlaybackSource? in
+            guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  url.pathExtension.lowercased() == "flv" else {
+                return nil
+            }
+            return BuiltinPlaybackSource(url: url, engine: .libMPV)
+        }
+        let webFLV = urls.compactMap { url -> BuiltinPlaybackSource? in
+            guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  url.pathExtension.lowercased() == "flv" else {
+                return nil
+            }
             return BuiltinPlaybackSource(url: url, engine: .webFLV)
         }
-        return nil
+        return native + libMPV + webFLV
+    }
+
+    /// 当前线路首选的内置播放源。
+    public var builtinPlaybackSource: BuiltinPlaybackSource? {
+        builtinPlaybackSources.first
     }
 
     /// BiliLive / Huya 优先二次解析出 HLS；Douyu 的官方网页接口直接返回 HTTP-FLV。

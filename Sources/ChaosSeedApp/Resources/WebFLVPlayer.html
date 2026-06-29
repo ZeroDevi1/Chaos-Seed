@@ -18,7 +18,7 @@
   </style>
 </head>
 <body>
-  <video id="video" controls autoplay playsinline></video>
+  <video id="video" autoplay playsinline></video>
   <script src="Vendor/mpegts.js"></script>
   <script>
     const video = document.getElementById("video");
@@ -32,6 +32,81 @@
         message: message || "",
         sessionId: activeSessionId
       });
+    }
+
+    function supportsPictureInPicture() {
+      return Boolean(
+        (document.pictureInPictureEnabled && video.requestPictureInPicture) ||
+        video.webkitSupportsPresentationMode &&
+          video.webkitSetPresentationMode
+      );
+    }
+
+    function notifyPictureInPictureAvailability() {
+      window.webkit?.messageHandlers?.chaosSeed?.postMessage({
+        type: "pictureInPictureAvailability",
+        available: supportsPictureInPicture(),
+        sessionId: activeSessionId
+      });
+    }
+
+    function notifyPictureInPictureState() {
+      const active = document.pictureInPictureElement === video ||
+        video.webkitPresentationMode === "picture-in-picture";
+      window.webkit?.messageHandlers?.chaosSeed?.postMessage({
+        type: "pictureInPictureState",
+        active,
+        sessionId: activeSessionId
+      });
+    }
+
+    function notifyPlaybackState() {
+      window.webkit?.messageHandlers?.chaosSeed?.postMessage({
+        type: "playbackState",
+        playing: !video.paused,
+        muted: video.muted,
+        volume: video.volume,
+        sessionId: activeSessionId
+      });
+    }
+
+    async function togglePlayback() {
+      if (video.paused) {
+        await video.play();
+      } else {
+        video.pause();
+      }
+    }
+
+    function setMuted(muted) {
+      video.muted = Boolean(muted);
+      notifyPlaybackState();
+    }
+
+    function setVolume(volume) {
+      video.volume = Math.min(1, Math.max(0, Number(volume)));
+      notifyPlaybackState();
+    }
+
+    async function togglePictureInPicture() {
+      try {
+        if (document.pictureInPictureElement === video) {
+          await document.exitPictureInPicture();
+        } else if (video.webkitPresentationMode === "picture-in-picture") {
+          video.webkitSetPresentationMode("inline");
+        } else if (document.pictureInPictureEnabled && video.requestPictureInPicture) {
+          await video.requestPictureInPicture();
+        } else if (
+          video.webkitSupportsPresentationMode &&
+          video.webkitSupportsPresentationMode("picture-in-picture")
+        ) {
+          video.webkitSetPresentationMode("picture-in-picture");
+        } else {
+          throw new Error("当前 WebKit 不支持画中画");
+        }
+      } catch (error) {
+        notify("pictureInPictureError", error?.message || String(error));
+      }
     }
 
     function destroyPlayback() {
@@ -54,6 +129,15 @@
         return;
       }
 
+      // Referer / User-Agent 属于浏览器禁止脚本设置的请求头。把它们交给 WebKit，
+      // 否则 mpegts.js 的 XHR 会直接抛出 Load failed；其它自定义 header 仍可透传。
+      const safeHeaders = Object.fromEntries(
+        Object.entries(config.headers || {}).filter(([name]) => {
+          const lower = name.toLowerCase();
+          return lower !== "referer" && lower !== "user-agent";
+        })
+      );
+
       player = mpegts.createPlayer({
         type: "flv",
         isLive: true,
@@ -67,7 +151,7 @@
         liveBufferLatencyChasing: true,
         liveBufferLatencyMaxLatency: 3,
         liveBufferLatencyMinRemain: 0.5,
-        headers: config.headers || {}
+        headers: safeHeaders
       });
 
       player.on(mpegts.Events.ERROR, (type, detail, info) => {
@@ -78,6 +162,7 @@
       player.attachMediaElement(video);
       player.load();
       notify("ready");
+      notifyPictureInPictureAvailability();
       try {
         await player.play();
       } catch (error) {
@@ -85,8 +170,19 @@
       }
     }
 
-    video.addEventListener("playing", () => notify("playing"));
-    video.addEventListener("pause", () => notify("paused"));
+    video.addEventListener("playing", () => {
+      notify("playing");
+      notifyPlaybackState();
+    });
+    video.addEventListener("pause", () => {
+      notify("paused");
+      notifyPlaybackState();
+    });
+    video.addEventListener("volumechange", notifyPlaybackState);
+    video.addEventListener("loadedmetadata", notifyPictureInPictureAvailability);
+    video.addEventListener("enterpictureinpicture", notifyPictureInPictureState);
+    video.addEventListener("leavepictureinpicture", notifyPictureInPictureState);
+    video.addEventListener("webkitpresentationmodechanged", notifyPictureInPictureState);
     video.addEventListener("error", () => {
       if (!lastPlayerError) {
         notify("error", video.error?.message || "HTMLVideoElement 播放失败");

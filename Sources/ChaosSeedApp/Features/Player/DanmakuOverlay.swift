@@ -29,12 +29,34 @@ enum DanmakuLayoutEngine {
     ) -> [DanmakuRenderItem] {
         guard size.width > 0, size.height > 0 else { return [] }
         let prepared = prepare(comments: comments, config: config)
-        switch config.mode {
-        case .scroll:
-            return scrolling(prepared, config: config, size: size, now: now)
-        case .top, .bottom:
-            return fixed(prepared, config: config, size: size, now: now)
+        var result: [DanmakuRenderItem] = []
+        if config.showScrolling {
+            result.append(contentsOf: scrolling(
+                prepared.filter { $0.comment.sourceMode == .scroll },
+                config: config,
+                size: size,
+                now: now
+            ))
         }
+        if config.showTop {
+            result.append(contentsOf: fixed(
+                prepared.filter { $0.comment.sourceMode == .top },
+                mode: .top,
+                config: config,
+                size: size,
+                now: now
+            ))
+        }
+        if config.showBottom {
+            result.append(contentsOf: fixed(
+                prepared.filter { $0.comment.sourceMode == .bottom },
+                mode: .bottom,
+                config: config,
+                size: size,
+                now: now
+            ))
+        }
+        return result
     }
 
     static func isBlocked(_ comment: DanmakuComment, rules: [String]) -> Bool {
@@ -143,6 +165,7 @@ enum DanmakuLayoutEngine {
 
     private static func fixed(
         _ comments: [PreparedComment],
+        mode: DanmakuMode,
         config: DanmakuConfig,
         size: CGSize,
         now: Date
@@ -165,7 +188,7 @@ enum DanmakuLayoutEngine {
             let width = itemWidth(prepared, fontSize: config.fontSize)
             let x = max(8, (size.width - width) / 2)
             let y: CGFloat
-            if config.mode == .top {
+            if mode == .top {
                 y = 8 + CGFloat(lane) * lineHeight
             } else {
                 y = size.height - 8 - CGFloat(lane + 1) * lineHeight
@@ -289,5 +312,136 @@ public struct DanmakuOverlay: View {
             green: Double((rgb >> 8) & 0xFF) / 255,
             blue: Double(rgb & 0xFF) / 255
         )
+    }
+}
+
+/// Bilibili Web 风格的独立右侧消息栏：新消息追加到底部，旧消息自然向上滚动。
+public struct DanmakuRightRail: View {
+    let comments: [DanmakuComment]
+    let config: DanmakuConfig
+
+    public init(
+        comments: [DanmakuComment],
+        config: DanmakuConfig
+    ) {
+        self.comments = comments
+        self.config = config
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("弹幕")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("\(visibleComments.count) 条")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 42)
+
+            Divider()
+
+            if visibleComments.isEmpty {
+                ContentUnavailableView(
+                    "等待弹幕",
+                    systemImage: "ellipsis.bubble",
+                    description: Text("新消息会从底部加入列表")
+                )
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(visibleComments) { comment in
+                                messageRow(comment)
+                                    .id(comment.id)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                    }
+                    .onAppear {
+                        scrollToLatest(using: proxy, animated: false)
+                    }
+                    .onChange(of: visibleComments.last?.id) {
+                        scrollToLatest(using: proxy, animated: true)
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .animation(.easeOut(duration: 0.22), value: visibleComments.last?.id)
+    }
+
+    private var visibleComments: [DanmakuComment] {
+        DanmakuRightRailModel.visibleComments(comments, config: config)
+    }
+
+    @ViewBuilder
+    private func messageRow(_ comment: DanmakuComment) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            if !comment.user.isEmpty {
+                Text(comment.user)
+                    .foregroundStyle(Color.accentColor)
+            }
+            if comment.isEmoticon, let rawURL = comment.imageUrl, let url = URL(string: rawURL) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFit()
+                    }
+                }
+                .frame(width: CGFloat(comment.imageWidth ?? 36), height: 28)
+            } else {
+                Text(comment.text)
+                    .foregroundStyle(messageColor(comment.colorRGB))
+            }
+        }
+        .font(.system(size: min(config.fontSize, 20), weight: .regular))
+        .lineLimit(3)
+        .opacity(config.opacity * comment.opacity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func color(_ rgb: UInt32) -> Color {
+        Color(
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255
+        )
+    }
+
+    private func messageColor(_ rgb: UInt32) -> Color {
+        guard config.showColored, rgb != 0xFF_FF_FF else { return .primary }
+        return color(rgb)
+    }
+
+    private func scrollToLatest(
+        using proxy: ScrollViewProxy,
+        animated: Bool
+    ) {
+        guard let id = visibleComments.last?.id else { return }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(id, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(id, anchor: .bottom)
+        }
+    }
+}
+
+enum DanmakuRightRailModel {
+    static func visibleComments(
+        _ comments: [DanmakuComment],
+        config: DanmakuConfig
+    ) -> [DanmakuComment] {
+        comments
+            .filter { $0.opacity >= config.minOpacity }
+            .filter { !DanmakuLayoutEngine.isBlocked($0, rules: config.blockedWords) }
+            .suffix(100)
+            .map { $0 }
     }
 }

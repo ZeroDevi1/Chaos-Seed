@@ -43,25 +43,17 @@ public struct RootView: View {
             case .home:
                 HomeView(liveKit: liveKit, homeVM: homeVM, onOpenRoom: onOpenRoom)
             case .history:
-                HistoryView()
+                HistoryView(onOpenRoom: onOpenRoom)
             case .settings:
                 SettingsView(appearance: $appearance)
             }
         }
         .frame(minWidth: 900, minHeight: 600)
-        .overlay(alignment: .bottom) {
-            if let toast = appState.toastMessage {
-                ToastView(message: toast)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, 24)
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: appState.toastMessage)
     }
 }
 
 /// 底部 Toast 提示（对齐原型 `.toast`，macOS 26 使用 Liquid Glass 材质）。
-private struct ToastView: View {
+struct ToastView: View {
     let message: String
 
     var body: some View {

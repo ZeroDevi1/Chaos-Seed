@@ -11,6 +11,9 @@ final class DanmakuTests: XCTestCase {
         XCTAssertEqual(config.blockedWords, ["spam"])
         XCTAssertTrue(config.collapseDuplicates)
         XCTAssertEqual(config.mode, .scroll)
+        XCTAssertTrue(config.showScrolling)
+        XCTAssertTrue(config.showTop)
+        XCTAssertTrue(config.showBottom)
     }
 
     @MainActor
@@ -153,6 +156,108 @@ final class DanmakuTests: XCTestCase {
         ).first)
         XCTAssertEqual(item.colorRGB, 0xFF_FF_FF)
         XCTAssertEqual(item.opacity, config.opacity * 0.4, accuracy: 0.001)
+    }
+
+    func testLayoutKeepsSourceModesAndTypeFilters() {
+        let start = Date()
+        let comments = [
+            DanmakuComment(text: "scroll", receivedAt: start, sourceMode: .scroll),
+            DanmakuComment(text: "top", receivedAt: start, sourceMode: .top),
+            DanmakuComment(text: "bottom", receivedAt: start, sourceMode: .bottom),
+        ]
+        var config = DanmakuConfig.default
+
+        XCTAssertEqual(
+            Set(DanmakuLayoutEngine.layout(
+                comments: comments,
+                config: config,
+                size: CGSize(width: 800, height: 450),
+                now: start
+            ).map(\.text)),
+            Set(["scroll", "top", "bottom"])
+        )
+
+        config.showTop = false
+        let filtered = DanmakuLayoutEngine.layout(
+            comments: comments,
+            config: config,
+            size: CGSize(width: 800, height: 450),
+            now: start
+        )
+        XCTAssertFalse(filtered.contains(where: { $0.text == "top" }))
+        XCTAssertTrue(filtered.contains(where: { $0.text == "scroll" }))
+        XCTAssertTrue(filtered.contains(where: { $0.text == "bottom" }))
+    }
+
+    @MainActor
+    func testDouyuPacketRoundTripAndCommentParsing() throws {
+        let first = DanmakuClient.encodeDouyuPacket("type@=loginreq/roomid@=1/")
+        let second = DanmakuClient.encodeDouyuPacket(
+            "type@=chatmsg/dms@=1/nn@=alice/txt@=hello@Sworld/"
+        )
+        let decoded = DanmakuClient.decodeDouyuPackets(first + second)
+
+        XCTAssertEqual(decoded.count, 2)
+        XCTAssertEqual(decoded[0], "type@=loginreq/roomid@=1/")
+        let comment = try XCTUnwrap(DanmakuClient.parseDouyuComment(decoded[1]))
+        XCTAssertEqual(comment.user, "alice")
+        XCTAssertEqual(comment.text, "hello/world")
+    }
+
+    @MainActor
+    func testHuyaJoinPacketContainsRoomCredentials() throws {
+        let packet = DanmakuClient.encodeHuyaJoin(yyuid: 123, uid: 456)
+        XCTAssertEqual(try HuyaJCE.int32(packet, tag: 0), 1)
+        let payload = try XCTUnwrap(HuyaJCE.bytes(packet, tag: 1))
+        XCTAssertEqual(try HuyaJCE.int64(payload, tag: 0), 123)
+        XCTAssertEqual(try HuyaJCE.int64(payload, tag: 4), 456)
+        XCTAssertEqual(try HuyaJCE.int64(payload, tag: 5), 456)
+    }
+
+    func testPlatformRoomMetadataParsing() throws {
+        let douyu = #"prefix "roomInfo":{"room":{"room_id":3168536}} suffix"#
+        XCTAssertEqual(try PlatformDanmakuResolver.parseDouyuRoomId(douyu), "3168536")
+
+        let huya = """
+        <script>window.HNF_GLOBAL_INIT = {"roomInfo":{"tLiveInfo":{"lYyid":1,"lUid":"2"}}};</script>
+        """
+        let object = try PlatformDanmakuResolver.extractHuyaGlobalInit(huya)
+        let json = try JSONValue(parsing: object)
+        XCTAssertEqual(json.pointer("/roomInfo/tLiveInfo/lYyid")?.asInt64, 1)
+        XCTAssertEqual(json.pointer("/roomInfo/tLiveInfo/lUid")?.asInt64, 2)
+    }
+
+    func testRightRailKeepsLatestVisibleComments() {
+        let comments = (0..<20).map {
+            DanmakuComment(
+                text: $0 == 19 ? "blocked" : "message \($0)",
+                opacity: $0 == 18 ? 0.1 : 1
+            )
+        }
+        var config = DanmakuConfig.default
+        config.minOpacity = 0.5
+        config.blockedWords = ["blocked"]
+
+        let visible = DanmakuRightRailModel.visibleComments(comments, config: config)
+
+        XCTAssertLessThanOrEqual(visible.count, 100)
+        XCTAssertEqual(visible.last?.text, "message 17")
+        XCTAssertFalse(visible.contains(where: { $0.text == "message 18" }))
+        XCTAssertFalse(visible.contains(where: { $0.text == "blocked" }))
+    }
+
+    func testOverlaySwitchDoesNotControlRightRailVisibility() {
+        XCTAssertFalse(DanmakuPresentationPolicy.showsOverlay(isEnabled: false))
+        XCTAssertTrue(DanmakuPresentationPolicy.showsRightRail(isExpanded: true))
+        XCTAssertFalse(DanmakuPresentationPolicy.showsRightRail(isExpanded: false))
+    }
+
+    @MainActor
+    func testReconnectDelayUsesBoundedExponentialBackoff() {
+        XCTAssertEqual(DanmakuClient.reconnectDelay(forAttempt: 1), 1)
+        XCTAssertEqual(DanmakuClient.reconnectDelay(forAttempt: 2), 2)
+        XCTAssertEqual(DanmakuClient.reconnectDelay(forAttempt: 3), 4)
+        XCTAssertEqual(DanmakuClient.reconnectDelay(forAttempt: 8), 15)
     }
 
     @MainActor

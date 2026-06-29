@@ -30,10 +30,27 @@ final class InputParserTests: XCTestCase {
         XCTAssertEqual(rid, "999")
     }
 
+    func testPrefixURL_rejectsMismatchedHost() {
+        XCTAssertThrowsError(
+            try InputParser.parse("bilibili:https://www.huya.com/999")
+        )
+    }
+
     func testBiliLiveURL() throws {
         let (site, rid) = try InputParser.parse("https://live.bilibili.com/12345")
         XCTAssertEqual(site, .biliLive)
         XCTAssertEqual(rid, "12345")
+    }
+
+    func testBiliH5AndQueryURLs() throws {
+        XCTAssertEqual(
+            try InputParser.parse("https://m.live.bilibili.com/h5/12345").1,
+            "12345"
+        )
+        XCTAssertEqual(
+            try InputParser.parse("https://live.bilibili.com/?room_id=67890").1,
+            "67890"
+        )
     }
 
     func testDouyuURL() throws {
@@ -48,6 +65,18 @@ final class InputParserTests: XCTestCase {
         XCTAssertEqual(rid, "ai")
     }
 
+    func testSchemeLessAndShareTextURLs() throws {
+        XCTAssertEqual(
+            try InputParser.parse("live.bilibili.com/12345").1,
+            "12345"
+        )
+        let parsed = try InputParser.parse(
+            "分享直播间：https://www.huya.com/abc123?from=share，欢迎观看"
+        )
+        XCTAssertEqual(parsed.0, .huya)
+        XCTAssertEqual(parsed.1, "abc123")
+    }
+
     func testDouyuTopicURL_isRejected() {
         XCTAssertThrowsError(try InputParser.parse("https://www.douyu.com/topic/xx")) { error in
             guard case LiveKitError.invalidInput = error else {
@@ -55,6 +84,11 @@ final class InputParserTests: XCTestCase {
                 return
             }
         }
+    }
+
+    func testNonRoomRoutesAreRejected() {
+        XCTAssertThrowsError(try InputParser.parse("https://www.huya.com/g/lol"))
+        XCTAssertThrowsError(try InputParser.parse("https://www.douyu.com/directory/all"))
     }
 
     func testUnsupportedHost() {

@@ -19,39 +19,16 @@ public enum InputParser {
                     throw LiveKitError.invalidInput("empty room id")
                 }
                 // 允许 `site:https://...` 的便捷写法。
-                if rest.lowercased().hasPrefix("http://") || rest.lowercased().hasPrefix("https://") {
-                    if let firstSeg = firstSegment(ofURLString: rest), !firstSeg.isEmpty {
-                        return (site, firstSeg)
-                    }
+                if let urlString = normalizedURLString(from: rest) {
+                    return try parseURL(urlString, expectedSite: site)
                 }
                 return (site, rest)
             }
         }
 
-        // URL 输入。
-        let lower = raw.lowercased()
-        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
-            guard let comps = URLComponents(string: raw) else {
-                throw LiveKitError.invalidInput("invalid url")
-            }
-            let host = (comps.host ?? "").lowercased()
-            let firstSeg = firstPathSegment(comps.path)
-            guard !firstSeg.isEmpty else {
-                throw LiveKitError.invalidInput("missing room id in url: \(raw)")
-            }
-            if host.hasSuffix("live.bilibili.com") {
-                return (.biliLive, firstSeg)
-            }
-            if host.hasSuffix("douyu.com") {
-                if firstSeg.lowercased() == "topic" {
-                    throw LiveKitError.invalidInput("unsupported douyu url path: \(raw)")
-                }
-                return (.douyu, firstSeg)
-            }
-            if host.hasSuffix("huya.com") {
-                return (.huya, firstSeg)
-            }
-            throw LiveKitError.unsupportedHost(host)
+        // URL、无 scheme 地址或分享文本中的 URL。
+        if let urlString = normalizedURLString(from: raw) {
+            return try parseURL(urlString)
         }
 
         // 纯数字房间号：默认走 BiliLive。
@@ -72,17 +49,114 @@ public enum InputParser {
         }
     }
 
-    /// 解析完整 URL 字符串，取路径的第一个非空段（去掉首尾 `/`）。
-    /// 用于 `site:https://...` 便捷写法。
-    private static func firstSegment(ofURLString urlString: String) -> String? {
-        guard let comps = URLComponents(string: urlString) else { return nil }
-        return firstPathSegment(comps.path)
+    private static func parseURL(
+        _ urlString: String,
+        expectedSite: Site? = nil
+    ) throws -> (Site, String) {
+        guard let components = URLComponents(string: urlString),
+              let rawHost = components.host?.lowercased(),
+              !rawHost.isEmpty else {
+            throw LiveKitError.invalidInput("invalid url")
+        }
+
+        let site: Site
+        if host(rawHost, matches: "live.bilibili.com") {
+            site = .biliLive
+        } else if host(rawHost, matches: "douyu.com") {
+            site = .douyu
+        } else if host(rawHost, matches: "huya.com") {
+            site = .huya
+        } else {
+            throw LiveKitError.unsupportedHost(rawHost)
+        }
+        if let expectedSite, expectedSite != site {
+            throw LiveKitError.invalidInput(
+                "url host does not match \(expectedSite.displayName): \(rawHost)"
+            )
+        }
+
+        let pathSegments = components.path
+            .split(separator: "/")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        let roomId: String?
+        switch site {
+        case .biliLive:
+            roomId = roomIdForBili(pathSegments, queryItems: components.queryItems ?? [])
+        case .douyu:
+            roomId = roomIdForDouyu(pathSegments)
+        case .huya:
+            roomId = roomIdForHuya(pathSegments)
+        }
+
+        guard let roomId, !roomId.isEmpty else {
+            throw LiveKitError.invalidInput("missing room id in url: \(urlString)")
+        }
+        return (site, roomId)
     }
 
-    /// 取 URL 路径的第一个非空段（去掉首尾 `/`）。
-    private static func firstPathSegment(_ path: String) -> String {
-        let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let first = trimmed.split(separator: "/").first.map(String.init) ?? ""
-        return first.trimmingCharacters(in: .whitespaces)
+    /// 接受完整 URL、常见无 scheme 地址，以及分享文本中首个 HTTP(S) URL。
+    private static func normalizedURLString(from input: String) -> String? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") {
+            return trimURLPunctuation(trimmed)
+        }
+
+        if let range = trimmed.range(
+            of: #"https?://[^\s]+"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) {
+            return trimURLPunctuation(String(trimmed[range]))
+        }
+
+        let knownHosts = [
+            "live.bilibili.com/",
+            "www.douyu.com/",
+            "m.douyu.com/",
+            "www.huya.com/",
+            "m.huya.com/",
+        ]
+        if knownHosts.contains(where: { lower.hasPrefix($0) }) {
+            return "https://\(trimURLPunctuation(trimmed))"
+        }
+        return nil
+    }
+
+    private static func trimURLPunctuation(_ value: String) -> String {
+        value.trimmingCharacters(
+            in: CharacterSet(charactersIn: " \t\r\n<>[](){}，。！？、；：\"'")
+        )
+    }
+
+    private static func host(_ host: String, matches domain: String) -> Bool {
+        host == domain || host.hasSuffix(".\(domain)")
+    }
+
+    private static func roomIdForBili(
+        _ segments: [String],
+        queryItems: [URLQueryItem]
+    ) -> String? {
+        if let first = segments.first, first.lowercased() != "h5" {
+            return first
+        }
+        if segments.first?.lowercased() == "h5", segments.count > 1 {
+            return segments[1]
+        }
+        return queryItems
+            .first(where: { ["room_id", "roomid"].contains($0.name.lowercased()) })?
+            .value
+    }
+
+    private static func roomIdForDouyu(_ segments: [String]) -> String? {
+        guard let first = segments.first else { return nil }
+        let unsupported = Set(["topic", "directory", "search", "member", "gapi"])
+        return unsupported.contains(first.lowercased()) ? nil : first
+    }
+
+    private static func roomIdForHuya(_ segments: [String]) -> String? {
+        guard let first = segments.first else { return nil }
+        let unsupported = Set(["g", "l", "search", "video"])
+        return unsupported.contains(first.lowercased()) ? nil : first
     }
 }

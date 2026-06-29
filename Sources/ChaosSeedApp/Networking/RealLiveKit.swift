@@ -58,9 +58,13 @@ public final class RealLiveKit: LiveKit, @unchecked Sendable {
     }
 
     public func resolveDanmakuConnection(site: Site, roomId: String) async throws -> DanmakuConnectionInfo {
-        guard site == .biliLive else {
-            throw LiveKitError.unsupportedSite
+        switch site {
+        case .biliLive:
+            return try await BiliDanmakuResolver(http: http, wbi: biliWbi).resolve(roomId: roomId)
+        case .douyu:
+            return try await PlatformDanmakuResolver.resolveDouyu(http: http, roomId: roomId)
+        case .huya:
+            return try await PlatformDanmakuResolver.resolveHuya(http: http, roomId: roomId)
         }
-        return try await BiliDanmakuResolver(http: http, wbi: biliWbi).resolve(roomId: roomId)
     }
 }

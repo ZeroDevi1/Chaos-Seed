@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 弹幕配置面板（叠加在播放器上方）。
+/// 视频画面内悬浮弹幕的配置面板。
 ///
 /// 对标 BiliBili 播放器弹幕设置：
 /// - 字号、不透明度、速度、显示区域、显示模式
@@ -38,12 +38,15 @@ public struct DanmakuSettingsPanel: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    Text("这里的设置只影响视频画面内从右向左移动的悬浮弹幕，右侧消息栏始终独立显示。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                     fontSizeRow
                     opacityRow
                     minOpacityRow
                     speedRow
                     displayAreaRow
-                    modeRow
+                    typeFilters
                     colorToggleRow
                     duplicateToggleRow
                     blockedWordsSection
@@ -118,15 +121,34 @@ public struct DanmakuSettingsPanel: View {
         }
     }
 
-    private var modeRow: some View {
-        labeledRow("显示模式") {
-            Picker("", selection: $config.mode) {
-                ForEach(DanmakuMode.allCases, id: \.self) { mode in
-                    Text(mode.label).tag(mode)
-                }
+    private var typeFilters: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("弹幕类型")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                danmakuTypeToggle("滚动", isOn: $config.showScrolling)
+                danmakuTypeToggle("顶部", isOn: $config.showTop)
+                danmakuTypeToggle("底部", isOn: $config.showBottom)
             }
-            .pickerStyle(.segmented)
         }
+    }
+
+    private func danmakuTypeToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .foregroundStyle(isOn.wrappedValue ? Color.white : Color.primary)
+                .background(
+                    isOn.wrappedValue ? Color.accentColor : Color.gray.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var colorToggleRow: some View {

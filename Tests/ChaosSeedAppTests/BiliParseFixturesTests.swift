@@ -129,24 +129,24 @@ final class BiliParseFixturesTests: XCTestCase {
         XCTAssertNil(low?.url)
     }
 
-    /// 服务端明确在 URL 中返回较低 qn 时，不能把低清流冒充成请求的高画质。
-    func testParseRoomPlayInfoValue_rejectsExplicitQualityFallback() throws {
+    /// 对齐 main：URL 查询参数不能作为可靠画质证据，仍按 requested_qn 绑定。
+    func testParseRoomPlayInfoValue_keepsRequestedQualityWhenURLQnDiffers() throws {
         let json = try JSONValue(parsing: Self.fixtureExplicitQnFallback)
 
         let vars = try biliParseRoomPlayInfoValue(json, requestedQn: 10000)
         let high = vars.first(where: { $0.quality == 10000 })
         XCTAssertNotNil(high)
-        XCTAssertNil(high?.url)
-        XCTAssertTrue(high?.backupUrls.isEmpty == true)
+        XCTAssertTrue(high?.url?.contains("qn=250") == true)
     }
 
-    func testParseRoomPlayInfoValue_keepsOnlyURLsMatchingRequestedQuality() throws {
+    func testParseRoomPlayInfoValue_keepsAllCDNBackupsForRequestedQuality() throws {
         let json = try JSONValue(parsing: Self.fixtureMixedURLQualities)
 
         let vars = try biliParseRoomPlayInfoValue(json, requestedQn: 10000)
         let high = try XCTUnwrap(vars.first(where: { $0.quality == 10000 }))
-        XCTAssertTrue(high.url?.contains("qn=10000") == true)
-        XCTAssertFalse(high.allURLs.contains(where: { $0.contains("qn=250") }))
+        XCTAssertEqual(high.allURLs.count, 2)
+        XCTAssertTrue(high.allURLs.contains(where: { $0.contains("qn=250") }))
+        XCTAssertTrue(high.allURLs.contains(where: { $0.contains("qn=10000") }))
     }
 
     /// 对照 Rust：accept_qn 过滤掉不支持的清晰度。
@@ -201,7 +201,7 @@ final class BiliParseFixturesTests: XCTestCase {
         )
         XCTAssertNil(flvOnly.builtinPlaybackURL)
         XCTAssertEqual(flvOnly.webFLVPlaybackURL?.absoluteString, "https://example.com/live.flv?token=1")
-        XCTAssertEqual(flvOnly.builtinPlaybackSource?.engine, .webFLV)
+        XCTAssertEqual(flvOnly.builtinPlaybackSource?.engine, .libMPV)
         XCTAssertTrue(flvOnly.needsBuiltinResolution(for: .huya))
         XCTAssertFalse(flvOnly.needsBuiltinResolution(for: .douyu))
         XCTAssertFalse(withHLS.needsBuiltinResolution(for: .biliLive))

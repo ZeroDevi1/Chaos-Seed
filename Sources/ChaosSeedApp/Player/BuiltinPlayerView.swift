@@ -1,56 +1,92 @@
 import SwiftUI
-import AVKit
+import AVFoundation
+import AppKit
 
-/// 内置播放器的 SwiftUI 视图：将 AVPlayerView 嵌入 SwiftUI 布局，并叠加弹幕层。
+/// 内置播放器的视频渲染视图。
 ///
 /// 特性：
-/// - 自动绑定 `BuiltinPlayer.avPlayer` 到视频渲染层。
-/// - 支持全屏 / 画中画（使用 macOS 26 的 `AVPlayerView` 原生控件）。
+/// - 使用 `AVPlayerLayer` 绕过 macOS 27 Beta 中 `AVPlayerView` 原生控件的绑定崩溃；
+/// - 自动绑定 `BuiltinPlayer.avPlayer` 到视频渲染层；
 /// - HDR（EDR）由视频解码管线自动启用。
-/// - 弹幕 Canvas 叠加层（通过 `danmakuComments` + `danmakuConfig` 注入）。
-///
-/// 用法：
-/// ```swift
-/// BuiltinPlayerView(player: player, danmakuComments: $vm.comments, danmakuConfig: $vm.danmakuConfig)
-///     .onAppear { BuiltinPlayer.configureWindowForHDR(NSApp.keyWindow) }
-/// ```
 public struct BuiltinPlayerView: NSViewRepresentable {
     let player: BuiltinPlayer
 
-    /// 弹幕数据源（从 DanmakuClient 同步接收）。
-    var danmakuComments: [DanmakuComment] = []
-    /// 弹幕显示配置。
-    var danmakuConfig: DanmakuConfig = .default
-    /// 是否显示弹幕。
-    var showDanmaku: Bool = false
-
-    public init(player: BuiltinPlayer,
-                danmakuComments: [DanmakuComment] = [],
-                danmakuConfig: DanmakuConfig = .default,
-                showDanmaku: Bool = false) {
+    public init(player: BuiltinPlayer) {
         self.player = player
-        self.danmakuComments = danmakuComments
-        self.danmakuConfig = danmakuConfig
-        self.showDanmaku = showDanmaku
     }
 
-    public func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
-        view.controlsStyle = .inline
-        view.showsFullScreenToggleButton = true
-        view.player = player.avPlayer
+    public func makeNSView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
+        view.playerLayer.player = player.avPlayer
+        player.attachPictureInPicture(to: view.playerLayer)
         return view
     }
 
-    public func updateNSView(_ nsView: AVPlayerView, context: Context) {
-        // BuiltinPlayer 复用稳定的 AVPlayer 实例，不在 SwiftUI 更新事务中反复解绑。
-        if nsView.player !== player.avPlayer {
-            nsView.player = player.avPlayer
+    public func updateNSView(_ nsView: PlayerLayerView, context: Context) {
+        if nsView.playerLayer.player !== player.avPlayer {
+            nsView.playerLayer.player = player.avPlayer
         }
+        player.attachPictureInPicture(to: nsView.playerLayer)
+    }
+
+    public static func dismantleNSView(_ nsView: PlayerLayerView, coordinator: ()) {
+        nsView.playerLayer.player = nil
+    }
+}
+
+/// 仅负责视频呈现，不创建 AVKit 的 SwiftUI 控件树。
+public final class PlayerLayerView: NSView {
+    var playerLayer: AVPlayerLayer {
+        guard let playerLayer = layer as? AVPlayerLayer else {
+            preconditionFailure("PlayerLayerView requires AVPlayerLayer")
+        }
+        return playerLayer
+    }
+
+    public override func makeBackingLayer() -> CALayer {
+        let layer = AVPlayerLayer()
+        layer.videoGravity = .resizeAspect
+        layer.backgroundColor = NSColor.black.cgColor
+        return layer
+    }
+
+    public override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
     }
 }
 
 // MARK: - 含弹幕叠加层的包装视图
+
+enum DanmakuPresentationPolicy {
+    static func showsOverlay(isEnabled: Bool) -> Bool {
+        isEnabled
+    }
+
+    static func showsRightRail(isExpanded: Bool) -> Bool {
+        isExpanded
+    }
+
+    static func rightRailWidth(totalWidth: CGFloat, isExpanded: Bool) -> CGFloat {
+        guard isExpanded else { return 0 }
+        return min(340, max(280, totalWidth * 0.28))
+    }
+
+    static func videoWidth(totalWidth: CGFloat, isRightRailExpanded: Bool) -> CGFloat {
+        max(
+            0,
+            totalWidth - rightRailWidth(
+                totalWidth: totalWidth,
+                isExpanded: isRightRailExpanded
+            )
+        )
+    }
+}
 
 /// 内置播放器含弹幕叠加层：视频 + 弹幕 Canvas。
 ///
@@ -59,106 +95,112 @@ public struct BuiltinPlayerView: NSViewRepresentable {
 public struct BuiltinPlayerWithDanmaku: View {
     @ObservedObject var player: BuiltinPlayer
     let danmakuComments: [DanmakuComment]
-    @Binding var danmakuConfig: DanmakuConfig
-    let danmakuAvailable: Bool
-    @State private var showDanmaku = true
-    @State private var showDanmakuSettings = false
+    let danmakuConfig: DanmakuConfig
+    let showOverlayDanmaku: Bool
+    @Binding var isRightRailExpanded: Bool
 
     public init(player: BuiltinPlayer,
                 danmakuComments: [DanmakuComment],
-                danmakuConfig: Binding<DanmakuConfig>,
-                danmakuAvailable: Bool = true) {
+                danmakuConfig: DanmakuConfig,
+                showOverlayDanmaku: Bool = true,
+                isRightRailExpanded: Binding<Bool>) {
         self.player = player
         self.danmakuComments = danmakuComments
-        self._danmakuConfig = danmakuConfig
-        self.danmakuAvailable = danmakuAvailable
+        self.danmakuConfig = danmakuConfig
+        self.showOverlayDanmaku = showOverlayDanmaku
+        self._isRightRailExpanded = isRightRailExpanded
     }
 
     public var body: some View {
         GeometryReader { geo in
-            ZStack {
-                // 视频层。
-                if player.engine == .webFLV, let request = player.webFLVRequest {
-                    WebFLVPlayerView(player: player, request: request)
-                } else {
-                    BuiltinPlayerView(player: player,
-                                      danmakuComments: danmakuComments,
-                                      danmakuConfig: danmakuConfig,
-                                      showDanmaku: showDanmaku)
-                }
+            let railWidth = DanmakuPresentationPolicy.rightRailWidth(
+                totalWidth: geo.size.width,
+                isExpanded: isRightRailExpanded
+            )
+            let videoWidth = DanmakuPresentationPolicy.videoWidth(
+                totalWidth: geo.size.width,
+                isRightRailExpanded: isRightRailExpanded
+            )
 
-                // 弹幕叠加层。
-                if showDanmaku && !danmakuComments.isEmpty {
-                    DanmakuOverlay(
+            HStack(spacing: 0) {
+                ZStack(alignment: .trailing) {
+                    videoSurface(size: CGSize(width: videoWidth, height: geo.size.height))
+
+                    Button {
+                        isRightRailExpanded.toggle()
+                    } label: {
+                        Image(systemName: isRightRailExpanded ? "chevron.right" : "chevron.left")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 24, height: 42)
+                            .foregroundStyle(.white)
+                            .background(.black.opacity(0.58), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 10)
+                    .help(isRightRailExpanded ? "收起弹幕列表" : "展开弹幕列表")
+                }
+                .frame(width: videoWidth)
+
+                if DanmakuPresentationPolicy.showsRightRail(isExpanded: isRightRailExpanded) {
+                    DanmakuRightRail(
                         comments: danmakuComments,
-                        config: danmakuConfig,
-                        size: geo.size,
-                        isPlaying: player.isPlaying
+                        config: danmakuConfig
                     )
-                        .allowsHitTesting(false)  // 弹幕不拦截点击事件。
-                }
-
-                if let error = player.errorMessage {
-                    VStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 30))
-                        Text("无法播放当前线路")
-                            .font(.headline)
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 420)
+                    .frame(width: railWidth)
+                    .background(.ultraThinMaterial)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 1)
                     }
-                    .padding(24)
-                    .liquidGlassBackground(in: .rect(cornerRadius: 16))
-                }
-
-                // 弹幕控制栏（底部）。
-                if danmakuAvailable {
-                    VStack {
-                        Spacer()
-                        GlassEffectContainer(spacing: 8) {
-                            HStack(spacing: 12) {
-                                Button {
-                                    showDanmaku.toggle()
-                                } label: {
-                                    Image(systemName: showDanmaku ? "text.bubble.fill" : "text.bubble")
-                                        .font(.system(size: 16))
-                                        .frame(width: 28, height: 24)
-                                }
-                                .buttonStyle(.plain)
-                                .glassEffect(in: .capsule)
-                                .help(showDanmaku ? "关闭弹幕" : "开启弹幕")
-
-                                Button {
-                                    showDanmakuSettings.toggle()
-                                } label: {
-                                    Image(systemName: "gearshape.fill")
-                                        .font(.system(size: 14))
-                                        .frame(width: 28, height: 24)
-                                }
-                                .buttonStyle(.plain)
-                                .glassEffect(in: .capsule)
-                                .help("弹幕设置")
-
-                                Spacer()
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                        }
-                        .padding(12)
-                    }
-                }
-
-                // 弹幕设置面板（浮层）。
-                if danmakuAvailable && showDanmakuSettings {
-                    DanmakuSettingsPanel(config: $danmakuConfig, onClose: {
-                        showDanmakuSettings = false
-                    })
-                    .transition(.scale.combined(with: .opacity))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .clipped()
+            .animation(.easeInOut(duration: 0.2), value: isRightRailExpanded)
         }
+    }
+
+    private func videoSurface(size: CGSize) -> some View {
+        ZStack {
+            if player.engine == .libMPV {
+                LibMPVPlayerView(player: player)
+            } else if player.engine == .webFLV, let request = player.webFLVRequest {
+                WebFLVPlayerView(player: player, request: request)
+            } else {
+                BuiltinPlayerView(player: player)
+            }
+
+            if DanmakuPresentationPolicy.showsOverlay(isEnabled: showOverlayDanmaku),
+               !danmakuComments.isEmpty {
+                DanmakuOverlay(
+                    comments: danmakuComments,
+                    config: danmakuConfig,
+                    size: size,
+                    isPlaying: player.isPlaying
+                )
+                .allowsHitTesting(false)
+            }
+
+            if let error = player.errorMessage {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 30))
+                    Text("无法播放当前线路")
+                        .font(.headline)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                }
+                .padding(24)
+                .liquidGlassBackground(in: .rect(cornerRadius: 16))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+        .clipped()
     }
 }

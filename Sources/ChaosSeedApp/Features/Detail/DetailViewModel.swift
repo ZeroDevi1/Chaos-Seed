@@ -19,12 +19,21 @@ public final class DetailViewModel: ObservableObject {
     /// 内置播放器实例（仅当用户选择内置播放器时创建并持有）。
     @Published var builtinPlayer: BuiltinPlayer?
 
-    /// 弹幕客户端（仅 BiliLive 房间支持）。
+    /// 当前直播间的弹幕客户端。
     @Published var danmakuClient: DanmakuClient?
     /// 弹幕显示配置。
     @Published var danmakuConfig: DanmakuConfig {
         didSet { Self.saveDanmakuConfig(danmakuConfig) }
     }
+    /// 是否在视频画面上显示从右向左移动的悬浮弹幕。
+    ///
+    /// 右侧消息栏只由自身的展开状态控制，不受此开关影响。
+    @Published var showOverlayDanmaku: Bool {
+        didSet {
+            UserDefaults.standard.set(showOverlayDanmaku, forKey: Self.showOverlayDanmakuKey)
+        }
+    }
+    @Published var danmakuConnectionError: String?
 
     /// 播放器偏好：`builtin` 使用内置 AVPlayer，`iina` 唤起外部 IINA。
     /// 持久化在 UserDefaults 中（`@AppStorage`）。
@@ -40,15 +49,21 @@ public final class DetailViewModel: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var playTask: Task<Void, Never>?
     private var danmakuTask: Task<Void, Never>?
+    private var danmakuRoomId: String?
+    private var resolvingDanmakuRoomId: String?
     private var resolvedRoomId: String
     /// 解析得到的播放提示（Referer/UA），传给播放器。
     private var playbackHints: PlaybackHints = .init()
     private static let danmakuConfigKey = "danmakuConfig"
+    // 沿用旧 key，保留用户已有的开关偏好。
+    private static let showOverlayDanmakuKey = "showDanmaku"
 
     public init(room: LiveRoomCard, liveKit: LiveKit) {
         self.room = room
         self.liveKit = liveKit
         self.danmakuConfig = Self.loadDanmakuConfig()
+        self.showOverlayDanmaku =
+            UserDefaults.standard.object(forKey: Self.showOverlayDanmakuKey) as? Bool ?? true
         self.resolvedRoomId = room.roomId
     }
 
@@ -81,7 +96,15 @@ public final class DetailViewModel: ObservableObject {
                 for v in manifest.variants {
                     let urlTag: String
                     if let source = v.builtinPlaybackSource {
-                        let backend = source.engine == .avFoundation ? "AVFoundation" : "HTTP-FLV"
+                        let backend: String
+                        switch source.engine {
+                        case .avFoundation:
+                            backend = "AVFoundation"
+                        case .libMPV:
+                            backend = "libmpv"
+                        case .webFLV:
+                            backend = "HTTP-FLV"
+                        }
                         urlTag = "✓内置可播/\(backend)"
                     } else if v.isResolved {
                         urlTag = "FLV / IINA"
@@ -157,18 +180,11 @@ public final class DetailViewModel: ObservableObject {
                 self.variants[index] = current
             }
 
-            guard let primaryURL = current.allURLs.first.flatMap(URL.init(string:)) else {
-                await MainActor.run {
-                    self.logs = "未能获取播放地址"
-                    onResult(.failure("无播放地址"))
-                }
-                return
-            }
-
             await MainActor.run {
                 switch preference {
                 case .builtin:
-                    guard let source = current.builtinPlaybackSource else {
+                    let sources = current.builtinPlaybackSources
+                    guard let source = sources.first else {
                         self.logs = """
                         ❌ 当前清晰度没有可用的 HLS、MP4 或 HTTP-FLV 地址。
                         P2P `.xs` 线路暂不受内置播放器支持，请改用 IINA。
@@ -183,12 +199,29 @@ public final class DetailViewModel: ObservableObject {
                         player = BuiltinPlayer()
                         self.builtinPlayer = player
                     }
-                    let backend = source.engine == .avFoundation ? "AVFoundation" : "WebKit HTTP-FLV"
-                    self.logs = "✅ 内置播放器（\(backend)）：\(self.room.title) / \(current.label)\nURL：\(source.url.absoluteString)"
-                    player.play(source: source, hints: hints)
+                    let backend: String
+                    switch source.engine {
+                    case .avFoundation:
+                        backend = "AVFoundation"
+                    case .libMPV:
+                        backend = "libmpv"
+                    case .webFLV:
+                        backend = "WebKit HTTP-FLV"
+                    }
+                    self.logs = """
+                    ✅ 内置播放器（首选 \(backend)，共 \(sources.count) 条候选）：\
+                    \(self.room.title) / \(current.label)
+                    URL：\(source.url.absoluteString)
+                    """
+                    player.play(sources: sources, hints: hints)
                     self.connectDanmaku(roomId: roomId)
                     onResult(.builtin)
                 case .iina:
+                    guard let primaryURL = current.allURLs.first.flatMap(URL.init(string:)) else {
+                        self.logs = "未能获取播放地址"
+                        onResult(.failure("无播放地址"))
+                        return
+                    }
                     let configuredPath = UserDefaults.standard.string(forKey: "iinaPath")
                         ?? IINAPlayer.defaultAppPath
                     let launcher = IINALauncher(appPath: configuredPath)
@@ -221,39 +254,82 @@ public final class DetailViewModel: ObservableObject {
         danmakuTask = nil
         danmakuClient?.disconnect()
         danmakuClient = nil
+        danmakuRoomId = nil
+        resolvingDanmakuRoomId = nil
+        danmakuConnectionError = nil
         builtinPlayer?.stop()
         builtinPlayer = nil
     }
 
-    /// 先解析真实房间号与 WBI token，再建立 BiliLive 弹幕 WebSocket。
-    private func connectDanmaku(roomId: String) {
-        guard room.site == .biliLive else {
-            danmakuTask?.cancel()
-            danmakuClient?.disconnect()
-            danmakuClient = nil
-            return
+    /// 将当前内置播放源交给 IINA。HTTP-FLV 在 WebKit 里不能稳定进入系统画中画，
+    /// 因此详情页会用 IINA 的 PiP 作为小窗播放 fallback。
+    func openActiveBuiltinSourceInIINA(startPictureInPicture: Bool) -> PlaybackLaunchResult {
+        guard let source = builtinPlayer?.activeSource else {
+            return .failure("当前没有正在播放的内置线路")
         }
+        let configuredPath = UserDefaults.standard.string(forKey: "iinaPath")
+            ?? IINAPlayer.defaultAppPath
+        let result = IINAPlayer.launch(
+            url: source.url.absoluteString,
+            hints: effectivePlaybackHints(),
+            appPath: configuredPath,
+            startPictureInPicture: startPictureInPicture
+        )
+        switch result {
+        case .launched:
+            let mode = startPictureInPicture ? "IINA 小窗" : "IINA"
+            logs = "✅ \(mode) 已启动：\(room.title)\nURL：\(source.url.absoluteString)"
+            Log.player.debug("\(mode) 启动成功")
+            return .iina
+        case .iinaNotFound:
+            logs = "❌ 未检测到 IINA，请安装后重试。"
+            Log.player.error("IINA 未安装")
+            return .iinaNotFound
+        case .failure(let message):
+            logs = "❌ 启动失败：\(message)"
+            Log.player.error("IINA 启动失败: \(message)")
+            return .failure(message)
+        }
+    }
+
+    /// 按平台解析弹幕连接信息并建立 WebSocket。
+    private func connectDanmaku(roomId: String) {
         let rid = roomId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rid.isEmpty else { return }
+        if danmakuRoomId == rid, danmakuClient != nil {
+            return
+        }
+        if resolvingDanmakuRoomId == rid, danmakuTask != nil {
+            return
+        }
         danmakuTask?.cancel()
         danmakuClient?.disconnect()
         danmakuClient = nil
+        danmakuRoomId = nil
+        resolvingDanmakuRoomId = rid
+        danmakuConnectionError = nil
         danmakuTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let connection = try await self.liveKit.resolveDanmakuConnection(
-                    site: .biliLive,
+                    site: self.room.site,
                     roomId: rid
                 )
                 guard !Task.isCancelled, self.builtinPlayer != nil else { return }
                 let client = DanmakuClient(connection: connection)
                 self.danmakuClient = client
+                self.danmakuRoomId = rid
+                self.resolvingDanmakuRoomId = nil
                 client.connect()
-                Log.network.debug("danmaku: 正在连接真实房间 \(connection.roomId)")
+                Log.network.debug(
+                    "danmaku: 正在连接 \(self.room.site.rawKey) 房间 \(connection.roomId)"
+                )
             } catch is CancellationError {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
+                self.resolvingDanmakuRoomId = nil
+                self.danmakuConnectionError = error.localizedDescription
                 Log.network.error("danmaku: 连接信息解析失败 room=\(rid)", error: error)
             }
         }
@@ -283,8 +359,7 @@ public final class DetailViewModel: ObservableObject {
 
     func copySelectedUrl() -> String? {
         guard let id = selectedVariantId,
-              let variant = variants.first(where: { $0.id == id }),
-              let url = variant.url else { return nil }
-        return url
+              let variant = variants.first(where: { $0.id == id }) else { return nil }
+        return variant.allURLs.first
     }
 }

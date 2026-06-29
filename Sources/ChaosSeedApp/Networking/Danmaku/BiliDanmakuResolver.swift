@@ -10,12 +10,37 @@ public struct DanmakuEmoticon: Sendable, Equatable {
 
 /// 弹幕 WebSocket 建连所需的完整凭据。
 public struct DanmakuConnectionInfo: Sendable, Equatable {
+    public let site: Site
     public let roomId: String
     public let uid: UInt64
     public let token: String
     public let buvid: String
     public let endpoint: URL
     public let emoticons: [String: DanmakuEmoticon]
+    public let huyaYyuid: Int64?
+    public let huyaUid: Int64?
+
+    public init(
+        site: Site = .biliLive,
+        roomId: String,
+        uid: UInt64 = 0,
+        token: String = "",
+        buvid: String = "",
+        endpoint: URL,
+        emoticons: [String: DanmakuEmoticon] = [:],
+        huyaYyuid: Int64? = nil,
+        huyaUid: Int64? = nil
+    ) {
+        self.site = site
+        self.roomId = roomId
+        self.uid = uid
+        self.token = token
+        self.buvid = buvid
+        self.endpoint = endpoint
+        self.emoticons = emoticons
+        self.huyaYyuid = huyaYyuid
+        self.huyaUid = huyaUid
+    }
 }
 
 /// 对齐 `chaos-core/danmaku/platforms/bili_live.rs` 的解析阶段。

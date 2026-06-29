@@ -59,6 +59,13 @@ final class SmokeLiveKitTests: XCTestCase {
         XCTAssertTrue(list.items.allSatisfy { $0.input.hasPrefix("huya:") })
     }
 
+    func testDouyu_recommendRooms_live() async throws {
+        try skipUnlessSmoke()
+        let list = try await RealLiveKit().getRecommendRooms(site: .douyu, page: 1)
+        XCTAssertFalse(list.items.isEmpty)
+        print("[SMOKE] douyu recommend=\(list.items.prefix(10).map { "\($0.roomId):\($0.online ?? 0)" })")
+    }
+
     // MARK: 解析
 
     /// 解析一个公开直播间。默认 rid=6，也可通过 BILI_SMOKE_ROOM_ID 指定复现房间。
@@ -150,7 +157,7 @@ final class SmokeLiveKitTests: XCTestCase {
             roomId: manifest.roomId,
             variantId: pending.id
         )
-        XCTAssertEqual(resolved.builtinPlaybackSource?.engine, .webFLV)
+        XCTAssertEqual(resolved.builtinPlaybackSource?.engine, .libMPV)
         try await assertHTTPFLVReachable(resolved, manifest: manifest)
     }
 
@@ -216,6 +223,61 @@ final class SmokeLiveKitTests: XCTestCase {
             inflate=\(client.lastInflateDiagnostic), \
             error=\(client.error ?? "-")
             """
+        )
+    }
+
+    @MainActor
+    func testDouyu_danmakuConnection_live() async throws {
+        try skipUnlessSmoke()
+        try await assertDanmakuConnection(
+            site: .douyu,
+            roomId: douyuRoomId,
+            requiresComment: false
+        )
+    }
+
+    @MainActor
+    func testHuya_danmakuConnection_live() async throws {
+        try skipUnlessSmoke()
+        try await assertDanmakuConnection(site: .huya, roomId: huyaRoomId)
+    }
+
+    @MainActor
+    private func assertDanmakuConnection(
+        site: Site,
+        roomId: String,
+        requiresComment: Bool = true
+    ) async throws {
+        let connection = try await RealLiveKit().resolveDanmakuConnection(
+            site: site,
+            roomId: roomId
+        )
+        let client = DanmakuClient(connection: connection)
+        client.connect()
+        defer { client.disconnect() }
+
+        for _ in 0..<40 where !client.isConnected {
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
+        XCTAssertTrue(client.isConnected, client.error ?? "\(site.rawKey) 弹幕未连接")
+
+        if !requiresComment {
+            for _ in 0..<12 where client.receivedPacketCount == 0 {
+                try await Task.sleep(nanoseconds: 250_000_000)
+            }
+            XCTAssertGreaterThan(
+                client.receivedPacketCount,
+                0,
+                "\(site.rawKey) 连接后未收到任何业务包"
+            )
+            return
+        }
+        for _ in 0..<40 where client.comments.isEmpty {
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
+        XCTAssertFalse(
+            client.comments.isEmpty,
+            "\(site.rawKey) 连接后 10 秒内未收到聊天弹幕；packets=\(client.receivedPacketCount), histogram=\(client.packetHistogram), last=\(client.lastPacketSummary), text=\(client.lastTextDiagnostic), error=\(client.error ?? "-")"
         )
     }
 

@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// 设计文档 §4.5：
 /// - 优先用 `NSWorkspace.shared.open(_:)` 打开流 URL；
-/// - 若 `PlaybackHints` 含 Referer/UA/Cookie，改用 IINA CLI（`Process`）传入 `--mpv-http-header-fields`。
+/// - 若 `PlaybackHints` 含 Referer/UA，改用 IINA CLI（`Process`）传入 mpv header 选项。
 ///
 /// v1：保留骨架与日志，实际拉起留到真实网络层接入后启用。
 public enum IINAPlayer {
@@ -27,18 +27,28 @@ public enum IINAPlayer {
     ///   - url: 直播流直连 URL。
     ///   - hints: 来自 `LiveManifest.playback` 的 HTTP header 提示。
     ///   - appPath: IINA.app 路径，默认 `/Applications/IINA.app`。
-    public static func launch(url: String, hints: PlaybackHints, appPath: String = defaultAppPath) -> LaunchResult {
+    public static func launch(
+        url: String,
+        hints: PlaybackHints,
+        appPath: String = defaultAppPath,
+        startPictureInPicture: Bool = false
+    ) -> LaunchResult {
         guard FileManager.default.fileExists(atPath: appPath) else {
             return .iinaNotFound
         }
-        let needsHeaders = hints.referer != nil || hints.userAgent != nil
-        if !needsHeaders, let streamURL = URL(string: url) {
+        let needsCLI = hints.referer != nil || hints.userAgent != nil || startPictureInPicture
+        if !needsCLI, let streamURL = URL(string: url) {
             // 简单情况：直接让系统用 IINA 打开 URL。
             let config = NSWorkspace.OpenConfiguration()
             return open(url: streamURL, appPath: appPath, config: config)
         }
-        // 需要 header：调用 iina-cli 传入 `--mpv-http-header-fields`。
-        return launchCLI(url: url, hints: hints, appPath: appPath)
+        // 需要 header 或 IINA 小窗：调用 iina-cli 传入对应 mpv/IINA 选项。
+        return launchCLI(
+            url: url,
+            hints: hints,
+            appPath: appPath,
+            startPictureInPicture: startPictureInPicture
+        )
     }
 
     private static func open(url: URL, appPath: String, config: NSWorkspace.OpenConfiguration) -> LaunchResult {
@@ -54,27 +64,48 @@ public enum IINAPlayer {
         return .launched
     }
 
-    private static func launchCLI(url: String, hints: PlaybackHints, appPath: String) -> LaunchResult {
+    private static func launchCLI(
+        url: String,
+        hints: PlaybackHints,
+        appPath: String,
+        startPictureInPicture: Bool
+    ) -> LaunchResult {
         let cliPath = "\(appPath)/Contents/MacOS/iina-cli"
         guard FileManager.default.isExecutableFile(atPath: cliPath) else {
             return .failure("iina-cli not found: \(cliPath)")
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: cliPath)
-        var args: [String] = [url]
-        if let referer = hints.referer {
-            args.append(contentsOf: ["--mpv-http-header-fields", "Referer: \(referer)"])
-        }
-        if let ua = hints.userAgent {
-            args.append(contentsOf: ["--mpv-http-header-fields", "User-Agent: \(ua)"])
-        }
-        task.arguments = args
+        task.arguments = buildCLIArguments(
+            url: url,
+            hints: hints,
+            startPictureInPicture: startPictureInPicture
+        )
         do {
             try task.run()
             return .launched
         } catch {
             return .failure(error.localizedDescription)
         }
+    }
+
+    static func buildCLIArguments(
+        url: String,
+        hints: PlaybackHints,
+        startPictureInPicture: Bool = false
+    ) -> [String] {
+        var args: [String] = ["--no-stdin"]
+        if startPictureInPicture {
+            args.append("--pip")
+        }
+        if let referer = hints.referer {
+            args.append("--mpv-referrer=\(referer)")
+        }
+        if let ua = hints.userAgent {
+            args.append("--mpv-user-agent=\(ua)")
+        }
+        args.append(url)
+        return args
     }
 }
 

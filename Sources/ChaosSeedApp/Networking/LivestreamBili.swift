@@ -184,47 +184,6 @@ private func biliURLs(
         .filter { seen.insert($0).inserted }
 }
 
-private enum BiliURLQualityEvidence {
-    case matches
-    case conflicts
-    case unknown
-}
-
-private func biliURLReportedQn(_ value: String) -> Int? {
-    guard let components = URLComponents(string: value) else { return nil }
-    return components.queryItems?
-        .first(where: { $0.name == "qn" })?
-        .value
-        .flatMap(Int.init)
-}
-
-/// Bili 在未登录或当前房间限制画质时，可能忽略请求的 qn，同时仍返回 HTTP 200。
-/// URL 的 `qn` 查询参数比 `current_qn` 更接近实际媒体档位，优先用它阻止低清流冒充高画质。
-private func biliURLQualityEvidence(_ urls: [String], requestedQn: Int) -> BiliURLQualityEvidence {
-    let reportedQns = Set(urls.compactMap(biliURLReportedQn))
-    guard !reportedQns.isEmpty else { return .unknown }
-    return reportedQns.contains(requestedQn) ? .matches : .conflicts
-}
-
-private func biliURLsCompatibleWithRequestedQuality(
-    _ urls: [String],
-    requestedQn: Int
-) -> [String] {
-    let exact = urls.filter { biliURLReportedQn($0) == requestedQn }
-    if !exact.isEmpty {
-        return exact
-    }
-    switch biliURLQualityEvidence(urls, requestedQn: requestedQn) {
-    case .matches:
-        return exact
-    case .unknown:
-        // URL 不携带 qn 时保留 main 分支的兼容行为，避免误杀确实已切档的旧线路。
-        return urls
-    case .conflicts:
-        return []
-    }
-}
-
 /// 对齐 `parse_room_playinfo_value`：枚举 accept_qn + g_qn_desc，按 requested_qn 绑定 URL。
 /// 标记为 internal 以便单元测试对照 Rust fixture。
 func biliParseRoomPlayInfoValue(_ v: JSONValue, requestedQn: Int?) throws -> [StreamVariant] {
@@ -247,17 +206,11 @@ func biliParseRoomPlayInfoValue(_ v: JSONValue, requestedQn: Int?) throws -> [St
     }
     let currentQnI = Int(currentQn)
     let acceptQn: [Int] = (codec.pointer("/accept_qn")?.asArray ?? []).compactMap { $0.asInt64.map(Int.init) }
-    let candidateURLs = biliURLs(
+    let urls = biliURLs(
         from: candidates,
         targetQn: requestedQn ?? currentQnI,
         requestedQn: requestedQn
     )
-    let urls = requestedQn.map {
-        biliURLsCompatibleWithRequestedQuality(
-            candidateURLs,
-            requestedQn: $0
-        )
-    } ?? candidateURLs
     Log.network.debug(
         "bili codec: \(best.protocolName)/\(best.formatName)/\(best.codecName), urls=\(urls.count)"
     )
@@ -274,10 +227,8 @@ func biliParseRoomPlayInfoValue(_ v: JSONValue, requestedQn: Int?) throws -> [St
             if currentQnI != r {
                 Log.network.notice("bili_live(playinfo): current_qn(\(currentQnI)) != requested_qn(\(r))")
             }
-            shouldBind = r == qn && !urls.isEmpty
-            if r == qn && !shouldBind {
-                Log.network.notice("bili_live(playinfo): URL 明确回退到其它 qn，拒绝绑定 requested_qn=\(r)")
-            }
+            // 对齐 main：current_qn 在部分房间不可靠，只要目标 qn 匹配且有 URL 就绑定。
+            shouldBind = r == qn
         } else {
             shouldBind = (qn == currentQnI)
         }
@@ -365,13 +316,6 @@ private func biliFetchPlayUrl(ctx: LivestreamContext, rid: Int64, qn: Int) async
         urls = durl.compactMap { $0.pointer("/url")?.asString }
     }
     urls = Mbga.sortUrls(urls)
-    if qn > 0 {
-        urls = biliURLsCompatibleWithRequestedQuality(
-            urls,
-            requestedQn: qn
-        )
-    }
-
     var out: [StreamVariant] = []
     for item in qnDesc {
         let descQn = Int(item.pointer("/qn")?.asInt64 ?? -1)
@@ -416,12 +360,8 @@ private func biliResolveVariantForQn(ctx: LivestreamContext, rid: Int64, qn: Int
             Log.network.notice("bili_live(resolve): v2 current_qn(\(info.currentQn)) != requested_qn(\(qn))，将尝试 v1 playUrl / html fallback")
             v2LastResort = (info.vars, v.allURLs)
         } else {
-            let compatibleURLs = biliURLsCompatibleWithRequestedQuality(
-                info.urls,
-                requestedQn: qn
-            )
-            if !compatibleURLs.isEmpty {
-                v2LastResort = (info.vars, compatibleURLs)
+            if !info.urls.isEmpty {
+                v2LastResort = (info.vars, info.urls)
             }
         }
     } catch LiveKitError.needPassword {
@@ -443,7 +383,6 @@ private func biliResolveVariantForQn(ctx: LivestreamContext, rid: Int64, qn: Int
     } catch {}
 
     if let (vars, urls) = v2LastResort,
-       biliURLQualityEvidence(urls, requestedQn: qn) != .conflicts,
        var v = vars.first(where: { $0.quality == qn }) {
         v.url = urls[0]
         v.backupUrls = Array(urls.dropFirst())

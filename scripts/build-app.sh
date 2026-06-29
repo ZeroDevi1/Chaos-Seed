@@ -72,7 +72,7 @@ else
   echo "    ⚠️ 未找到 AppIcon.icns（跳过图标）"
 fi
 
-# Info.plist：声明为 LSUIElement=NO 的普通窗口应用、最小系统版本、图标、签名占位。
+# Info.plist：声明为 LSUIElement=NO 的普通窗口应用、最小系统版本和图标。
 cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -114,7 +114,16 @@ PLIST
 # PkgInfo（经典 8 字节标记）。
 printf "APPL????" > "$APP_DIR/Contents/PkgInfo"
 
+# SwiftPM 产物自带临时签名，其标识与最终 Bundle ID 不同。重新对完整 App
+# 做 ad-hoc 签名，确保系统媒体服务读取到一致的应用身份。
+codesign \
+  --force \
+  --deep \
+  --sign - \
+  --identifier com.zerodevi1.chaosseed \
+  "$APP_DIR"
+echo "    签名：ad-hoc（com.zerodevi1.chaosseed）"
+
 echo "==> 完成 ✅"
 echo "    应用：$APP_DIR"
 echo "    启动：open \"$APP_DIR\""
-echo "    备注：未签名，首次打开需在「系统设置 > 隐私与安全性」允许运行。"
