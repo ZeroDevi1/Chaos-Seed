@@ -34,6 +34,8 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("OpenGL"),
+                .linkedFramework("Security"),
+                .linkedFramework("CoreImage"),
             ]
         ),
         .target(

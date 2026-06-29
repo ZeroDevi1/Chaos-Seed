@@ -229,7 +229,7 @@ public struct DetailView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(variant.label)
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(lineName(for: variant))
+                            Text(qualitySubtitle(for: variant))
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
@@ -268,9 +268,11 @@ public struct DetailView: View {
         .liquidGlassBackground(in: .rect(cornerRadius: 10))
     }
 
-    /// 用 quality 值映射到「线路 N」，便于复刻原型观感。
-    private func lineName(for variant: StreamVariant) -> String {
-        "线路 \((variant.quality % 3) + 1)"
+    private func qualitySubtitle(for variant: StreamVariant) -> String {
+        if let diagnostic = variant.biliQualityDiagnosticText {
+            return diagnostic
+        }
+        return "线路 \((variant.quality % 3) + 1)"
     }
 
     private func variantStatus(_ variant: StreamVariant) -> String {

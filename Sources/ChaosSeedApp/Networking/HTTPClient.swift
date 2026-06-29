@@ -3,6 +3,16 @@ import Foundation
 /// 通用 HTTP 客户端，封装 `URLSession`，提供与 Rust `reqwest::Client` 等价的能力：
 /// GET（带 query / headers）、POST（form-urlencoded）、text/JSON 取回。
 public actor HTTPClient {
+    public struct JSONResponse: Sendable {
+        public var json: JSONValue
+        public var headers: [String: String]
+
+        public init(json: JSONValue, headers: [String: String]) {
+            self.json = json
+            self.headers = headers
+        }
+    }
+
     public struct Config: Sendable {
         public var timeout: TimeInterval
         public var userAgent: String
@@ -39,6 +49,18 @@ public actor HTTPClient {
         try Self.ensureSuccess(response, data: data)
         let any = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         return JSONValue.fromAny(any)
+    }
+
+    /// GET 取回 JSON，同时保留响应头。扫码登录需要读取 `Set-Cookie`。
+    public func getJSONWithHeaders(_ urlString: String, query: [(String, String)] = [], headers: [String: String] = [:]) async throws -> JSONResponse {
+        let (data, response) = try await perform(urlString, method: "GET", query: query, headers: headers, body: nil)
+        try Self.ensureSuccess(response, data: data)
+        let any = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        let headerFields = response.allHeaderFields.reduce(into: [String: String]()) { result, item in
+            guard let key = item.key as? String else { return }
+            result[key] = String(describing: item.value)
+        }
+        return JSONResponse(json: JSONValue.fromAny(any), headers: headerFields)
     }
 
     // MARK: POST (form)

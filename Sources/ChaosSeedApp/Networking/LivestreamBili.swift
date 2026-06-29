@@ -63,7 +63,9 @@ private func biliHeaders(cookie: String?) -> [String: String] {
         "Referer": BILI_LS_REFERER,
         "Origin": BILI_LS_ORIGIN,
     ]
-    if let cookie { h["Cookie"] = cookie }
+    if let cookie = BiliAccountStore.combinedCookie(buvidCookie: cookie) {
+        h["Cookie"] = cookie
+    }
     return h
 }
 

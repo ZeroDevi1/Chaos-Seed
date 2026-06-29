@@ -91,6 +91,52 @@ public struct StreamVariant: Codable, Hashable, Sendable, Identifiable {
         }
     }
 
+    /// BiliLive CDN 实际下发的 qn，优先读取主播放 URL 的 `qn`，再退到 `expected_qn`。
+    ///
+    /// B 站会出现“请求 qn=10000（原画），URL 实际 qn=250（720P）”的回退；
+    /// 这里仅做展示诊断，不改变解析器选择 URL 的行为。
+    public var biliActualQn: Int? {
+        guard id.hasPrefix("bili_live:"),
+              let primary = allURLs.first,
+              let components = URLComponents(string: primary),
+              let items = components.queryItems else {
+            return nil
+        }
+        return Self.queryInt(items, named: "qn")
+            ?? Self.queryInt(items, named: "expected_qn")
+    }
+
+    public var biliActualQualityText: String? {
+        guard let qn = biliActualQn else { return nil }
+        return Self.biliQnText(qn)
+    }
+
+    public var biliQualityDiagnosticText: String? {
+        guard id.hasPrefix("bili_live:") else { return nil }
+        if let actual = biliActualQn, actual != quality {
+            return "请求 \(Self.biliQnText(quality))，实际 \(Self.biliQnText(actual))"
+        }
+        return "qn=\(quality)"
+    }
+
+    private static func queryInt(_ items: [URLQueryItem], named name: String) -> Int? {
+        items.first(where: { $0.name == name })?.value.flatMap(Int.init)
+    }
+
+    private static func biliQnText(_ qn: Int) -> String {
+        switch qn {
+        case 30000: return "杜比 (qn=30000)"
+        case 20000: return "4K (qn=20000)"
+        case 15000: return "2K (qn=15000)"
+        case 10000: return "原画 (qn=10000)"
+        case 400: return "1080P 蓝光 (qn=400)"
+        case 250: return "720P 超清 (qn=250)"
+        case 150: return "480P 高清 (qn=150)"
+        case 80: return "流畅 (qn=80)"
+        default: return "qn=\(qn)"
+        }
+    }
+
     /// AVPlayer 可直接尝试的 URL。
     ///
     /// 三个平台的传统 HTTP-FLV 与 P2P `.xs` 线路不能由 AVPlayer 解封装；

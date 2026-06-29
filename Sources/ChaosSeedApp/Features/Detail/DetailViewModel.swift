@@ -67,7 +67,8 @@ public final class DetailViewModel: ObservableObject {
                 for v in manifest.variants {
                     let urlTag: String
                     urlTag = v.isResolved ? "IINA 可播" : "需二段解析"
-                    lines.append("  · \(v.label) (qn=\(v.quality)) [\(urlTag)]")
+                    let qualityTag = v.biliQualityDiagnosticText ?? "quality=\(v.quality)"
+                    lines.append("  · \(v.label) (\(qualityTag)) [\(urlTag)]")
                 }
                 lines.append("Referer：\(manifest.playback.referer ?? "-")")
                 self.logs = lines.joined(separator: "\n")
@@ -134,7 +135,8 @@ public final class DetailViewModel: ObservableObject {
                 switch result {
                 case .launched:
                     self.externalPlaybackActive = true
-                    self.logs = "✅ IINA 已启动：\(self.room.title) / \(current.label)\nURL：\(primaryURL.absoluteString)"
+                    let qualityTag = current.biliQualityDiagnosticText ?? "quality=\(current.quality)"
+                    self.logs = "✅ IINA 已启动：\(self.room.title) / \(current.label)\n清晰度：\(qualityTag)\nURL：\(primaryURL.absoluteString)"
                     self.connectDanmaku(roomId: roomId)
                     Log.player.debug("IINA 启动成功")
                     onResult(.iina)

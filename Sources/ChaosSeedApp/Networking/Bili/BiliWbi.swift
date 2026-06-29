@@ -142,7 +142,9 @@ public final class BiliWbi: @unchecked Sendable {
             "Referer": Self.biliReferer,
             "User-Agent": Self.biliUA,
         ]
-        if let cookie = await ensureBuvidCookie() { headers["Cookie"] = cookie }
+        if let cookie = BiliAccountStore.combinedCookie(buvidCookie: await ensureBuvidCookie()) {
+            headers["Cookie"] = cookie
+        }
         let json = try await http.getJSON(url, headers: headers)
         let imgUrl = json.pointer("/data/wbi_img/img_url")?.asString ?? ""
         let subUrl = json.pointer("/data/wbi_img/sub_url")?.asString ?? ""
@@ -176,7 +178,9 @@ public final class BiliWbi: @unchecked Sendable {
             "Referer": Self.biliReferer,
             "User-Agent": Self.biliUA,
         ]
-        if let cookie = await ensureBuvidCookie() { headers["Cookie"] = cookie }
+        if let cookie = BiliAccountStore.combinedCookie(buvidCookie: await ensureBuvidCookie()) {
+            headers["Cookie"] = cookie
+        }
         let text = try await http.getText(url, headers: headers)
         // 正则 `"access_id":"(.*?)"`，捕获后去除反斜杠转义。
         guard let regex = try? NSRegularExpression(pattern: #""access_id":"(.*?)""#, options: []),

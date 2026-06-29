@@ -112,7 +112,9 @@ private func biliGetJSON(ctx: LiveDirectoryPlatformContext, url: String, query: 
         "Referer": BILI_DIR_REFERER,
         "User-Agent": BILI_DIR_UA,
     ]
-    if let cookie = await ctx.biliWbi.ensureBuvidCookie() { headers["Cookie"] = cookie }
+    if let cookie = BiliAccountStore.combinedCookie(buvidCookie: await ctx.biliWbi.ensureBuvidCookie()) {
+        headers["Cookie"] = cookie
+    }
     let json = try await ctx.http.getJSON(url, query: query, headers: headers)
     // Bili APIs 通常 HTTP 200 但 code 字段表示业务错误。
     if let code = json.pointer("/code")?.asInt64, code != 0 {

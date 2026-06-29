@@ -77,7 +77,7 @@ public struct BiliDanmakuResolver: Sendable {
         )
 
         var headers = Self.headers
-        if let cookie = await wbi.ensureBuvidCookie() {
+        if let cookie = BiliAccountStore.combinedCookie(buvidCookie: await wbi.ensureBuvidCookie()) {
             headers["Cookie"] = cookie
         }
         let info = try await http.getJSON(

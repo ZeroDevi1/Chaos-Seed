@@ -10,6 +10,8 @@ public struct SettingsView: View {
     @AppStorage("useMockLiveKit") private var useMockLiveKit = false
     /// 是否在启动时恢复上次浏览位置（平台/分类/页码）。
     @AppStorage("rememberBrowsePosition") private var rememberBrowsePosition = false
+    @StateObject private var biliAccountVM = BiliAccountSettingsViewModel()
+    @State private var showingBiliLogin = false
     @Binding var appearance: AppAppearance
 
     public init(appearance: Binding<AppAppearance>) {
@@ -26,6 +28,8 @@ public struct SettingsView: View {
                     Divider()
                     rememberRow
                     Divider()
+                    biliAccountRow
+                    Divider()
                     iinaPathRow
                     Divider()
                     timeoutRow
@@ -41,6 +45,15 @@ public struct SettingsView: View {
                 .liquidGlassBackground(in: .rect(cornerRadius: 10))
                 .padding(20)
             }
+        }
+        .sheet(isPresented: $showingBiliLogin) {
+            BiliQRCodeLoginSheet {
+                showingBiliLogin = false
+                Task { await biliAccountVM.refresh() }
+            }
+        }
+        .task {
+            await biliAccountVM.refresh()
         }
     }
 
@@ -109,6 +122,36 @@ public struct SettingsView: View {
             TextField("/Applications/IINA.app", text: $iinaPath)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 280)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private var biliAccountRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Bilibili 账号")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(biliAccountVM.subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if biliAccountVM.loading {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            if biliAccountVM.isLoggedIn {
+                Button("退出登录") {
+                    biliAccountVM.logout()
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button("扫码登录") {
+                    showingBiliLogin = true
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

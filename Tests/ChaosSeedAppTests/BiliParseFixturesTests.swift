@@ -149,6 +149,31 @@ final class BiliParseFixturesTests: XCTestCase {
         XCTAssertTrue(high.allURLs.contains(where: { $0.contains("qn=10000") }))
     }
 
+    func testBiliActualQnDiagnosticTextUsesPrimaryURL() throws {
+        let variant = StreamVariant(
+            id: "bili_live:10000:原画",
+            label: "原画",
+            quality: 10000,
+            url: "https://example.com/live_2500.flv?expires=1&qn=250&expected_qn=250",
+            backupUrls: ["https://example.com/live_10000.flv?qn=10000"]
+        )
+
+        XCTAssertEqual(variant.biliActualQn, 250)
+        XCTAssertEqual(variant.biliActualQualityText, "720P 超清 (qn=250)")
+        XCTAssertEqual(variant.biliQualityDiagnosticText, "请求 原画 (qn=10000)，实际 720P 超清 (qn=250)")
+    }
+
+    func testBiliActualQnFallsBackToExpectedQn() throws {
+        let variant = StreamVariant(
+            id: "bili_live:10000:原画",
+            label: "原画",
+            quality: 10000,
+            url: "https://example.com/live_2500.flv?expires=1&expected_qn=250"
+        )
+
+        XCTAssertEqual(variant.biliActualQn, 250)
+    }
+
     /// 对照 Rust：accept_qn 过滤掉不支持的清晰度。
     func testParseRoomPlayInfoValue_filtersByAcceptQn() throws {
         let json = try JSONValue(parsing: Self.fixtureAcceptQnFilter)
