@@ -1,10 +1,8 @@
 import SwiftUI
 
 enum PlaybackLaunchResult {
-    case builtin
     case iina
     case iinaNotFound
-    case unsupportedBuiltin
     case failure(String)
 }
 
@@ -16,8 +14,8 @@ public final class DetailViewModel: ObservableObject {
     @Published var loading = false
     @Published var logs: String = ""
 
-    /// 内置播放器实例（仅当用户选择内置播放器时创建并持有）。
-    @Published var builtinPlayer: BuiltinPlayer?
+    /// IINA 已启动后，本应用保留详情页用于播放记录与弹幕显示。
+    @Published var externalPlaybackActive = false
 
     /// 当前直播间的弹幕客户端。
     @Published var danmakuClient: DanmakuClient?
@@ -25,24 +23,7 @@ public final class DetailViewModel: ObservableObject {
     @Published var danmakuConfig: DanmakuConfig {
         didSet { Self.saveDanmakuConfig(danmakuConfig) }
     }
-    /// 是否在视频画面上显示从右向左移动的悬浮弹幕。
-    ///
-    /// 右侧消息栏只由自身的展开状态控制，不受此开关影响。
-    @Published var showOverlayDanmaku: Bool {
-        didSet {
-            UserDefaults.standard.set(showOverlayDanmaku, forKey: Self.showOverlayDanmakuKey)
-        }
-    }
     @Published var danmakuConnectionError: String?
-
-    /// 播放器偏好：`builtin` 使用内置 AVPlayer，`iina` 唤起外部 IINA。
-    /// 持久化在 UserDefaults 中（`@AppStorage`）。
-    @AppStorage("playerPreference") var playerPreferenceRaw = PlayerPreference.builtin.rawValue
-
-    var playerPreference: PlayerPreference {
-        get { PlayerPreference(rawValue: playerPreferenceRaw) ?? .builtin }
-        set { playerPreferenceRaw = newValue.rawValue }
-    }
 
     let room: LiveRoomCard
     private let liveKit: LiveKit
@@ -55,15 +36,11 @@ public final class DetailViewModel: ObservableObject {
     /// 解析得到的播放提示（Referer/UA），传给播放器。
     private var playbackHints: PlaybackHints = .init()
     private static let danmakuConfigKey = "danmakuConfig"
-    // 沿用旧 key，保留用户已有的开关偏好。
-    private static let showOverlayDanmakuKey = "showDanmaku"
 
     public init(room: LiveRoomCard, liveKit: LiveKit) {
         self.room = room
         self.liveKit = liveKit
         self.danmakuConfig = Self.loadDanmakuConfig()
-        self.showOverlayDanmaku =
-            UserDefaults.standard.object(forKey: Self.showOverlayDanmakuKey) as? Bool ?? true
         self.resolvedRoomId = room.roomId
     }
 
@@ -80,13 +57,7 @@ public final class DetailViewModel: ObservableObject {
                 self.variants = manifest.variants
                 self.playbackHints = manifest.playback
                 self.resolvedRoomId = manifest.roomId
-                let defaultVariant: StreamVariant?
-                if self.playerPreference == .builtin {
-                    defaultVariant = manifest.variants.first(where: { $0.builtinPlaybackSource != nil })
-                        ?? manifest.variants.first
-                } else {
-                    defaultVariant = manifest.variants.first
-                }
+                let defaultVariant = manifest.variants.first
                 self.selectedVariantId = defaultVariant?.id
                 // 汇总解析结果到日志框。
                 var lines: [String] = []
@@ -95,22 +66,7 @@ public final class DetailViewModel: ObservableObject {
                 if let name = manifest.info.name { lines.append("主播：\(name)") }
                 for v in manifest.variants {
                     let urlTag: String
-                    if let source = v.builtinPlaybackSource {
-                        let backend: String
-                        switch source.engine {
-                        case .avFoundation:
-                            backend = "AVFoundation"
-                        case .libMPV:
-                            backend = "libmpv"
-                        case .webFLV:
-                            backend = "HTTP-FLV"
-                        }
-                        urlTag = "✓内置可播/\(backend)"
-                    } else if v.isResolved {
-                        urlTag = "FLV / IINA"
-                    } else {
-                        urlTag = "需二段解析"
-                    }
+                    urlTag = v.isResolved ? "IINA 可播" : "需二段解析"
                     lines.append("  · \(v.label) (qn=\(v.quality)) [\(urlTag)]")
                 }
                 lines.append("Referer：\(manifest.playback.referer ?? "-")")
@@ -126,29 +82,18 @@ public final class DetailViewModel: ObservableObject {
         }
     }
 
-    /// 开始播放：根据 `playerPreference` 选择内置播放器或 IINA。
-    ///
-    /// - 内置播放器：创建 `BuiltinPlayer`，解析 variant → 设置 `builtinPlayer` 并发布 `isPlaying` 变化。
-    /// - IINA：解析 variant → 调用 `IINALauncher.play()` → 通过回调回报结果。
-    func play(
-        using overridePreference: PlayerPreference? = nil,
-        onResult: @escaping (PlaybackLaunchResult) -> Void
-    ) {
+    /// 开始播放：统一解析 variant 后交给 IINA；本应用只保留历史记录与弹幕显示。
+    func play(onResult: @escaping (PlaybackLaunchResult) -> Void) {
         guard let id = selectedVariantId,
               let variant = variants.first(where: { $0.id == id }) else { return }
 
         let site = room.site
         let roomId = resolvedRoomId
         let hints = effectivePlaybackHints()
-        let preference = overridePreference ?? playerPreference
-        let needResolve = preference == .builtin
-            ? variant.needsBuiltinResolution(for: site)
-            : !variant.isResolved
+        let needResolve = !variant.isResolved
         logs = "正在获取「\(variant.label)」播放地址…"
         playTask?.cancel()
-        if preference == .iina {
-            stopBuiltinPlayer()
-        }
+        stopPlaybackSession()
 
         playTask = Task { [weak self] in
             guard let self else { return }
@@ -161,17 +106,12 @@ public final class DetailViewModel: ObservableObject {
                     return
                 } catch {
                     guard !Task.isCancelled, self.selectedVariantId == id else { return }
-                    if preference == .builtin, variant.builtinPlaybackSource != nil {
-                        Log.parsing.error("resolveVariant 失败，回退已有内置播放源 variant=\(id)", error: error)
-                        current = variant
-                    } else {
-                        Log.parsing.error("resolveVariant 失败 variant=\(id)", error: error)
-                        await MainActor.run {
-                            self.logs = "❌ 解析失败：\(error.localizedDescription)"
-                            onResult(.failure("解析失败：\(error.localizedDescription)"))
-                        }
-                        return
+                    Log.parsing.error("resolveVariant 失败 variant=\(id)", error: error)
+                    await MainActor.run {
+                        self.logs = "❌ 解析失败：\(error.localizedDescription)"
+                        onResult(.failure("解析失败：\(error.localizedDescription)"))
                     }
+                    return
                 }
             }
             guard !Task.isCancelled, self.selectedVariantId == id else { return }
@@ -181,73 +121,40 @@ public final class DetailViewModel: ObservableObject {
             }
 
             await MainActor.run {
-                switch preference {
-                case .builtin:
-                    let sources = current.builtinPlaybackSources
-                    guard let source = sources.first else {
-                        self.logs = """
-                        ❌ 当前清晰度没有可用的 HLS、MP4 或 HTTP-FLV 地址。
-                        P2P `.xs` 线路暂不受内置播放器支持，请改用 IINA。
-                        """
-                        onResult(.unsupportedBuiltin)
-                        return
-                    }
-                    let player: BuiltinPlayer
-                    if let currentPlayer = self.builtinPlayer {
-                        player = currentPlayer
-                    } else {
-                        player = BuiltinPlayer()
-                        self.builtinPlayer = player
-                    }
-                    let backend: String
-                    switch source.engine {
-                    case .avFoundation:
-                        backend = "AVFoundation"
-                    case .libMPV:
-                        backend = "libmpv"
-                    case .webFLV:
-                        backend = "WebKit HTTP-FLV"
-                    }
-                    self.logs = """
-                    ✅ 内置播放器（首选 \(backend)，共 \(sources.count) 条候选）：\
-                    \(self.room.title) / \(current.label)
-                    URL：\(source.url.absoluteString)
-                    """
-                    player.play(sources: sources, hints: hints)
+                guard let primaryURL = current.allURLs.first.flatMap(URL.init(string:)) else {
+                    self.logs = "未能获取播放地址"
+                    onResult(.failure("无播放地址"))
+                    return
+                }
+                let configuredPath = UserDefaults.standard.string(forKey: "iinaPath")
+                    ?? IINAPlayer.defaultAppPath
+                let launcher = IINALauncher(appPath: configuredPath)
+                launcher.play(url: primaryURL, hints: hints)
+                let result = launcher.lastResult ?? .failure("unknown")
+                switch result {
+                case .launched:
+                    self.externalPlaybackActive = true
+                    self.logs = "✅ IINA 已启动：\(self.room.title) / \(current.label)\nURL：\(primaryURL.absoluteString)"
                     self.connectDanmaku(roomId: roomId)
-                    onResult(.builtin)
-                case .iina:
-                    guard let primaryURL = current.allURLs.first.flatMap(URL.init(string:)) else {
-                        self.logs = "未能获取播放地址"
-                        onResult(.failure("无播放地址"))
-                        return
-                    }
-                    let configuredPath = UserDefaults.standard.string(forKey: "iinaPath")
-                        ?? IINAPlayer.defaultAppPath
-                    let launcher = IINALauncher(appPath: configuredPath)
-                    launcher.play(url: primaryURL, hints: hints)
-                    let result = launcher.lastResult ?? .failure("unknown")
-                    switch result {
-                    case .launched:
-                        self.logs = "✅ IINA 已启动：\(self.room.title) / \(current.label)\nURL：\(primaryURL.absoluteString)"
-                        Log.player.debug("IINA 启动成功")
-                        onResult(.iina)
-                    case .iinaNotFound:
-                        self.logs = "❌ 未检测到 IINA，请安装后重试。"
-                        Log.player.error("IINA 未安装")
-                        onResult(.iinaNotFound)
-                    case .failure(let m):
-                        self.logs = "❌ 启动失败：\(m)"
-                        Log.player.error("IINA 启动失败: \(m)")
-                        onResult(.failure(m))
-                    }
+                    Log.player.debug("IINA 启动成功")
+                    onResult(.iina)
+                case .iinaNotFound:
+                    self.externalPlaybackActive = false
+                    self.logs = "❌ 未检测到 IINA，请安装后重试。"
+                    Log.player.error("IINA 未安装")
+                    onResult(.iinaNotFound)
+                case .failure(let m):
+                    self.externalPlaybackActive = false
+                    self.logs = "❌ 启动失败：\(m)"
+                    Log.player.error("IINA 启动失败: \(m)")
+                    onResult(.failure(m))
                 }
             }
         }
     }
 
-    /// 停止内置播放器并释放资源。
-    func stopBuiltinPlayer() {
+    /// 停止本应用持有的播放状态与弹幕连接；不会关闭外部 IINA 进程。
+    func stopPlaybackSession() {
         playTask?.cancel()
         playTask = nil
         danmakuTask?.cancel()
@@ -257,39 +164,7 @@ public final class DetailViewModel: ObservableObject {
         danmakuRoomId = nil
         resolvingDanmakuRoomId = nil
         danmakuConnectionError = nil
-        builtinPlayer?.stop()
-        builtinPlayer = nil
-    }
-
-    /// 将当前内置播放源交给 IINA。HTTP-FLV 在 WebKit 里不能稳定进入系统画中画，
-    /// 因此详情页会用 IINA 的 PiP 作为小窗播放 fallback。
-    func openActiveBuiltinSourceInIINA(startPictureInPicture: Bool) -> PlaybackLaunchResult {
-        guard let source = builtinPlayer?.activeSource else {
-            return .failure("当前没有正在播放的内置线路")
-        }
-        let configuredPath = UserDefaults.standard.string(forKey: "iinaPath")
-            ?? IINAPlayer.defaultAppPath
-        let result = IINAPlayer.launch(
-            url: source.url.absoluteString,
-            hints: effectivePlaybackHints(),
-            appPath: configuredPath,
-            startPictureInPicture: startPictureInPicture
-        )
-        switch result {
-        case .launched:
-            let mode = startPictureInPicture ? "IINA 小窗" : "IINA"
-            logs = "✅ \(mode) 已启动：\(room.title)\nURL：\(source.url.absoluteString)"
-            Log.player.debug("\(mode) 启动成功")
-            return .iina
-        case .iinaNotFound:
-            logs = "❌ 未检测到 IINA，请安装后重试。"
-            Log.player.error("IINA 未安装")
-            return .iinaNotFound
-        case .failure(let message):
-            logs = "❌ 启动失败：\(message)"
-            Log.player.error("IINA 启动失败: \(message)")
-            return .failure(message)
-        }
+        externalPlaybackActive = false
     }
 
     /// 按平台解析弹幕连接信息并建立 WebSocket。
@@ -315,7 +190,7 @@ public final class DetailViewModel: ObservableObject {
                     site: self.room.site,
                     roomId: rid
                 )
-                guard !Task.isCancelled, self.builtinPlayer != nil else { return }
+                guard !Task.isCancelled else { return }
                 let client = DanmakuClient(connection: connection)
                 self.danmakuClient = client
                 self.danmakuRoomId = rid

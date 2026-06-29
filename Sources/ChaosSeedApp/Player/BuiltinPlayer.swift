@@ -4,19 +4,6 @@ import AVKit
 import AppKit
 import CPrivatePIP
 
-/// 播放器选择偏好。
-public enum PlayerPreference: String, CaseIterable, Codable {
-    case builtin
-    case iina
-
-    public var label: String {
-        switch self {
-        case .builtin: return "内置播放器"
-        case .iina: return "IINA"
-        }
-    }
-}
-
 /// 一次内置播放会话首次真正开始播放时发布的确认事件。
 ///
 /// 同一会话切换备用线路不会生成新事件，避免历史记录重复写入。
